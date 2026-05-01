@@ -1,12 +1,71 @@
-import React, { useState } from 'react';
-import { motion } from 'framer-motion';
-import { Calendar, Utensils, Compass, Award, ChevronRight, Menu } from 'lucide-react';
+import React from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Utensils, Compass, Award, ChevronRight, Menu as MenuIcon, X, Home, Calendar } from 'lucide-react';
 
-const EstanciaHome: React.FC<{ onOpenMenu: () => void, onOpenExcursions: () => void, onOpenBooking: () => void }> = ({ onOpenMenu, onOpenExcursions, onOpenBooking }) => {
-  const [dates, setDates] = useState({ checkIn: '', checkOut: '' });
+const EstanciaHome: React.FC<{ 
+  onOpenMenu: () => void, 
+  onOpenExcursions: () => void, 
+  onOpenBooking: () => void,
+  onNavigate: (s: any) => void 
+}> = ({ onOpenMenu, onOpenExcursions, onOpenBooking, onNavigate }) => {
+  const [isMenuOpen, setIsMenuOpen] = React.useState(false);
+
+  const menuItems = [
+    { id: 'home', label: 'Inicio', icon: <Home size={20} />, action: () => { onNavigate('home'); setIsMenuOpen(false); } },
+    { id: 'restaurant', label: 'Restaurante', icon: <Utensils size={20} />, action: () => { onNavigate('restaurant'); setIsMenuOpen(false); } },
+    { id: 'excursions', label: 'Excursiones', icon: <Compass size={20} />, action: () => { onNavigate('excursions'); setIsMenuOpen(false); } },
+    { id: 'reservas', label: 'Reservar Ahora', icon: <Calendar size={20} />, action: () => { onOpenBooking(); setIsMenuOpen(false); } },
+    { id: 'club', label: 'Club Estancia', icon: <Award size={20} />, action: () => { onNavigate('club'); setIsMenuOpen(false); } },
+  ];
 
   return (
-    <div className="min-h-screen bg-brand-neutral overflow-hidden">
+    <div className="min-h-screen bg-brand-neutral overflow-hidden relative">
+      {/* Top Menu Overlay */}
+      <AnimatePresence>
+        {isMenuOpen && (
+          <motion.div
+            initial={{ opacity: 0, x: '100%' }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: '100%' }}
+            transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+            className="absolute inset-0 z-[100] bg-brand-wood text-white p-8 flex flex-col"
+          >
+            <div className="flex justify-between items-center mb-16">
+              <span className="text-[10px] uppercase tracking-[0.5em] font-bold text-brand-accent">Menu</span>
+              <button onClick={() => setIsMenuOpen(false)} className="p-2 bg-white/10 rounded-full">
+                <X size={24} />
+              </button>
+            </div>
+
+            <nav className="space-y-8">
+              {menuItems.map((item, idx) => (
+                <motion.button
+                  key={item.id}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: idx * 0.1 }}
+                  onClick={item.action}
+                  className="w-full flex items-center justify-between group"
+                >
+                  <div className="flex items-center gap-6">
+                    <div className="text-brand-accent group-hover:scale-110 transition-transform">
+                      {item.icon}
+                    </div>
+                    <span className="text-3xl font-serif tracking-tight">{item.label}</span>
+                  </div>
+                  <ChevronRight className="opacity-20 group-hover:opacity-100 transition-opacity" />
+                </motion.button>
+              ))}
+            </nav>
+
+            <div className="mt-auto pb-12 border-t border-white/10 pt-8">
+              <p className="text-[10px] uppercase tracking-[0.3em] text-white/40 mb-2">Contacto</p>
+              <p className="text-sm font-sans font-medium">hola@lacanyada.com</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Hero Section */}
       <section className="relative h-[600px] w-full">
         <div className="absolute inset-0">
@@ -36,8 +95,11 @@ const EstanciaHome: React.FC<{ onOpenMenu: () => void, onOpenExcursions: () => v
             transition={{ duration: 0.8, ease: "easeOut", delay: 0.2 }}
             className="flex items-center gap-4"
           >
-            <button className="text-white p-2 hover:bg-white/10 rounded-full transition-colors">
-              <Menu size={24} />
+            <button 
+              onClick={() => setIsMenuOpen(true)}
+              className="text-white p-2 hover:bg-white/10 rounded-full transition-colors"
+            >
+              <MenuIcon size={24} />
             </button>
           </motion.div>
         </header>

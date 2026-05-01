@@ -135,7 +135,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose }) => {
       initial={{ opacity: 0, y: '100%' }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: '100%' }}
-      transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+      transition={{ type: 'spring' as const, damping: 25, stiffness: 200 }}
       className="absolute inset-0 z-[100] bg-brand-neutral flex flex-col overflow-hidden"
     >
       <header className="px-6 py-8 flex items-center justify-between border-b border-brand-primary/5 bg-white/80 backdrop-blur-xl sticky top-0 z-50">
@@ -185,7 +185,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose }) => {
 
                 <div className="grid grid-cols-7 mb-4">
                   {['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sa'].map(day => (
-                    <div key={day} className="text-center text-[10px] uppercase tracking-widest font-bold text-brand-primary/30" colSpan={1}>
+                    <div key={day} className="text-center text-[10px] uppercase tracking-widest font-bold text-brand-primary/30">
                       {day}
                     </div>
                   ))}

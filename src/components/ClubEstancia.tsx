@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Award, Star, History, Gift, ChevronRight, CheckCircle2, Crown, Sparkles } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Award, Star, History, Gift, CheckCircle2, Crown, Sparkles } from 'lucide-react';
 
 const ClubEstancia: React.FC = () => {
   const [points] = useState(2450);

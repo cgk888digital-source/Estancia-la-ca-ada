@@ -9,7 +9,7 @@ interface MenuItem {
   tag?: string;
 }
 
-const menuData = {
+const menuData: { [key: string]: MenuItem[] } = {
   entradas: [
     { name: "Empanada de la Estancia", description: "Cortada a cuchillo, horneada en horno de barro con leña de piquillín.", price: "$2.800" },
     { name: "Burrata y Tomates Ahumados", description: "Queso de pasta hilada, tomates reliquia, pesto de albahaca silvestre y piñones.", price: "$8.500", tag: "Recomendado" },
@@ -159,7 +159,7 @@ const RestaurantMenu: React.FC<{ onBack: () => void, onOpenCava: () => void }> =
       </div>
 
       {/* Decorative element */}
-      <div className="fixed bottom-0 left-0 w-full h-32 bg-gradient-to-t from-brand-neutral to-transparent pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-full h-32 bg-gradient-to-t from-brand-neutral to-transparent pointer-events-none" />
     </motion.div>
   );
 };

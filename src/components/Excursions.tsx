@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, MapPin, Star, Clock, ArrowRight } from 'lucide-react';
+import { ChevronLeft, Clock } from 'lucide-react';
 
 interface Experience {
   id: number;
@@ -167,7 +167,7 @@ const Excursions: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         <motion.div 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="fixed inset-0 bg-brand-olive/5 -z-10 pointer-events-none"
+          className="absolute inset-0 bg-brand-olive/5 -z-10 pointer-events-none"
         />
       )}
       
@@ -176,7 +176,7 @@ const Excursions: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         <motion.div 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="fixed inset-0 bg-brand-terracotta/5 -z-10 pointer-events-none"
+          className="absolute inset-0 bg-brand-terracotta/5 -z-10 pointer-events-none"
         />
       )}
     </div>

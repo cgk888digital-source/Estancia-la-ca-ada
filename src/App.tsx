@@ -6,7 +6,7 @@ import Excursions from './components/Excursions'
 import BookingFlow from './components/BookingFlow'
 import ClubEstancia from './components/ClubEstancia'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Home, Utensils, Calendar, Award } from 'lucide-react'
+import { Home, Utensils, Calendar, Award, ChevronLeft } from 'lucide-react'
 
 type Screen = 'home' | 'restaurant' | 'excursions' | 'club' | 'cava'
 
@@ -22,7 +22,7 @@ function App() {
     animate: {
       x: 0,
       opacity: 1,
-      transition: { type: 'spring', damping: 25, stiffness: 200 }
+      transition: { type: 'spring' as const, damping: 25, stiffness: 200 }
     },
     exit: (direction: number) => ({
       x: direction > 0 ? '-100%' : '100%',
@@ -49,6 +49,20 @@ function App() {
         
         {/* Screen Content */}
         <div className="flex-grow overflow-hidden relative">
+          <AnimatePresence>
+            {currentScreen !== 'home' && currentScreen !== 'cava' && (
+              <motion.button
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                onClick={() => navigateTo('home')}
+                className="absolute top-6 left-6 z-[60] p-2 bg-white/20 backdrop-blur-md rounded-full border border-white/20 text-white shadow-lg"
+              >
+                <ChevronLeft size={24} />
+              </motion.button>
+            )}
+          </AnimatePresence>
+
           <AnimatePresence mode="wait" initial={false} custom={direction}>
             <motion.div
               key={currentScreen}
@@ -64,6 +78,7 @@ function App() {
                   onOpenMenu={() => navigateTo('restaurant')} 
                   onOpenExcursions={() => navigateTo('excursions')}
                   onOpenBooking={() => setIsBookingOpen(true)}
+                  onNavigate={(s) => navigateTo(s)}
                 />
               )}
               {currentScreen === 'restaurant' && (
