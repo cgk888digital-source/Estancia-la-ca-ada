@@ -5,14 +5,16 @@ import WineCellar from './components/WineCellar'
 import Excursions from './components/Excursions'
 import BookingFlow from './components/BookingFlow'
 import ClubEstancia from './components/ClubEstancia'
+import BookingSuccess from './components/BookingSuccess'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Home, Utensils, Calendar, Award, ChevronLeft } from 'lucide-react'
 
-type Screen = 'home' | 'restaurant' | 'excursions' | 'club' | 'cava'
+type Screen = 'home' | 'restaurant' | 'excursions' | 'club' | 'cava' | 'success'
 
 function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home')
   const [isBookingOpen, setIsBookingOpen] = useState(false)
+  const [bookingData, setBookingData] = useState<any>(null)
 
   const slideVariants = {
     initial: (direction: number) => ({
@@ -34,7 +36,7 @@ function App() {
   const [direction, setDirection] = useState(0)
 
   const navigateTo = (screen: Screen) => {
-    const screenOrder: Screen[] = ['home', 'restaurant', 'excursions', 'club']
+    const screenOrder: Screen[] = ['home', 'restaurant', 'excursions', 'club', 'success']
     const currentIndex = screenOrder.indexOf(currentScreen as any)
     const nextIndex = screenOrder.indexOf(screen as any)
     
@@ -96,6 +98,13 @@ function App() {
               {currentScreen === 'club' && (
                 <ClubEstancia />
               )}
+              {currentScreen === 'success' && bookingData && (
+                <BookingSuccess 
+                  data={bookingData}
+                  onGoToClub={() => navigateTo('club')}
+                  onBackToHome={() => navigateTo('home')}
+                />
+              )}
             </motion.div>
           </AnimatePresence>
         </div>
@@ -131,7 +140,14 @@ function App() {
         {/* Booking Flow Modal */}
         <AnimatePresence>
           {isBookingOpen && (
-            <BookingFlow onClose={() => setIsBookingOpen(false)} />
+            <BookingFlow 
+              onClose={() => setIsBookingOpen(false)} 
+              onComplete={(data) => {
+                setBookingData(data);
+                setIsBookingOpen(false);
+                navigateTo('success');
+              }}
+            />
           )}
         </AnimatePresence>
       </div>

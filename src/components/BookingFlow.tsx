@@ -4,9 +4,10 @@ import { ChevronLeft, ChevronRight, X, Users, Dog, Calendar as CalendarIcon, Awa
 
 interface BookingFlowProps {
   onClose: () => void;
+  onComplete: (data: { unitName: string; checkIn: string; checkOut: string; bookingCode: string }) => void;
 }
 
-const BookingFlow: React.FC<BookingFlowProps> = ({ onClose }) => {
+const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
   const [step, setStep] = useState(1);
   const [selectedDates, setSelectedDates] = useState<{ start: Date | null, end: Date | null }>({
     start: null,
@@ -372,6 +373,17 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose }) => {
           </div>
           <button 
             disabled={!selectedUnit}
+            onClick={() => {
+              if (selectedData && selectedDates.start && selectedDates.end) {
+                const bookingCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+                onComplete({
+                  unitName: selectedData.title,
+                  checkIn: selectedDates.start.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }),
+                  checkOut: selectedDates.end.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }),
+                  bookingCode: bookingCode
+                });
+              }
+            }}
             className={`bg-brand-accent text-brand-wood px-10 py-4 rounded-2xl font-bold transition-all active:scale-95 ${!selectedUnit ? 'opacity-50 grayscale' : 'hover:bg-brand-accent/90'}`}
           >
             Confirmar Reserva
