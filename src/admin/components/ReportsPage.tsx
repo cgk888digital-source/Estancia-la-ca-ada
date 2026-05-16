@@ -100,7 +100,7 @@ const ReportsPage: React.FC = () => {
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
-            <Tooltip formatter={(v: number) => [fmt(v), 'Neto']} contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontSize: 12 }} />
+            <Tooltip formatter={(v: unknown) => [fmt(v as number), 'Neto']} contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontSize: 12 }} />
             <Area type="monotone" dataKey="neto" stroke="#C5A059" strokeWidth={2.5} fill="url(#netGrad)" dot={{ fill: '#C5A059', r: 4 }} />
           </AreaChart>
         </ResponsiveContainer>
