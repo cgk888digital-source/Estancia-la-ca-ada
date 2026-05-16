@@ -19,7 +19,7 @@ const EstanciaHome: React.FC<{
   ];
 
   return (
-    <div className="min-h-screen bg-brand-neutral overflow-hidden relative">
+    <div className="min-h-screen bg-brand-neutral overflow-x-hidden relative">
       {/* Top Menu Overlay */}
       <AnimatePresence>
         {isMenuOpen && (
@@ -69,11 +69,16 @@ const EstanciaHome: React.FC<{
       {/* Hero Section */}
       <section className="relative h-[600px] w-full">
         <div className="absolute inset-0">
-          <img 
-            src="/assets/hero.png" 
-            alt="Estancia La Cañada" 
+          <video
+            autoPlay
+            loop
+            muted
+            playsInline
             className="w-full h-full object-cover"
-          />
+          >
+            <source src="/assets/hero.mp4" type="video/mp4" />
+            <img src="/assets/hero.png" alt="Estancia La Cañada" className="w-full h-full object-cover" />
+          </video>
           <div className="absolute inset-0 bg-black/30" />
         </div>
 
@@ -84,7 +89,7 @@ const EstanciaHome: React.FC<{
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, ease: "easeOut" }}
           >
-            <h1 className="text-white text-3xl tracking-tighter font-serif">
+            <h1 className="text-white text-base tracking-widest font-sans uppercase opacity-90">
               Estancia La Cañada
             </h1>
           </motion.div>
@@ -111,10 +116,10 @@ const EstanciaHome: React.FC<{
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 1, ease: "easeOut" }}
           >
-            <h2 className="text-white text-5xl mb-4 font-serif italic">
+            <h2 className="text-white text-2xl mb-2 font-serif italic">
               Donde el lujo encuentra la tierra
             </h2>
-            <p className="text-white/80 text-lg font-sans tracking-wide max-w-sm mx-auto">
+            <p className="text-white/70 text-xs font-sans tracking-widest max-w-xs mx-auto uppercase">
               Una experiencia exclusiva en el corazón de la pampa.
             </p>
           </motion.div>
@@ -159,8 +164,122 @@ const EstanciaHome: React.FC<{
           </motion.button>
         </div>
 
+        {/* Instalaciones Section */}
+        <div className="mt-12">
+          <div className="mb-8">
+            <span className="text-brand-terracotta text-[10px] uppercase tracking-[0.4em] font-bold block mb-1">Nuestras Instalaciones</span>
+            <h2 className="text-2xl font-serif text-brand-primary">El espacio que te espera</h2>
+          </div>
+
+          <div className="flex flex-col gap-8">
+
+            {/* Formato 1: Imagen grande arriba, texto abajo */}
+            <motion.div
+              initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.6 }}
+              className="bg-white rounded-3xl overflow-hidden shadow-lg shadow-black/5"
+            >
+              <div className="relative h-64 overflow-hidden">
+                <img src="/assets/instalaciones/salon.jpg" alt="Salón Principal" className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
+                <span className="absolute bottom-4 left-5 text-[10px] uppercase tracking-[0.3em] text-white/80 font-bold">Encuentros con estilo</span>
+              </div>
+              <div className="p-5">
+                <h3 className="text-xl font-serif text-brand-wood mb-2">Salón Principal</h3>
+                <p className="text-brand-primary/60 text-xs leading-relaxed">Un espacio amplio y elegante diseñado para reuniones sociales, eventos privados y momentos especiales en familia.</p>
+              </div>
+            </motion.div>
+
+            {/* Formato 2: Horizontal — imagen izquierda, texto derecha */}
+            <motion.div
+              initial={{ opacity: 0, x: -30 }} whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.6 }}
+              className="bg-white rounded-3xl overflow-hidden shadow-lg shadow-black/5 flex h-44"
+            >
+              <div className="relative w-2/5 flex-none overflow-hidden">
+                <img src="/assets/instalaciones/comedor-1.jpg" alt="Comedor" className="w-full h-full object-cover" />
+              </div>
+              <div className="flex flex-col justify-center p-5 flex-1">
+                <span className="text-brand-terracotta text-[9px] uppercase tracking-widest font-bold mb-2">Gastronomía</span>
+                <h3 className="text-lg font-serif text-brand-wood mb-2 leading-tight">Comedor</h3>
+                <p className="text-brand-primary/60 text-[11px] leading-relaxed">Desayunos y cenas con productos frescos de la región andina.</p>
+              </div>
+            </motion.div>
+
+            {/* Formato 3: Imagen full con overlay de texto */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }} whileInView={{ opacity: 1, scale: 1 }}
+              viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.7 }}
+              className="relative h-72 rounded-3xl overflow-hidden shadow-lg shadow-black/5"
+            >
+              <img src="/assets/instalaciones/vistas-aereas.jpg" alt="Vistas Panorámicas" className="w-full h-full object-cover" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent" />
+              <div className="absolute bottom-0 left-0 right-0 p-6">
+                <span className="text-brand-accent text-[9px] uppercase tracking-[0.4em] font-bold block mb-1">El páramo a tus pies</span>
+                <h3 className="text-2xl font-serif text-white mb-2">Vistas Panorámicas</h3>
+                <p className="text-white/70 text-xs leading-relaxed max-w-xs">La Cañada revela toda su magnitud. Montaña, cielo y estancia fundidos en un solo horizonte.</p>
+              </div>
+            </motion.div>
+
+            {/* Formato 4: Horizontal invertido — texto izquierda, imagen derecha */}
+            <motion.div
+              initial={{ opacity: 0, x: 30 }} whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.6 }}
+              className="bg-brand-wood rounded-3xl overflow-hidden shadow-lg shadow-black/5 flex h-44"
+            >
+              <div className="flex flex-col justify-center p-5 flex-1">
+                <span className="text-brand-accent text-[9px] uppercase tracking-widest font-bold mb-2">Celebra lo que importa</span>
+                <h3 className="text-lg font-serif text-white mb-2 leading-tight">Salón de Eventos</h3>
+                <p className="text-white/60 text-[11px] leading-relaxed">Capacidad para grupos, con iluminación y equipamiento a medida.</p>
+              </div>
+              <div className="relative w-2/5 flex-none overflow-hidden">
+                <img src="/assets/instalaciones/salon-eventos.jpg" alt="Salón de Eventos" className="w-full h-full object-cover" />
+              </div>
+            </motion.div>
+
+            {/* Formato 5: Imagen grande con franja de color lateral */}
+            <motion.div
+              initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.6 }}
+              className="bg-white rounded-3xl overflow-hidden shadow-lg shadow-black/5"
+            >
+              <div className="relative h-56 overflow-hidden">
+                <img src="/assets/instalaciones/jardines.jpg" alt="Jardines" className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
+                <div className="absolute top-4 right-4 bg-brand-olive/90 backdrop-blur-sm text-white text-[9px] uppercase tracking-widest font-bold px-3 py-1.5 rounded-full">
+                  Naturaleza
+                </div>
+              </div>
+              <div className="p-5 flex gap-4 items-start">
+                <div className="w-1 self-stretch bg-brand-olive rounded-full flex-none" />
+                <div>
+                  <h3 className="text-xl font-serif text-brand-wood mb-2">Jardines y Terrazas</h3>
+                  <p className="text-brand-primary/60 text-xs leading-relaxed">Amplios jardines con especies nativas y rincones íntimos para descansar al aire libre. El paisaje venezolano en su máxima expresión.</p>
+                </div>
+              </div>
+            </motion.div>
+
+            {/* Formato 6: Horizontal — Sala de Juegos */}
+            <motion.div
+              initial={{ opacity: 0, x: -30 }} whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.6 }}
+              className="bg-white rounded-3xl overflow-hidden shadow-lg shadow-black/5 flex h-44"
+            >
+              <div className="relative w-2/5 flex-none overflow-hidden">
+                <img src="/assets/instalaciones/sala-de-juegos.jpg" alt="Sala de Juegos" className="w-full h-full object-cover" />
+              </div>
+              <div className="flex flex-col justify-center p-5 flex-1">
+                <span className="text-brand-accent text-[9px] uppercase tracking-widest font-bold mb-2">Diversión</span>
+                <h3 className="text-lg font-serif text-brand-wood mb-2 leading-tight">Sala de Juegos</h3>
+                <p className="text-brand-primary/60 text-[11px] leading-relaxed">Un espacio para el entretenimiento de toda la familia. Momentos de diversión sin salir de la estancia.</p>
+              </div>
+            </motion.div>
+
+          </div>
+        </div>
+
         {/* Loyalty Footer */}
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0 }}
           whileInView={{ opacity: 1 }}
           className="mt-16 flex flex-col items-center justify-center text-center"

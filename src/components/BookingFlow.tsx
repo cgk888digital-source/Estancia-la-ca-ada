@@ -16,6 +16,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [occupants, setOccupants] = useState({ adults: 1, children: 0, pets: 0 });
   const [selectedUnit, setSelectedUnit] = useState<number | null>(null);
+  const [galleryIndex, setGalleryIndex] = useState<Record<number, number>>({});
 
   // Calendar Logic
   const daysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
@@ -99,33 +100,112 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
   const accommodationOptions = [
     {
       id: 1,
-      title: "Cabaña de la Pampa",
-      type: "Cabaña Privada",
-      price: 450,
-      capacity: "4 Personas",
-      pets: "Pet Friendly",
-      image: "/assets/cabin.png",
-      amenities: ["Wifi High Speed", "Chimenea a Leña", "Vista al Campo"]
+      title: "Suites La Vega",
+      type: "Suite Comunicante",
+      price: 320,
+      capacity: "Hasta 7 Personas",
+      pets: "Consultar",
+      image: "/assets/suites/la-vega/exterior.jpg",
+      gallery: [
+        "/assets/suites/la-vega/exterior.jpg",
+        "/assets/suites/la-vega/terraza.png",
+        "/assets/suites/la-vega/hab-suite.png",
+        "/assets/suites/la-vega/hab-king.png",
+        "/assets/suites/la-vega/hab-matrimonial.png",
+        "/assets/suites/la-vega/hab-literas.png",
+        "/assets/suites/la-vega/hab-triple.png",
+      ],
+      description: "2 habitaciones comunicantes con baños propios y terrazas a ambos lados.",
+      rooms: ["Matrimonial (cama King)", "2 literas (4 camas) o litera + individual (3 camas)"],
+      amenities: ["2 Baños Privados", "Terrazas Dobles", "Vistas a la Montaña"]
     },
     {
       id: 2,
-      title: "Suite del Mirador",
-      type: "Habitación Boutique",
-      price: 320,
-      capacity: "2 Personas",
-      pets: "No Mascotas",
-      image: "/assets/room.png",
-      amenities: ["Cama King", "Jacuzzi Privado", "Balcón"]
+      title: "Cabaña La Lomita",
+      type: "Cabaña Privada",
+      price: 420,
+      capacity: "Hasta 6 Personas",
+      pets: "Pet Friendly",
+      image: "/assets/suites/la-lomita/exterior.png",
+      gallery: [
+        "/assets/suites/la-lomita/exterior.png",
+        "/assets/suites/la-lomita/salon-chimenea.png",
+        "/assets/suites/la-lomita/salon.png",
+        "/assets/suites/la-lomita/hab-1.png",
+        "/assets/suites/la-lomita/hab-2.png",
+        "/assets/suites/la-lomita/hab-3.png",
+        "/assets/suites/la-lomita/cocina.png",
+        "/assets/suites/la-lomita/bano-1.png",
+        "/assets/suites/la-lomita/bano-2.png",
+      ],
+      description: "Cabaña independiente con 3 habitaciones, salón con chimenea de piedra, mini cocina equipada y terraza privada.",
+      rooms: ["3 Habitaciones dobles", "Salón con chimenea", "Mini cocina equipada"],
+      amenities: ["3 Baños Privados", "Chimenea de Piedra", "Terraza", "Mini Cocina"]
+    },
+    {
+      id: 4,
+      title: "Cabaña Mitibibo",
+      type: "Cabaña Privada",
+      price: 400,
+      capacity: "Hasta 8 Personas",
+      pets: "Pet Friendly",
+      image: "/assets/suites/mitibibo/exterior.png",
+      gallery: [
+        "/assets/suites/mitibibo/exterior.png",
+        "/assets/suites/mitibibo/salon-cocina.png",
+        "/assets/suites/mitibibo/salon.png",
+        "/assets/suites/mitibibo/cocina.png",
+        "/assets/suites/mitibibo/hab-1.png",
+        "/assets/suites/mitibibo/hab-2.png",
+        "/assets/suites/mitibibo/hab-3.png",
+      ],
+      description: "Cabaña amarilla con paredes de piedra, salón con chimenea y ventanas panorámicas a la montaña, cocina completamente equipada.",
+      rooms: ["2 Habitaciones dobles", "1 Habitación múltiple (literas)", "Salón con chimenea"],
+      amenities: ["3 Baños Privados", "Cocina Equipada", "Chimenea", "Vistas Panorámicas"]
+    },
+    {
+      id: 5,
+      title: "Galería Llano Grande",
+      type: "Galería de Habitaciones",
+      price: 160,
+      capacity: "Hasta 3 Personas por hab.",
+      pets: "Consultar",
+      image: "/assets/suites/llano-grande/exterior.png",
+      gallery: [
+        "/assets/suites/llano-grande/exterior.png",
+        "/assets/suites/llano-grande/hab-8.png",
+        "/assets/suites/llano-grande/hab-1.png",
+        "/assets/suites/llano-grande/hab-2.png",
+        "/assets/suites/llano-grande/hab-3.png",
+        "/assets/suites/llano-grande/hab-4.png",
+        "/assets/suites/llano-grande/hab-5.png",
+        "/assets/suites/llano-grande/hab-6.png",
+        "/assets/suites/llano-grande/hab-7.png",
+      ],
+      description: "6 habitaciones únicas, cada una con su propio encanto y estilo. Desde ambientes rústicos con paredes de piedra hasta habitaciones acogedoras con detalles artesanales.",
+      rooms: ["Habitaciones dobles", "Habitaciones con litera", "Habitaciones twin", "Baño privado en cada una"],
+      amenities: ["6 Baños Privados", "Cada hab. única", "Detalles artesanales", "Flores y jardines"]
     },
     {
       id: 3,
-      title: "Refugio del Bosque",
-      type: "Cabaña Privada",
-      price: 480,
-      capacity: "2 Personas",
-      pets: "Pet Friendly",
-      image: "/assets/cabin.png",
-      amenities: ["Privacidad Total", "Deck Privado", "Fogón"]
+      title: "Galería La Manita",
+      type: "Galería de Habitaciones",
+      price: 180,
+      capacity: "Hasta 3 Personas por hab.",
+      pets: "Consultar",
+      image: "/assets/suites/la-manita/exterior.png",
+      gallery: [
+        "/assets/suites/la-manita/exterior.png",
+        "/assets/suites/la-manita/fachada.png",
+        "/assets/suites/la-manita/hab-1.png",
+        "/assets/suites/la-manita/hab-2.png",
+        "/assets/suites/la-manita/hab-3.png",
+        "/assets/suites/la-manita/bano-1.png",
+        "/assets/suites/la-manita/bano-2.png",
+      ],
+      description: "6 habitaciones independientes con baño privado, techos de madera y vistas a la montaña. Cada una con cama doble y litera.",
+      rooms: ["Cama doble + litera (hasta 3 personas)", "Baño privado por habitación", "6 habitaciones disponibles"],
+      amenities: ["6 Baños Privados", "Techos de Madera", "Vistas a la Montaña"]
     }
   ];
 
@@ -310,49 +390,119 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
               </div>
 
               <div className="space-y-8">
-                {accommodationOptions.map((opt) => (
-                  <motion.button
-                    key={opt.id}
-                    onClick={() => setSelectedUnit(opt.id)}
-                    whileTap={{ scale: 0.98 }}
-                    className={`w-full text-left bg-white rounded-[2.5rem] overflow-hidden shadow-xl shadow-black/5 border-2 transition-all relative
-                      ${selectedUnit === opt.id ? 'border-brand-terracotta' : 'border-transparent'}
-                    `}
-                  >
-                    <div className="relative aspect-video overflow-hidden">
-                      <img src={opt.image} alt={opt.title} className="w-full h-full object-cover" />
-                      <div className="absolute top-4 right-4 bg-brand-accent/90 backdrop-blur-md text-white text-[9px] uppercase tracking-widest font-bold py-1.5 px-3 rounded-full">
-                        {opt.type}
-                      </div>
-                      <div className="absolute bottom-4 left-4 flex items-center gap-2 bg-[#C5A059]/90 backdrop-blur-md text-white text-[9px] uppercase tracking-widest font-bold py-1.5 px-4 rounded-full border border-white/20">
-                        <Award size={12} />
-                        +100 Puntos Club Estancia
-                      </div>
-                    </div>
+                {accommodationOptions.map((opt) => {
+                  const currentImg = galleryIndex[opt.id] ?? 0;
+                  const total = opt.gallery.length;
+                  const goNext = (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    setGalleryIndex(prev => ({ ...prev, [opt.id]: (currentImg + 1) % total }));
+                  };
+                  const goPrev = (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    setGalleryIndex(prev => ({ ...prev, [opt.id]: (currentImg - 1 + total) % total }));
+                  };
 
-                    <div className="p-6">
-                      <div className="flex justify-between items-start mb-4">
-                        <div>
-                          <h3 className="text-2xl font-serif text-brand-wood">{opt.title}</h3>
-                          <p className="text-brand-primary/40 text-xs uppercase tracking-widest">{opt.capacity} • {opt.pets}</p>
+                  return (
+                    <motion.div
+                      key={opt.id}
+                      onClick={() => setSelectedUnit(opt.id)}
+                      whileTap={{ scale: 0.98 }}
+                      className={`w-full text-left bg-white rounded-[2.5rem] overflow-hidden shadow-xl shadow-black/5 border-2 transition-all relative cursor-pointer
+                        ${selectedUnit === opt.id ? 'border-brand-terracotta' : 'border-transparent'}
+                      `}
+                    >
+                      {/* Gallery */}
+                      <div className="relative aspect-video overflow-hidden">
+                        <AnimatePresence mode="wait">
+                          <motion.img
+                            key={currentImg}
+                            src={opt.gallery[currentImg]}
+                            alt={opt.title}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.3 }}
+                            className="w-full h-full object-cover"
+                          />
+                        </AnimatePresence>
+
+                        {/* Gallery arrows — solo si hay más de 1 foto */}
+                        {total > 1 && (
+                          <>
+                            <button
+                              onClick={goPrev}
+                              className="absolute left-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 bg-black/40 backdrop-blur-sm rounded-full flex items-center justify-center text-white active:scale-90 transition-all"
+                            >
+                              <ChevronLeft size={16} />
+                            </button>
+                            <button
+                              onClick={goNext}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 bg-black/40 backdrop-blur-sm rounded-full flex items-center justify-center text-white active:scale-90 transition-all"
+                            >
+                              <ChevronRight size={16} />
+                            </button>
+                            {/* Dots */}
+                            <div className="absolute bottom-12 left-0 w-full flex justify-center gap-1.5 z-20">
+                              {opt.gallery.map((_, i) => (
+                                <button
+                                  key={i}
+                                  onClick={e => { e.stopPropagation(); setGalleryIndex(prev => ({ ...prev, [opt.id]: i })); }}
+                                  className={`h-1.5 rounded-full transition-all ${i === currentImg ? 'w-4 bg-white' : 'w-1.5 bg-white/50'}`}
+                                />
+                              ))}
+                            </div>
+                            {/* Counter */}
+                            <div className="absolute top-4 left-4 bg-black/40 backdrop-blur-sm text-white text-[10px] font-bold px-2.5 py-1 rounded-full z-20">
+                              {currentImg + 1} / {total}
+                            </div>
+                          </>
+                        )}
+
+                        <div className="absolute top-4 right-4 bg-brand-accent/90 backdrop-blur-md text-white text-[9px] uppercase tracking-widest font-bold py-1.5 px-3 rounded-full z-20">
+                          {opt.type}
                         </div>
-                        <div className="text-right">
-                          <span className="text-2xl font-serif text-brand-terracotta">${opt.price}</span>
-                          <p className="text-[10px] text-brand-primary/40 uppercase tracking-widest">/ noche</p>
+                        <div className="absolute bottom-4 left-4 flex items-center gap-2 bg-[#C5A059]/90 backdrop-blur-md text-white text-[9px] uppercase tracking-widest font-bold py-1.5 px-4 rounded-full border border-white/20 z-20">
+                          <Award size={12} />
+                          +100 Puntos Club Estancia
                         </div>
                       </div>
 
-                      <div className="flex flex-wrap gap-3 pt-4 border-t border-brand-primary/5">
-                        {opt.amenities.map(a => (
-                          <div key={a} className="flex items-center gap-2 text-[10px] text-brand-primary/60 uppercase tracking-widest font-medium">
-                            <div className="w-1 h-1 rounded-full bg-brand-accent" />
-                            {a}
+                      <div className="p-6">
+                        <div className="flex justify-between items-start mb-3">
+                          <div>
+                            <h3 className="text-2xl font-serif text-brand-wood">{opt.title}</h3>
+                            <p className="text-brand-primary/40 text-xs uppercase tracking-widest mt-0.5">{opt.capacity} • {opt.pets}</p>
                           </div>
-                        ))}
+                          <div className="text-right">
+                            <span className="text-2xl font-serif text-brand-terracotta">${opt.price}</span>
+                            <p className="text-[10px] text-brand-primary/40 uppercase tracking-widest">/ noche</p>
+                          </div>
+                        </div>
+
+                        <p className="text-brand-primary/60 text-xs leading-relaxed mb-4">{opt.description}</p>
+
+                        {/* Tipos de habitación */}
+                        <div className="space-y-1.5 mb-4">
+                          {opt.rooms.map(r => (
+                            <div key={r} className="flex items-center gap-2 text-xs text-brand-primary/70">
+                              <div className="w-1.5 h-1.5 rounded-full bg-brand-terracotta shrink-0" />
+                              {r}
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="flex flex-wrap gap-3 pt-4 border-t border-brand-primary/5">
+                          {opt.amenities.map(a => (
+                            <div key={a} className="flex items-center gap-2 text-[10px] text-brand-primary/60 uppercase tracking-widest font-medium">
+                              <div className="w-1 h-1 rounded-full bg-brand-accent" />
+                              {a}
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  </motion.button>
-                ))}
+                    </motion.div>
+                  );
+                })}
               </div>
             </motion.div>
           )}
