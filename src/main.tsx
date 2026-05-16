@@ -8,6 +8,7 @@ import Dashboard from './admin/components/Dashboard.tsx'
 import TransactionsPage from './admin/components/TransactionsPage.tsx'
 import EmployeesPage from './admin/components/EmployeesPage.tsx'
 import ReportsPage from './admin/components/ReportsPage.tsx'
+import MenuPage from './admin/components/MenuPage.tsx'
 import { registerSW } from 'virtual:pwa-register'
 
 registerSW({ immediate: true })
@@ -23,6 +24,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="egresos" element={<TransactionsPage typeFilter="egreso" />} />
           <Route path="empleados" element={<EmployeesPage />} />
           <Route path="reportes" element={<ReportsPage />} />
+          <Route path="menu" element={<MenuPage />} />
         </Route>
         {/* Guest mobile app */}
         <Route path="/*" element={<App />} />

@@ -1,167 +1,364 @@
-import React from 'react';
-import { motion } from 'framer-motion';
-import { ChevronLeft, Info, Wind, Wine, ChevronRight } from 'lucide-react';
+import React, { useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { ChevronLeft, ChevronRight, Wine, Clock, Users } from 'lucide-react'
+import { getMenu } from '../utils/menuStore'
 
-interface MenuItem {
-  name: string;
-  description: string;
-  price: string;
-  tag?: string;
-}
+const galleryPlatos = [
+  { src: '/assets/restaurante/platos/ceviche.png',          label: 'Ceviche del Día' },
+  { src: '/assets/restaurante/platos/bocado-1.png',         label: 'Bocado de Autor' },
+  { src: '/assets/restaurante/platos/tartare-aguacate.png', label: 'Tartare de Atún' },
+  { src: '/assets/restaurante/platos/pescado-grill.png',    label: 'Pescado a la Plancha' },
+  { src: '/assets/restaurante/platos/ravioli.png',          label: 'Ravioli Artesanal' },
+  { src: '/assets/restaurante/platos/ensalada.png',         label: 'Ensalada Fresca' },
+  { src: '/assets/restaurante/platos/trucha-verduras.png',  label: 'Trucha del Páramo' },
+  { src: '/assets/restaurante/platos/carne-papas.png',      label: 'Carne de Res' },
+  { src: '/assets/restaurante/platos/milanesa.png',         label: 'Milanesa de la Casa' },
+  { src: '/assets/restaurante/platos/sopa-cebolla.png',     label: 'Sopa Gratinada' },
+  { src: '/assets/restaurante/platos/postre-fresas.png',    label: 'Fresas con Crema' },
+  { src: '/assets/restaurante/platos/postre-crepe.png',     label: 'Crepe de Chocolate' },
+]
 
-const menuData: { [key: string]: MenuItem[] } = {
-  entradas: [
-    { name: "Empanada de la Estancia", description: "Cortada a cuchillo, horneada en horno de barro con leña de piquillín.", price: "$2.800" },
-    { name: "Burrata y Tomates Ahumados", description: "Queso de pasta hilada, tomates reliquia, pesto de albahaca silvestre y piñones.", price: "$8.500", tag: "Recomendado" },
-    { name: "Mollejas al Verdeo", description: "Corazón de molleja crocante, crema de verdeo y papines andinos.", price: "$9.200" }
-  ],
-  principales: [
-    { name: "Ojo de Bife 'La Cañada'", description: "400g de novillo seleccionado, madurado 21 días, servido con chimichurri de la casa.", price: "$24.500" },
-    { name: "Costillar a la Llama", description: "Cocción lenta de 6 horas a la leña de quebracho, servido con ensalada de la huerta.", price: "$28.000" },
-    { name: "Cordero Patagónico", description: "Cocción lenta de 12 horas, puré de calabaza asada y reducción de malbec.", price: "$26.000" },
-    { name: "Risotto de Hongos del Bosque", description: "Arroz carnaroli, mix de hongos silvestres y aceite de trufa blanca.", price: "$16.800", tag: "Vegetariano" }
-  ],
-  postres: [
-    { name: "Volcán de Dulce de Leche", description: "Con helado de crema americana y tierra de chocolate amargo.", price: "$5.200" },
-    { name: "Peras al Borgoña", description: "Cocinadas en vino tinto especiado, mascarpone artesanal.", price: "$4.500" },
-    { name: "Flan Casero 'La Cañada'", description: "Receta tradicional con 12 yemas, dulce de leche colonial y crema montada.", price: "$4.800" }
-  ]
-};
+const RestaurantMenu: React.FC<{ onBack: () => void; onOpenCava: () => void }> = ({ onBack, onOpenCava }) => {
+  const [activeTab, setActiveTab] = useState('almuerzo')
+  const menu = getMenu()
+  const activeSection = menu.find(s => s.id === activeTab)!
 
-const RestaurantMenu: React.FC<{ onBack: () => void, onOpenCava: () => void }> = ({ onBack, onOpenCava }) => {
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="min-h-screen bg-brand-neutral text-brand-primary font-sans"
+      className="min-h-screen bg-brand-neutral text-brand-primary font-sans pb-32"
     >
-      {/* Header Image */}
-      <div className="relative h-[30vh] w-full overflow-hidden">
-        <img 
-          src="/assets/restaurant_hero.png" 
-          alt="Gourmet Experience" 
+      {/* ── HERO ── */}
+      <div className="relative h-[55vh] w-full overflow-hidden">
+        <img
+          src="/assets/restaurante/hero.jpg"
+          alt="Restaurante La Cañada"
           className="w-full h-full object-cover"
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-brand-wood/60 to-transparent" />
-        
-        <button 
+        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-black/20" />
+
+        <button
           onClick={onBack}
-          className="absolute top-6 left-6 z-20 flex items-center gap-2 text-white/90 hover:text-white transition-colors"
+          className="absolute top-6 left-6 z-20 p-2 bg-black/30 backdrop-blur-md rounded-full border border-white/20 text-white"
         >
-          <div className="p-2 bg-black/20 backdrop-blur-md rounded-full border border-white/20">
-            <ChevronLeft size={20} />
-          </div>
+          <ChevronLeft size={20} />
         </button>
 
-        <div className="absolute bottom-0 left-0 w-full p-6">
-          <motion.div
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.2 }}
-          >
-            <span className="text-brand-accent text-[10px] uppercase tracking-[0.4em] font-medium mb-1 block">Experiencia Gastronómica</span>
-            <h1 className="text-white text-3xl font-serif">Menú de Pasos</h1>
+        <div className="absolute bottom-0 left-0 w-full p-7">
+          <motion.div initial={{ y: 24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.15 }}>
+            <span className="text-brand-accent text-[10px] uppercase tracking-[0.45em] font-bold block mb-2">
+              Cocina de La Cañada
+            </span>
+            <h1 className="text-white text-4xl font-serif leading-tight mb-2">
+              Gastronomía<br />de Origen
+            </h1>
+            <p className="text-white/70 text-xs leading-relaxed max-w-[260px]">
+              Productos locales, fuego de leña y recetas que celebran el territorio andino.
+            </p>
           </motion.div>
         </div>
       </div>
 
-      {/* Menu Content */}
-      <div className="px-6 py-12 pb-24">
-        {/* Intro */}
-        <div className="text-center mb-16">
-          <Wind className="mx-auto text-brand-olive/30 mb-4" size={24} />
-          <p className="text-lg font-serif italic text-brand-primary/70 leading-relaxed max-w-xs mx-auto">
-            "Nuestra cocina honra la tierra y el fuego."
-          </p>
-          <div className="w-8 h-[1px] bg-brand-accent mx-auto mt-6" />
+      {/* ── AMBIENTE — chefs + interior ── */}
+      <section className="px-5 mt-8">
+        <div className="mb-4">
+          <span className="text-brand-terracotta text-[10px] uppercase tracking-[0.4em] font-bold block mb-1">Nuestra Cocina</span>
+          <h2 className="text-2xl font-serif text-brand-primary">El arte en el plato</h2>
         </div>
 
-        {/* Categories */}
-        <div className="space-y-16">
-          {Object.entries(menuData).map(([category, items], idx) => (
-            <motion.section 
-              key={category}
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ delay: idx * 0.1 }}
+        {/* 2 verticales lado a lado */}
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          {[
+            { src: '/assets/restaurante/chef-1.png',  caption: 'Arepas artesanales' },
+            { src: '/assets/restaurante/chef-2.png',  caption: 'Horneados del día' },
+          ].map((img, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }} transition={{ delay: i * 0.1 }}
+              className="relative rounded-2xl overflow-hidden"
+              style={{ aspectRatio: '3/4' }}
             >
-              <h2 className="text-[10px] uppercase tracking-[0.5em] text-brand-terracotta font-bold mb-8 flex items-center gap-3">
-                <span className="w-6 h-[1px] bg-brand-terracotta/30" />
-                {category}
-              </h2>
-
-              <div className="space-y-10">
-                {items.map((item) => (
-                  <div key={item.name} className="group cursor-default">
-                    <div className="flex justify-between items-baseline mb-1">
-                      <h3 className="text-lg font-serif text-brand-wood">{item.name}</h3>
-                      <span className="text-brand-accent font-serif text-sm">{item.price}</span>
-                    </div>
-                    <p className="text-brand-primary/60 text-xs leading-relaxed mb-2">
-                      {item.description}
-                    </p>
-                    {item.tag && (
-                      <span className="text-[9px] uppercase tracking-widest border border-brand-olive/20 text-brand-olive px-2 py-0.5 rounded-full font-bold">
-                        {item.tag}
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </motion.section>
+              <img src={img.src} alt={img.caption} className="w-full h-full object-cover" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
+              <span className="absolute bottom-3 left-3 text-white text-[10px] font-bold tracking-wide">
+                {img.caption}
+              </span>
+            </motion.div>
           ))}
         </div>
 
-        {/* Cava CTA Section */}
-        <motion.section
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
+        {/* Interior de noche — full width */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
-          className="mt-32 relative h-[300px] rounded-3xl overflow-hidden group cursor-pointer"
-          onClick={onOpenCava}
+          className="relative rounded-2xl overflow-hidden"
+          style={{ height: 200 }}
         >
-          <div className="absolute inset-0 bg-brand-wood/80 group-hover:bg-brand-wood/70 transition-colors z-10" />
-          <img 
-            src="/assets/wine_bottle.png" 
-            alt="Cava Virtual" 
-            className="absolute inset-0 w-full h-full object-cover scale-150 group-hover:scale-[1.6] transition-transform duration-1000"
-          />
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center text-center p-8">
-            <Wine className="text-brand-accent mb-4" size={40} />
-            <h2 className="text-white text-3xl md:text-4xl font-serif mb-4">Cava Virtual</h2>
-            <p className="text-white/70 text-sm md:text-base max-w-md mb-8">
-              Explore nuestra selección exclusiva de etiquetas curadas y descubra el maridaje perfecto para su cena.
-            </p>
-            <div className="flex items-center gap-2 text-brand-accent text-xs uppercase tracking-[0.3em] font-bold">
-              Explorar Selección <ChevronRight size={14} />
-            </div>
-          </div>
-        </motion.section>
-
-        {/* Footer Info */}
-        <motion.div 
-          initial={{ opacity: 0 }}
-          whileInView={{ opacity: 1 }}
-          className="mt-32 p-8 bg-brand-terracotta/5 rounded-3xl border border-brand-terracotta/10 flex flex-col md:flex-row items-center gap-6"
-        >
-          <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-brand-terracotta shadow-sm">
-            <Info size={24} />
-          </div>
-          <div className="text-center md:text-left">
-            <h4 className="text-brand-wood font-serif text-lg mb-1">Aviso para Comensales</h4>
-            <p className="text-brand-primary/50 text-sm">
-              Por favor, informe a nuestro personal sobre cualquier alergia o restricción alimentaria. Disponemos de opciones sin TACC.
-            </p>
+          <img src="/assets/restaurante/interior-noche.png" alt="Restaurante de noche" className="w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
+          <div className="absolute bottom-4 left-5 right-5 flex justify-between items-end">
+            <span className="text-white text-sm font-serif italic">Un ambiente para recordar</span>
           </div>
         </motion.div>
-      </div>
+      </section>
 
-      {/* Decorative element */}
-      <div className="absolute bottom-0 left-0 w-full h-32 bg-gradient-to-t from-brand-neutral to-transparent pointer-events-none" />
+      {/* ── GALERÍA DE PLATOS ── */}
+      <section className="px-5 mt-12">
+        <div className="mb-6">
+          <span className="text-brand-terracotta text-[10px] uppercase tracking-[0.4em] font-bold block mb-1">Nuestros Platos</span>
+          <h2 className="text-2xl font-serif text-brand-primary">Lo que llega a tu mesa</h2>
+          <p className="text-brand-primary/50 text-xs mt-1">Elaborados con productos frescos de la región andina.</p>
+        </div>
+
+        {/* Grid mixto */}
+        <div className="flex flex-col gap-3">
+          {/* Full width — primer plato destacado */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.97 }} whileInView={{ opacity: 1, scale: 1 }}
+            viewport={{ once: true }}
+            className="relative rounded-2xl overflow-hidden"
+            style={{ height: 240 }}
+          >
+            <img src={galleryPlatos[0].src} alt={galleryPlatos[0].label} className="w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent" />
+            <span className="absolute bottom-4 left-4 text-white font-serif text-lg">{galleryPlatos[0].label}</span>
+            <span className="absolute top-4 right-4 bg-brand-accent/90 text-white text-[9px] uppercase tracking-widest font-bold px-3 py-1.5 rounded-full">
+              Entrada
+            </span>
+          </motion.div>
+
+          {/* Fila de 2 */}
+          <div className="grid grid-cols-2 gap-3">
+            {galleryPlatos.slice(1, 3).map((p, i) => (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }} transition={{ delay: i * 0.08 }}
+                className="relative rounded-2xl overflow-hidden"
+                style={{ height: 160 }}
+              >
+                <img src={p.src} alt={p.label} className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/55 to-transparent" />
+                <span className="absolute bottom-2 left-2 right-2 text-white text-[11px] font-bold leading-tight">{p.label}</span>
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Full width — principal destacado */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.97 }} whileInView={{ opacity: 1, scale: 1 }}
+            viewport={{ once: true }}
+            className="relative rounded-2xl overflow-hidden"
+            style={{ height: 220 }}
+          >
+            <img src={galleryPlatos[3].src} alt={galleryPlatos[3].label} className="w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+            <div className="absolute bottom-4 left-4">
+              <span className="text-brand-accent text-[9px] uppercase tracking-widest font-bold block mb-1">Principal</span>
+              <span className="text-white font-serif text-lg">{galleryPlatos[3].label}</span>
+            </div>
+          </motion.div>
+
+          {/* Fila de 2 */}
+          <div className="grid grid-cols-2 gap-3">
+            {galleryPlatos.slice(4, 6).map((p, i) => (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }} transition={{ delay: i * 0.08 }}
+                className="relative rounded-2xl overflow-hidden"
+                style={{ height: 160 }}
+              >
+                <img src={p.src} alt={p.label} className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/55 to-transparent" />
+                <span className="absolute bottom-2 left-2 right-2 text-white text-[11px] font-bold leading-tight">{p.label}</span>
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Fila de 3 pequeñas */}
+          <div className="grid grid-cols-3 gap-2">
+            {galleryPlatos.slice(6, 9).map((p, i) => (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }} transition={{ delay: i * 0.07 }}
+                className="relative rounded-xl overflow-hidden"
+                style={{ height: 120 }}
+              >
+                <img src={p.src} alt={p.label} className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                <span className="absolute bottom-1.5 left-1.5 right-1.5 text-white text-[9px] font-bold leading-tight">{p.label}</span>
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Full width — postre destacado */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.97 }} whileInView={{ opacity: 1, scale: 1 }}
+            viewport={{ once: true }}
+            className="relative rounded-2xl overflow-hidden bg-brand-wood"
+            style={{ height: 200 }}
+          >
+            <img src={galleryPlatos[10].src} alt={galleryPlatos[10].label} className="w-full h-full object-cover opacity-90" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-transparent" />
+            <div className="absolute bottom-4 left-4">
+              <span className="text-brand-accent text-[9px] uppercase tracking-widest font-bold block mb-1">Postre</span>
+              <span className="text-white font-serif text-lg">{galleryPlatos[10].label}</span>
+            </div>
+          </motion.div>
+
+          {/* Última fila de 2 — postres */}
+          <div className="grid grid-cols-2 gap-3">
+            {galleryPlatos.slice(9, 11).map((p, i) => (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }} transition={{ delay: i * 0.08 }}
+                className="relative rounded-2xl overflow-hidden"
+                style={{ height: 150 }}
+              >
+                <img src={p.src} alt={p.label} className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/55 to-transparent" />
+                <span className="absolute bottom-2 left-2 right-2 text-white text-[11px] font-bold leading-tight">{p.label}</span>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── MENÚ DE LA SEMANA ── */}
+      <section className="px-5 mt-14">
+        <div className="mb-6">
+          <span className="text-brand-terracotta text-[10px] uppercase tracking-[0.4em] font-bold block mb-1">Actualizado semanalmente</span>
+          <h2 className="text-2xl font-serif text-brand-primary">Menú de la Semana</h2>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex bg-white p-1 rounded-2xl shadow-sm border border-brand-primary/5 mb-6">
+          {menu.map(section => (
+            <button
+              key={section.id}
+              onClick={() => setActiveTab(section.id)}
+              className={`flex-1 py-2.5 rounded-xl text-[10px] uppercase tracking-widest font-bold transition-all ${
+                activeTab === section.id
+                  ? 'bg-brand-wood text-white shadow-lg'
+                  : 'text-brand-primary/50 hover:text-brand-primary'
+              }`}
+            >
+              {section.emoji} {section.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Included notice */}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2 }}
+          >
+            {activeSection.included && (
+              <div className="flex items-center gap-2 mb-5 bg-brand-olive/10 border border-brand-olive/20 rounded-xl px-4 py-2.5">
+                <span className="text-brand-olive text-xs">✓</span>
+                <span className="text-brand-olive text-xs font-bold">{activeSection.included}</span>
+              </div>
+            )}
+
+            {/* Dish list */}
+            <div className="flex flex-col gap-4">
+              {activeSection.items.map((dish, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, x: -12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.06 }}
+                  className="bg-white rounded-2xl overflow-hidden shadow-sm border border-brand-primary/5 flex"
+                >
+                  {/* Foto del plato si existe */}
+                  {dish.image && (
+                    <div className="w-24 flex-none overflow-hidden">
+                      <img
+                        src={dish.image!.startsWith('data:') ? dish.image! : `/assets/restaurante/${dish.image}`}
+                        alt={dish.name}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+                  <div className={`flex flex-col justify-center p-4 flex-1 ${!dish.image ? 'border-l-4 border-brand-accent' : ''}`}>
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <h3 className="text-sm font-serif text-brand-wood leading-tight">{dish.name}</h3>
+                      {dish.price && (
+                        <span className={`text-xs font-bold whitespace-nowrap flex-none ${dish.price === 'Incluido' ? 'text-brand-olive' : 'text-brand-accent'}`}>
+                          {dish.price}
+                        </span>
+                      )}
+                    </div>
+                    {dish.description && (
+                      <p className="text-brand-primary/55 text-[11px] leading-relaxed">{dish.description}</p>
+                    )}
+                    {dish.tag && (
+                      <span className="mt-2 self-start text-[9px] uppercase tracking-widest border border-brand-olive/30 text-brand-olive px-2 py-0.5 rounded-full font-bold">
+                        {dish.tag}
+                      </span>
+                    )}
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        </AnimatePresence>
+
+        {/* Horario e info */}
+        <div className="mt-8 grid grid-cols-2 gap-3">
+          <div className="bg-white rounded-2xl p-4 border border-brand-primary/5 shadow-sm flex items-center gap-3">
+            <Clock size={18} className="text-brand-accent flex-none" />
+            <div>
+              <p className="text-[9px] uppercase tracking-widest text-brand-primary/40 font-bold mb-0.5">Horario</p>
+              <p className="text-xs font-bold text-brand-wood">7am · 12pm · 7pm</p>
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl p-4 border border-brand-primary/5 shadow-sm flex items-center gap-3">
+            <Users size={18} className="text-brand-accent flex-none" />
+            <div>
+              <p className="text-[9px] uppercase tracking-widest text-brand-primary/40 font-bold mb-0.5">Reservas</p>
+              <p className="text-xs font-bold text-brand-wood">Recepción</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── CAVA VIRTUAL CTA ── */}
+      <section className="px-5 mt-12">
+        <motion.div
+          initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          onClick={onOpenCava}
+          className="relative h-[220px] rounded-3xl overflow-hidden cursor-pointer group"
+        >
+          <img
+            src="/assets/restaurante/mesa-elegante.png"
+            alt="Cava Virtual"
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-brand-wood/85 via-brand-wood/40 to-transparent" />
+          <div className="absolute inset-0 flex flex-col items-center justify-end pb-7 text-center px-6">
+            <Wine className="text-brand-accent mb-3" size={32} />
+            <h3 className="text-white text-2xl font-serif mb-1">Cava Virtual</h3>
+            <p className="text-white/60 text-xs mb-4">Etiquetas seleccionadas por nuestro sommelier</p>
+            <div className="flex items-center gap-1.5 text-brand-accent text-[10px] uppercase tracking-[0.3em] font-bold">
+              Explorar <ChevronRight size={12} />
+            </div>
+          </div>
+        </motion.div>
+      </section>
     </motion.div>
-  );
-};
+  )
+}
 
-export default RestaurantMenu;
+export default RestaurantMenu

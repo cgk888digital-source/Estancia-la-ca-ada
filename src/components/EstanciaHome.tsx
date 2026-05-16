@@ -259,19 +259,130 @@ const EstanciaHome: React.FC<{
               </div>
             </motion.div>
 
-            {/* Formato 6: Horizontal — Sala de Juegos */}
+
+            {/* Formato 7: Full imagen overlay — Sala de Chimenea */}
             <motion.div
-              initial={{ opacity: 0, x: -30 }} whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.6 }}
-              className="bg-white rounded-3xl overflow-hidden shadow-lg shadow-black/5 flex h-44"
+              initial={{ opacity: 0, scale: 0.96 }} whileInView={{ opacity: 1, scale: 1 }}
+              viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.7 }}
+              className="relative h-72 rounded-3xl overflow-hidden shadow-lg shadow-black/5"
             >
-              <div className="relative w-2/5 flex-none overflow-hidden">
-                <img src="/assets/instalaciones/sala-de-juegos.jpg" alt="Sala de Juegos" className="w-full h-full object-cover" />
+              <img src="/assets/instalaciones/sala-chimenea.png" alt="Sala de Chimenea" className="w-full h-full object-cover" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent" />
+              <div className="absolute bottom-0 left-0 right-0 p-6">
+                <span className="text-brand-accent text-[9px] uppercase tracking-[0.4em] font-bold block mb-1">Confort & Calidez</span>
+                <h3 className="text-2xl font-serif text-white mb-2">Sala de Chimenea</h3>
+                <p className="text-white/70 text-xs leading-relaxed max-w-xs">Un rincón íntimo donde el fuego de leña convierte cada velada en un momento especial.</p>
               </div>
+            </motion.div>
+
+            {/* Formato 8: Full imagen — Terraza al Atardecer */}
+            <motion.div
+              initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.6 }}
+              className="bg-white rounded-3xl overflow-hidden shadow-lg shadow-black/5"
+            >
+              <div className="relative h-64 overflow-hidden">
+                <img src="/assets/instalaciones/terraza-atardecer.png" alt="Terraza al Atardecer" className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
+                <span className="absolute top-4 right-4 bg-brand-terracotta/90 backdrop-blur-sm text-white text-[9px] uppercase tracking-widest font-bold px-3 py-1.5 rounded-full">Al aire libre</span>
+              </div>
+              <div className="p-5 flex gap-4 items-start">
+                <div className="w-1 self-stretch bg-brand-terracotta rounded-full flex-none" />
+                <div>
+                  <h3 className="text-xl font-serif text-brand-wood mb-2">Terraza con Vista a la Montaña</h3>
+                  <p className="text-brand-primary/60 text-xs leading-relaxed">Cenas al atardecer con el páramo andino como telón de fondo. Una experiencia que no se olvida.</p>
+                </div>
+              </div>
+            </motion.div>
+
+            {/* Formato 9: Horizontal derecha — Recepción */}
+            <motion.div
+              initial={{ opacity: 0, x: 30 }} whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.6 }}
+              className="bg-brand-neutral rounded-3xl overflow-hidden shadow-lg shadow-black/5 flex h-44 border border-brand-primary/5"
+            >
               <div className="flex flex-col justify-center p-5 flex-1">
-                <span className="text-brand-accent text-[9px] uppercase tracking-widest font-bold mb-2">Diversión</span>
-                <h3 className="text-lg font-serif text-brand-wood mb-2 leading-tight">Sala de Juegos</h3>
-                <p className="text-brand-primary/60 text-[11px] leading-relaxed">Un espacio para el entretenimiento de toda la familia. Momentos de diversión sin salir de la estancia.</p>
+                <span className="text-brand-terracotta text-[9px] uppercase tracking-widest font-bold mb-2">Bienvenida</span>
+                <h3 className="text-lg font-serif text-brand-wood mb-2 leading-tight">Recepción</h3>
+                <p className="text-brand-primary/60 text-[11px] leading-relaxed">Atención personalizada desde el primer momento. Estamos aquí para hacer tu estancia perfecta.</p>
+              </div>
+              <div className="relative w-2/5 flex-none overflow-hidden">
+                <img src="/assets/instalaciones/recepcion.png" alt="Recepción" className="w-full h-full object-cover" />
+              </div>
+            </motion.div>
+
+            {/* Formato 10: Grid 2 columnas — Terraza + Área infantil */}
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { src: '/assets/instalaciones/terraza-exterior.png', label: 'Terraza Exterior', sub: 'Sociales' },
+                { src: '/assets/instalaciones/area-infantil.png',    label: 'Área Infantil',   sub: 'Familias' },
+              ].map((item, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, margin: '-60px' }} transition={{ delay: i * 0.1, duration: 0.5 }}
+                  className="relative rounded-2xl overflow-hidden shadow-md"
+                  style={{ height: 180 }}
+                >
+                  <img src={item.src} alt={item.label} className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-transparent" />
+                  <div className="absolute bottom-3 left-3">
+                    <span className="text-white/60 text-[9px] uppercase tracking-widest font-bold block">{item.sub}</span>
+                    <span className="text-white text-xs font-bold leading-tight">{item.label}</span>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+
+            {/* Formato 11: Full imagen — Vista panorámica del hotel */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }} whileInView={{ opacity: 1, scale: 1 }}
+              viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.8 }}
+              className="relative h-56 rounded-3xl overflow-hidden shadow-lg shadow-black/5"
+            >
+              <img src="/assets/instalaciones/vista-panoramica-hotel.png" alt="Vista Panorámica" className="w-full h-full object-cover" />
+              <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/50" />
+              <div className="absolute bottom-4 left-5">
+                <span className="text-brand-accent text-[9px] uppercase tracking-[0.4em] font-bold block mb-1">La Estancia desde arriba</span>
+                <h3 className="text-xl font-serif text-white">Un paraíso en los Andes</h3>
+              </div>
+            </motion.div>
+
+            {/* Formato 12: Imagen principal + tira de fotos — Salón El Morro */}
+            <motion.div
+              initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.6 }}
+              className="bg-white rounded-3xl overflow-hidden shadow-lg shadow-black/5"
+            >
+              <div className="relative h-52 overflow-hidden">
+                <img src="/assets/instalaciones/salon-morro-pool.png" alt="Salón El Morro" className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
+                <div className="absolute top-4 left-4 bg-brand-wood/90 backdrop-blur-sm text-white text-[9px] uppercase tracking-widest font-bold px-3 py-1.5 rounded-full">
+                  Salón El Morro
+                </div>
+              </div>
+              {/* Mini tira de 3 fotos */}
+              <div className="grid grid-cols-3 gap-1 px-1 pt-1">
+                {[
+                  '/assets/instalaciones/salon-morro-pool.png',
+                  '/assets/instalaciones/salon-morro-pingpong.png',
+                  '/assets/instalaciones/salon-morro-ambiente.png',
+                ].map((src, i) => (
+                  <div key={i} className="h-16 overflow-hidden rounded-lg">
+                    <img src={src} alt="" className="w-full h-full object-cover" />
+                  </div>
+                ))}
+              </div>
+              <div className="p-5">
+                <h3 className="text-xl font-serif text-brand-wood mb-2">Salón El Morro</h3>
+                <p className="text-brand-primary/60 text-xs leading-relaxed mb-3">Diversión para toda la familia en un espacio único con techo de madera rústica.</p>
+                <div className="flex flex-wrap gap-2">
+                  {['Mesa de Pool', 'Ping Pong', 'TV SimpleTV'].map(tag => (
+                    <span key={tag} className="text-[9px] uppercase tracking-widest bg-brand-wood/5 text-brand-wood border border-brand-wood/15 px-2.5 py-1 rounded-full font-bold">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
               </div>
             </motion.div>
 

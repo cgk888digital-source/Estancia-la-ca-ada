@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import {
   LayoutDashboard, ArrowDownCircle, ArrowUpCircle,
-  Users, BarChart3, Menu, X, Hotel, LogOut
+  Users, BarChart3, Menu, X, Hotel, LogOut, UtensilsCrossed
 } from 'lucide-react'
 
 const navItems = [
@@ -11,6 +11,7 @@ const navItems = [
   { to: '/admin/egresos', label: 'Egresos', icon: <ArrowUpCircle size={20} /> },
   { to: '/admin/empleados', label: 'Empleados', icon: <Users size={20} /> },
   { to: '/admin/reportes', label: 'Reportes', icon: <BarChart3 size={20} /> },
+  { to: '/admin/menu', label: 'Menú Semanal', icon: <UtensilsCrossed size={20} /> },
 ]
 
 const AdminLayout: React.FC = () => {
