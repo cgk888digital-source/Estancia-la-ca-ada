@@ -104,7 +104,7 @@ const Dashboard: React.FC = () => {
               <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} />
               <Tooltip
-                formatter={(value: number) => [fmt(value), '']}
+                formatter={(value: unknown) => [fmt(value as number), '']}
                 contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontSize: 12 }}
               />
               <Bar dataKey="ingresos" name="Ingresos" fill="#C5A059" radius={[6, 6, 0, 0]} />
@@ -128,7 +128,7 @@ const Dashboard: React.FC = () => {
                 iconSize={8}
                 formatter={(value) => <span style={{ fontSize: 11, color: '#6b7280' }}>{value}</span>}
               />
-              <Tooltip formatter={(value: number) => [fmt(value), '']} contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontSize: 12 }} />
+              <Tooltip formatter={(value: unknown) => [fmt(value as number), '']} contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontSize: 12 }} />
             </PieChart>
           </ResponsiveContainer>
         </div>

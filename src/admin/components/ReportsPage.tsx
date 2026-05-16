@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, Legend
+  AreaChart, Area, PieChart, Pie, Cell, Legend
 } from 'recharts'
 import { mockTransactions, mockMonthlyData, categoryLabels, categoryColors } from '../data/mockData'
 
@@ -120,7 +120,7 @@ const ReportsPage: React.FC = () => {
                   <Pie data={incomeByCategory} cx="50%" cy="50%" outerRadius={70} paddingAngle={3} dataKey="value">
                     {incomeByCategory.map((entry, i) => <Cell key={i} fill={entry.color} />)}
                   </Pie>
-                  <Tooltip formatter={(v: number) => [fmt(v), '']} contentStyle={{ borderRadius: 12, border: 'none', fontSize: 12 }} />
+                  <Tooltip formatter={(v: unknown) => [fmt(v as number), '']} contentStyle={{ borderRadius: 12, border: 'none', fontSize: 12 }} />
                 </PieChart>
               </ResponsiveContainer>
               <div className="space-y-2 mt-2">
@@ -152,7 +152,7 @@ const ReportsPage: React.FC = () => {
                 <BarChart data={expenseByCategory} layout="vertical" barSize={16}>
                   <XAxis type="number" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} width={100} />
-                  <Tooltip formatter={(v: number) => [fmt(v), '']} contentStyle={{ borderRadius: 12, border: 'none', fontSize: 12 }} />
+                  <Tooltip formatter={(v: unknown) => [fmt(v as number), '']} contentStyle={{ borderRadius: 12, border: 'none', fontSize: 12 }} />
                   <Bar dataKey="value" radius={[0, 6, 6, 0]}>
                     {expenseByCategory.map((entry, i) => <Cell key={i} fill={entry.color} />)}
                   </Bar>
@@ -185,7 +185,7 @@ const ReportsPage: React.FC = () => {
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
-            <Tooltip formatter={(v: number) => [fmt(v), '']} contentStyle={{ borderRadius: 12, border: 'none', fontSize: 12 }} />
+            <Tooltip formatter={(v: unknown) => [fmt(v as number), '']} contentStyle={{ borderRadius: 12, border: 'none', fontSize: 12 }} />
             <Legend formatter={v => <span style={{ fontSize: 12, color: '#6b7280' }}>{v}</span>} />
             <Bar dataKey="ingresos" name="Ingresos" fill="#C5A059" radius={[6, 6, 0, 0]} />
             <Bar dataKey="egresos" name="Egresos" fill="#A65D47" radius={[6, 6, 0, 0]} />

@@ -4,7 +4,7 @@ export type IncomeCategory = 'alojamiento' | 'restaurante' | 'excursiones' | 'ba
 export type ExpenseCategory = 'empleados' | 'alimentos' | 'mantenimiento' | 'servicios' | 'comisiones' | 'otros_egresos'
 export type TransactionCategory = IncomeCategory | ExpenseCategory
 
-export type PaymentMethod = 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque'
+export type PaymentMethod = 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque' | 'débito automático'
 
 export interface Transaction {
   id: string
