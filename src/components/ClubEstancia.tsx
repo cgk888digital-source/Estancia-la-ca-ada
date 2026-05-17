@@ -31,8 +31,58 @@ const ClubEstancia: React.FC = () => {
       {/* Header */}
       <header className="px-6 py-10">
         <span className="text-brand-terracotta text-[10px] uppercase tracking-[0.4em] font-bold mb-1 block">Miembro Exclusivo</span>
-        <h1 className="text-4xl font-serif">Club Estancia</h1>
+        <h1 className="text-3xl font-serif leading-tight">Club La Estancia<br />de La Cañada</h1>
       </header>
+
+      {/* Virtual Card Section — va antes de Cómo Funciona */}
+      <div className="px-6 mb-10">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="relative h-56 w-full rounded-[2.5rem] overflow-hidden shadow-2xl shadow-[#C5A059]/30 border border-[#C5A059]/20"
+        >
+          <div className="absolute inset-0 bg-gradient-to-br from-[#D4AF37] via-[#C5A059] to-[#8B7355]" />
+          <motion.div
+            initial={{ x: '-100%' }}
+            animate={{ x: '100%' }}
+            transition={{ duration: 3, repeat: Infinity, ease: "linear", repeatDelay: 1 }}
+            className="absolute inset-0 w-1/2 bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12"
+          />
+          <div className="relative h-full p-8 flex flex-col justify-between text-white">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest font-bold opacity-70">Nivel Actual</p>
+                <h2 className="text-2xl font-serif flex items-center gap-2">
+                  Socio Oro <Award size={20} className="fill-current" />
+                </h2>
+              </div>
+              <Sparkles size={24} className="opacity-40" />
+            </div>
+            <div className="space-y-4">
+              <div className="flex gap-4 opacity-80">
+                <div className="w-10 h-6 bg-white/20 rounded-md border border-white/30" />
+                <div className="flex gap-1 items-center">
+                  <div className="w-1 h-1 rounded-full bg-white/50" />
+                  <div className="w-1 h-1 rounded-full bg-white/50" />
+                  <div className="w-1 h-1 rounded-full bg-white/50" />
+                  <div className="w-1 h-1 rounded-full bg-white/50" />
+                  <span className="text-[10px] font-mono">8829</span>
+                </div>
+              </div>
+              <div className="flex justify-between items-end">
+                <div>
+                  <p className="text-[8px] uppercase tracking-widest font-bold opacity-60">Nombre del Miembro</p>
+                  <p className="text-lg font-serif">Mateo Arandía</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[8px] uppercase tracking-widest font-bold opacity-60">ID Miembro</p>
+                  <p className="text-xs font-mono">EC-4492-2026</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      </div>
 
       {/* Cómo Funciona */}
       <section className="px-6 mb-10">
@@ -76,62 +126,6 @@ const ClubEstancia: React.FC = () => {
         </div>
       </section>
 
-      {/* Virtual Card Section */}
-      <div className="px-6 mb-12">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="relative h-56 w-full rounded-[2.5rem] overflow-hidden shadow-2xl shadow-[#C5A059]/30 border border-[#C5A059]/20"
-        >
-          {/* Metallic Gradient Background */}
-          <div className="absolute inset-0 bg-gradient-to-br from-[#D4AF37] via-[#C5A059] to-[#8B7355]" />
-          
-          {/* Shine Effect Animation */}
-          <motion.div
-            initial={{ x: '-100%' }}
-            animate={{ x: '100%' }}
-            transition={{ duration: 3, repeat: Infinity, ease: "linear", repeatDelay: 1 }}
-            className="absolute inset-0 w-1/2 bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12"
-          />
-
-          {/* Card Content */}
-          <div className="relative h-full p-8 flex flex-col justify-between text-white">
-            <div className="flex justify-between items-start">
-              <div>
-                <p className="text-[10px] uppercase tracking-widest font-bold opacity-70">Nivel Actual</p>
-                <h2 className="text-2xl font-serif flex items-center gap-2">
-                  Socio Oro <Award size={20} className="fill-current" />
-                </h2>
-              </div>
-              <Sparkles size={24} className="opacity-40" />
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex gap-4 opacity-80">
-                <div className="w-10 h-6 bg-white/20 rounded-md border border-white/30" />
-                <div className="flex gap-1 items-center">
-                  <div className="w-1 h-1 rounded-full bg-white/50" />
-                  <div className="w-1 h-1 rounded-full bg-white/50" />
-                  <div className="w-1 h-1 rounded-full bg-white/50" />
-                  <div className="w-1 h-1 rounded-full bg-white/50" />
-                  <span className="text-[10px] font-mono">8829</span>
-                </div>
-              </div>
-              
-              <div className="flex justify-between items-end">
-                <div>
-                  <p className="text-[8px] uppercase tracking-widest font-bold opacity-60">Nombre del Miembro</p>
-                  <p className="text-lg font-serif">Mateo Arandía</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[8px] uppercase tracking-widest font-bold opacity-60">ID Miembro</p>
-                  <p className="text-xs font-mono">EC-4492-2026</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </motion.div>
-      </div>
 
       {/* Points Dashboard */}
       <div className="px-6 mb-12">
@@ -242,14 +236,25 @@ const ClubEstancia: React.FC = () => {
               />
 
               <div className="relative p-6">
+                {/* Título Tarjeta de Regalo */}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Gift size={14} className="text-[#C5A059]" />
+                    <span className="text-[#C5A059] text-xs uppercase tracking-[0.3em] font-bold">Tarjeta de Regalo</span>
+                  </div>
+                  <div className="bg-[#C5A059] text-white text-[9px] uppercase tracking-widest font-bold px-3 py-1.5 rounded-full">
+                    {card.discount}% OFF
+                  </div>
+                </div>
+
+                {/* Línea decorativa */}
+                <div className="border-t border-[#C5A059]/20 mb-4" />
+
                 {/* Header row */}
                 <div className="flex items-start justify-between mb-5">
                   <div>
                     <p className="text-[9px] uppercase tracking-[0.4em] text-[#C5A059]/70 font-bold mb-1">Estancia La Cañada</p>
                     <h4 className="text-3xl font-serif text-white">${card.value} <span className="text-base text-white/50">USD</span></h4>
-                  </div>
-                  <div className="bg-[#C5A059] text-white text-[9px] uppercase tracking-widest font-bold px-3 py-1.5 rounded-full">
-                    {card.discount}% OFF
                   </div>
                 </div>
 
