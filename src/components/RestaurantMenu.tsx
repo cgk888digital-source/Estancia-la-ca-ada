@@ -1,7 +1,8 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronLeft, ChevronRight, Wine, Clock, Users } from 'lucide-react'
 import { getMenu } from '../utils/menuStore'
+import { weeklyMenu } from '../data/weeklyMenu'
 
 const galleryPlatos = [
   { src: '/assets/restaurante/platos/ceviche.png',          label: 'Ceviche del Día' },
@@ -20,8 +21,11 @@ const galleryPlatos = [
 
 const RestaurantMenu: React.FC<{ onBack: () => void; onOpenCava: () => void }> = ({ onBack, onOpenCava }) => {
   const [activeTab, setActiveTab] = useState('almuerzo')
-  const menu = getMenu()
-  const activeSection = menu.find(s => s.id === activeTab)!
+  const [menu, setMenu] = useState(weeklyMenu)
+
+  useEffect(() => { getMenu().then(setMenu) }, [])
+
+  const activeSection = menu.find(s => s.id === activeTab) ?? menu[0]
 
   return (
     <motion.div
@@ -60,6 +64,23 @@ const RestaurantMenu: React.FC<{ onBack: () => void; onOpenCava: () => void }> =
           </motion.div>
         </div>
       </div>
+
+      {/* ── VIDEO COCINA ── */}
+      <motion.div
+        initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+        className="px-5 mt-5"
+      >
+        <div className="rounded-2xl overflow-hidden" style={{ aspectRatio: '16/9' }}>
+          <video
+            src="/assets/restaurante/video-cocina.mov"
+            autoPlay
+            loop
+            muted
+            playsInline
+            className="w-full h-full object-cover"
+          />
+        </div>
+      </motion.div>
 
       {/* ── AMBIENTE — chefs + interior ── */}
       <section className="px-5 mt-8">
@@ -203,11 +224,11 @@ const RestaurantMenu: React.FC<{ onBack: () => void; onOpenCava: () => void }> =
             className="relative rounded-2xl overflow-hidden bg-brand-wood"
             style={{ height: 200 }}
           >
-            <img src={galleryPlatos[10].src} alt={galleryPlatos[10].label} className="w-full h-full object-cover opacity-90" />
+            <img src={galleryPlatos[11].src} alt={galleryPlatos[11].label} className="w-full h-full object-cover opacity-90" />
             <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-transparent" />
             <div className="absolute bottom-4 left-4">
               <span className="text-brand-accent text-[9px] uppercase tracking-widest font-bold block mb-1">Postre</span>
-              <span className="text-white font-serif text-lg">{galleryPlatos[10].label}</span>
+              <span className="text-white font-serif text-lg">{galleryPlatos[11].label}</span>
             </div>
           </motion.div>
 

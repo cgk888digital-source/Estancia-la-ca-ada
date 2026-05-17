@@ -39,7 +39,7 @@ function imgSrc(image: string) {
 }
 
 export default function MenuPage() {
-  const [menu, setMenu] = useState<MenuSection[]>(getMenu)
+  const [menu, setMenu] = useState<MenuSection[]>([])
   const [activeTab, setActiveTab] = useState('desayuno')
   const [saved, setSaved] = useState(false)
 
@@ -63,10 +63,10 @@ export default function MenuPage() {
 
   const activeSection = menu.find(s => s.id === activeTab)!
 
-  useEffect(() => { setMenu(getMenu()) }, [])
+  useEffect(() => { getMenu().then(setMenu) }, [])
 
-  function handleSave() {
-    saveMenu(menu)
+  async function handleSave() {
+    await saveMenu(menu)
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
   }

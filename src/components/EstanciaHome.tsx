@@ -2,12 +2,12 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Utensils, Compass, Award, ChevronRight, Menu as MenuIcon, X, Home, Calendar } from 'lucide-react';
 
-const EstanciaHome: React.FC<{ 
-  onOpenMenu: () => void, 
-  onOpenExcursions: () => void, 
+const EstanciaHome: React.FC<{
+  onOpenMenu: () => void,
+  onOpenExcursions: () => void,
   onOpenBooking: () => void,
-  onNavigate: (s: any) => void 
-}> = ({ onOpenMenu, onOpenExcursions, onOpenBooking, onNavigate }) => {
+  onNavigate: (s: any) => void
+}> = ({ onOpenExcursions, onOpenBooking, onNavigate }) => {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
 
   const menuItems = [
@@ -131,19 +131,19 @@ const EstanciaHome: React.FC<{
         <div className="flex flex-col gap-6">
           <motion.button
             whileHover={{ y: -5 }}
-            onClick={onOpenMenu}
-            className="bg-white group p-6 rounded-3xl shadow-xl shadow-black/5 flex items-center justify-between transition-all"
+            onClick={onOpenBooking}
+            className="bg-brand-accent group p-6 rounded-3xl shadow-xl shadow-brand-accent/30 flex items-center justify-between transition-all"
           >
             <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-brand-neutral rounded-2xl flex items-center justify-center text-brand-accent group-hover:bg-brand-accent group-hover:text-white transition-colors">
-                <Utensils size={28} />
+              <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center text-white transition-colors">
+                <Calendar size={28} />
               </div>
               <div className="text-left">
-                <h3 className="text-lg font-serif text-brand-primary">Menú del Restaurante</h3>
-                <p className="text-brand-primary/50 text-xs">Gastronomía de autor</p>
+                <h3 className="text-lg font-serif text-white">Reserva tu Estadía</h3>
+                <p className="text-white/70 text-xs">Disponibilidad inmediata · Sin intermediarios</p>
               </div>
             </div>
-            <ChevronRight className="text-brand-primary/20 group-hover:text-brand-accent transition-colors" />
+            <ChevronRight className="text-white/60 group-hover:text-white transition-colors" />
           </motion.button>
 
           <motion.button
@@ -345,6 +345,67 @@ const EstanciaHome: React.FC<{
               <div className="absolute bottom-4 left-5">
                 <span className="text-brand-accent text-[9px] uppercase tracking-[0.4em] font-bold block mb-1">La Estancia desde arriba</span>
                 <h3 className="text-xl font-serif text-white">Un paraíso en los Andes</h3>
+              </div>
+            </motion.div>
+
+            {/* Formato 13: Full overlay — Terraza de Fiestas */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }} whileInView={{ opacity: 1, scale: 1 }}
+              viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.7 }}
+              className="relative h-64 rounded-3xl overflow-hidden shadow-lg shadow-black/5"
+            >
+              <img src="/assets/instalaciones/terraza-fiesta.png" alt="Terraza de Fiestas" className="w-full h-full object-cover" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+              <div className="absolute bottom-5 left-5 right-5">
+                <span className="text-brand-accent text-[9px] uppercase tracking-[0.4em] font-bold block mb-1">Eventos & Celebraciones</span>
+                <h3 className="text-xl font-serif text-white leading-tight">Terraza de Fiestas</h3>
+                <p className="text-white/70 text-[11px] mt-1">El escenario perfecto para celebrar momentos únicos.</p>
+              </div>
+            </motion.div>
+
+            {/* Formato 14: Grid 2 columnas — Desayuno + Tablita de Vino */}
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { src: '/assets/instalaciones/desay.png',        label: 'Desayunos',      sub: 'Gastronomía' },
+                { src: '/assets/instalaciones/tablita-vino.png', label: 'Tablita de Vino', sub: 'Bodega' },
+              ].map((item, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, margin: '-40px' }} transition={{ delay: i * 0.1, duration: 0.5 }}
+                  className="relative rounded-2xl overflow-hidden shadow-md shadow-black/5"
+                  style={{ aspectRatio: '3/4' }}
+                >
+                  <img src={item.src} alt={item.label} className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-transparent" />
+                  <div className="absolute bottom-3 left-3">
+                    <span className="text-brand-accent text-[8px] uppercase tracking-widest font-bold block mb-0.5">{item.sub}</span>
+                    <span className="text-white text-xs font-serif leading-tight">{item.label}</span>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+
+            {/* Formato 15: Video — Noche & Música en Vivo */}
+            <motion.div
+              initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.7 }}
+              className="relative rounded-3xl overflow-hidden shadow-xl shadow-black/10"
+            >
+              <video
+                src="/assets/video-fiesta.mov"
+                autoPlay
+                loop
+                muted
+                playsInline
+                className="w-full object-cover"
+                style={{ aspectRatio: '9/16', maxHeight: 520 }}
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-black/20 pointer-events-none" />
+              <div className="absolute bottom-6 left-5 right-5">
+                <span className="text-brand-accent text-[9px] uppercase tracking-[0.4em] font-bold block mb-1">Magia de la Noche</span>
+                <h3 className="text-2xl font-serif text-white leading-tight">Música en Vivo</h3>
+                <p className="text-white/70 text-xs mt-1.5">Noches únicas donde el alma de Los Andes cobra vida.</p>
               </div>
             </motion.div>
 

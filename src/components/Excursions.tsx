@@ -42,6 +42,20 @@ const experiences: Experience[] = [
     themeColor: 'bg-brand-terracotta'
   },
   {
+    id: 5,
+    category: 'Aventura',
+    title: 'Recorrido en Bus Antiguo por el Pueblo',
+    description: 'Un viaje en el tiempo a bordo de nuestro icónico bus antiguo. Recorra las calles del pueblo y el municipio descubriendo su arquitectura colonial, mercados locales y los paisajes únicos de los Andes venezolanos.',
+    gallery: [
+      '/assets/excursiones/bus-pueblo-1.png',
+      '/assets/excursiones/bus-pueblo-2.png',
+      '/assets/excursiones/bus-pueblo-3.png',
+    ],
+    duration: '2h - 3h',
+    points: 150,
+    themeColor: 'bg-brand-terracotta'
+  },
+  {
     id: 3,
     category: 'Relax',
     title: 'Masajes Terapéuticos',
