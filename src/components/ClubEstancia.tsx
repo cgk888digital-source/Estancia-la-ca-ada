@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Award, Star, History, Gift, CheckCircle2, Crown, Sparkles } from 'lucide-react';
+import { Award, Star, History, Gift, CheckCircle2, Crown, Sparkles, ShoppingBag, Coins, Repeat2 } from 'lucide-react';
 
 const ClubEstancia: React.FC = () => {
   const [points] = useState(2450);
@@ -33,6 +33,48 @@ const ClubEstancia: React.FC = () => {
         <span className="text-brand-terracotta text-[10px] uppercase tracking-[0.4em] font-bold mb-1 block">Miembro Exclusivo</span>
         <h1 className="text-4xl font-serif">Club Estancia</h1>
       </header>
+
+      {/* Cómo Funciona */}
+      <section className="px-6 mb-10">
+        <h2 className="text-xl font-serif mb-5">¿Cómo funciona?</h2>
+        <div className="flex flex-col gap-3">
+          {[
+            {
+              icon: <ShoppingBag size={20} />,
+              title: 'Acumula con cada consumo',
+              desc: 'Gana 1 punto por cada $1 que gastes en hospedaje, restaurante o excursiones.',
+              color: 'bg-brand-accent/10 text-brand-accent',
+            },
+            {
+              icon: <Coins size={20} />,
+              title: 'Sube de nivel',
+              desc: 'A mayor acumulación, mayor es tu nivel: Plata → Oro → Platino. Cada nivel desbloquea beneficios exclusivos.',
+              color: 'bg-brand-terracotta/10 text-brand-terracotta',
+            },
+            {
+              icon: <Repeat2 size={20} />,
+              title: 'Canjea tus puntos',
+              desc: 'Usa tus puntos para cenas de bienvenida, upgrades de habitación, cabalgatas y más.',
+              color: 'bg-brand-olive/10 text-brand-olive',
+            },
+          ].map((step, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.1 }}
+              className="bg-white rounded-2xl p-5 flex items-start gap-4 shadow-sm shadow-black/5"
+            >
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${step.color}`}>
+                {step.icon}
+              </div>
+              <div>
+                <p className="font-serif text-brand-primary text-sm mb-0.5">{step.title}</p>
+                <p className="text-brand-primary/50 text-xs leading-relaxed">{step.desc}</p>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      </section>
 
       {/* Virtual Card Section */}
       <div className="px-6 mb-12">
@@ -169,6 +211,72 @@ const ClubEstancia: React.FC = () => {
             </motion.div>
           ))}
         </div>
+      </section>
+
+      {/* Gift Cards */}
+      <section className="px-6 mb-12">
+        <div className="mb-5">
+          <span className="text-brand-terracotta text-[10px] uppercase tracking-[0.4em] font-bold block mb-1">El regalo perfecto</span>
+          <h3 className="text-xl font-serif">Gift Cards</h3>
+          <p className="text-brand-primary/50 text-xs mt-1 leading-relaxed">
+            Regala una experiencia única en La Cañada a tus familiares y amigos. Válidas para hospedaje, restaurante y excursiones.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-4">
+          {[
+            { value: 100, pay: 80,  discount: 20 },
+            { value: 200, pay: 160, discount: 20 },
+          ].map((card) => (
+            <motion.div
+              key={card.value}
+              initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+              className="relative overflow-hidden rounded-[2rem] shadow-xl shadow-[#C5A059]/20"
+            >
+              {/* Background */}
+              <div className="absolute inset-0 bg-gradient-to-br from-[#3D2B1F] via-[#5a3e2b] to-[#2a1f15]" />
+              <motion.div
+                initial={{ x: '-100%' }} animate={{ x: '200%' }}
+                transition={{ duration: 5, repeat: Infinity, ease: 'linear', repeatDelay: 3 }}
+                className="absolute inset-0 w-1/3 bg-gradient-to-r from-transparent via-[#C5A059]/15 to-transparent skew-x-12 pointer-events-none"
+              />
+
+              <div className="relative p-6">
+                {/* Header row */}
+                <div className="flex items-start justify-between mb-5">
+                  <div>
+                    <p className="text-[9px] uppercase tracking-[0.4em] text-[#C5A059]/70 font-bold mb-1">Estancia La Cañada</p>
+                    <h4 className="text-3xl font-serif text-white">${card.value} <span className="text-base text-white/50">USD</span></h4>
+                  </div>
+                  <div className="bg-[#C5A059] text-white text-[9px] uppercase tracking-widest font-bold px-3 py-1.5 rounded-full">
+                    {card.discount}% OFF
+                  </div>
+                </div>
+
+                {/* Divider */}
+                <div className="border-t border-white/10 my-4" />
+
+                {/* Price & CTA */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-white/40 text-[10px] uppercase tracking-widest mb-0.5">Precio especial</p>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-2xl font-bold text-[#C5A059]">${card.pay}</span>
+                      <span className="text-white/40 text-xs line-through">${card.value}</span>
+                    </div>
+                  </div>
+                  <button className="bg-[#C5A059] hover:bg-[#d4b96a] active:scale-95 text-white font-bold text-xs uppercase tracking-widest px-5 py-3 rounded-xl transition-all flex items-center gap-2">
+                    <Gift size={14} /> Comprar
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+
+        <p className="text-center text-brand-primary/40 text-[10px] mt-4 leading-relaxed">
+          Las Gift Cards son válidas por 12 meses · Sin restricciones de temporada
+        </p>
       </section>
 
       {/* History Section */}

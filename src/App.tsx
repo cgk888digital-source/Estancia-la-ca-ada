@@ -45,9 +45,9 @@ function App() {
   }
 
   return (
-    <div className="bg-[#121212] min-h-screen flex justify-center items-start md:py-8">
+    <div className="bg-[#121212] h-[100dvh] flex justify-center items-start md:py-8 overflow-hidden">
       {/* Mobile Container */}
-      <div className="w-full max-w-[430px] min-h-screen md:min-h-[850px] bg-brand-neutral relative shadow-2xl md:rounded-[3rem] overflow-hidden flex flex-col">
+      <div className="w-full max-w-[430px] h-[100dvh] md:h-[850px] bg-brand-neutral relative shadow-2xl md:rounded-[3rem] overflow-hidden flex flex-col">
         
         {/* Screen Content */}
         <div className="flex-grow overflow-hidden relative">
@@ -110,7 +110,7 @@ function App() {
         </div>
 
         {/* Bottom Navigation Bar */}
-        <nav className="bg-white/80 backdrop-blur-xl border-t border-brand-primary/5 px-8 py-4 flex justify-between items-center z-50 pb-8 md:pb-6">
+        <nav className="shrink-0 bg-white/80 backdrop-blur-xl border-t border-brand-primary/5 px-8 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] flex justify-between items-center z-50">
           <NavItem 
             icon={<Home size={22} />} 
             label="Inicio" 

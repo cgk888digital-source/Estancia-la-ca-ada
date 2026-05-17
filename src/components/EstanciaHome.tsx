@@ -162,6 +162,36 @@ const EstanciaHome: React.FC<{
             </div>
             <ChevronRight className="text-brand-primary/20 group-hover:text-brand-accent transition-colors" />
           </motion.button>
+
+          {/* Club & Gift Cards banner */}
+          <motion.button
+            whileHover={{ y: -5 }}
+            onClick={() => onNavigate('club')}
+            className="relative overflow-hidden rounded-3xl shadow-xl shadow-black/10 text-left"
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-[#3D2B1F] via-[#5a3e2b] to-[#3D2B1F]" />
+            <motion.div
+              initial={{ x: '-100%' }}
+              animate={{ x: '200%' }}
+              transition={{ duration: 4, repeat: Infinity, ease: 'linear', repeatDelay: 2 }}
+              className="absolute inset-0 w-1/3 bg-gradient-to-r from-transparent via-[#C5A059]/20 to-transparent skew-x-12 pointer-events-none"
+            />
+            <div className="relative p-6 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 bg-[#C5A059]/20 rounded-2xl flex items-center justify-center">
+                  <Award size={28} className="text-[#C5A059]" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <h3 className="text-lg font-serif text-white">Club & Gift Cards</h3>
+                    <span className="bg-[#C5A059] text-white text-[8px] uppercase tracking-widest font-bold px-2 py-0.5 rounded-full">Nuevo</span>
+                  </div>
+                  <p className="text-white/60 text-xs">Puntos, beneficios y regalos para tus seres queridos</p>
+                </div>
+              </div>
+              <ChevronRight className="text-[#C5A059]/60 shrink-0" />
+            </div>
+          </motion.button>
         </div>
 
         {/* Instalaciones Section */}
