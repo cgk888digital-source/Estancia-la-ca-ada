@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, X, Users, Dog, Calendar as CalendarIcon, Awa
 
 interface BookingFlowProps {
   onClose: () => void;
-  onComplete: (data: { unitName: string; checkIn: string; checkOut: string; bookingCode: string }) => void;
+  onComplete: (data: any) => void;
 }
 
 const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
@@ -14,9 +14,118 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
     end: null
   });
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [occupants, setOccupants] = useState({ adults: 1, children: 0, pets: 0 });
+  const [occupants, setOccupants] = useState({ adults: 2, children: 0, babies: 0, pets: 0 });
   const [selectedUnit, setSelectedUnit] = useState<number | null>(null);
   const [galleryIndex, setGalleryIndex] = useState<Record<number, number>>({});
+
+  // Ficha de Reserva & Payment state
+  const [formData, setFormData] = useState({
+    nombre: '',
+    apellido: '',
+    ci: '',
+    tlf: '',
+    correo: '',
+    referido: '',
+    sigueCircuito: false
+  });
+  const [selectedPayment, setSelectedPayment] = useState<'zelle' | 'pago_movil' | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  const getSeason = (date: Date): 'low' | 'high' | 'dec' => {
+    const month = date.getMonth();
+    const day = date.getDate();
+    
+    // Diciembre (Dic 20 - Ene 06)
+    if ((month === 11 && day >= 20) || (month === 0 && day <= 6)) {
+      return 'dec';
+    }
+    
+    // Temporada Alta: Dic 15 - Dic 19, Ene 7 - Ene 15, Jun 15 - Sep 15
+    if (
+      (month === 11 && day >= 15 && day <= 19) ||
+      (month === 0 && day >= 7 && day <= 15) ||
+      ((month === 5 && day >= 15) || month === 6 || month === 7 || (month === 8 && day <= 15))
+    ) {
+      return 'high';
+    }
+    
+    return 'low';
+  };
+
+  const getRoomPrice = (roomId: number, isDecember: boolean) => {
+    switch (roomId) {
+      case 1: // Suite La Vega
+        return isDecember ? 158 : 137;
+      case 2: // Cabaña La Lomita
+        return isDecember ? 337 : 297;
+      case 4: // Cabaña Mitibibo
+        return isDecember ? 337 : 297;
+      case 5: // Galería Llano Grande
+        return isDecember ? 76 : 64;
+      case 3: // Galería La Manita
+        return isDecember ? 70 : 60;
+      default:
+        return 0;
+    }
+  };
+
+  const calculateStayPrice = (roomId: number, adults: number, children: number, nights: number, isDecember: boolean) => {
+    const roomNightlyRate = getRoomPrice(roomId, isDecember);
+    // Alimentos: $56 por adulto, $48 por niño (3-12 años)
+    const mealsNightlyRate = (adults * 56) + (children * 48);
+    const totalNightlyRate = roomNightlyRate + mealsNightlyRate;
+    return {
+      roomNightly: roomNightlyRate,
+      mealsNightly: mealsNightlyRate,
+      roomTotal: roomNightlyRate * nights,
+      mealsTotal: mealsNightlyRate * nights,
+      nightlyRate: totalNightlyRate,
+      totalStayPrice: totalNightlyRate * nights
+    };
+  };
+
+  const isRoomAvailable = (roomId: number, adults: number, children: number) => {
+    const totalOccupants = adults + children;
+    switch (roomId) {
+      case 1: // Suite La Vega: Max 6
+        return totalOccupants <= 6;
+      case 2: // Cabaña La Lomita: Min 6 Personas, Max 10
+        return totalOccupants >= 6 && totalOccupants <= 10;
+      case 4: // Cabaña Mitibibo: Min 6 Personas, Max 9
+        return totalOccupants >= 6 && totalOccupants <= 9;
+      case 5: // Galería Llano Grande: Max 4
+        return totalOccupants <= 4;
+      case 3: // Galería La Manita: Max 3
+        return totalOccupants <= 3;
+      default:
+        return false;
+    }
+  };
+
+  const getRoomAvailabilityError = (roomId: number, adults: number, children: number) => {
+    const totalOccupants = adults + children;
+    if (roomId === 2 || roomId === 4) {
+      if (totalOccupants < 6) {
+        return "Mínimo 6 personas requeridas para cabañas grandes";
+      }
+      const max = roomId === 2 ? 10 : 9;
+      if (totalOccupants > max) {
+        return `Excede capacidad máxima (Máx ${max} personas)`;
+      }
+    } else {
+      const max = roomId === 1 ? 6 : (roomId === 5 ? 4 : 3);
+      if (totalOccupants > max) {
+        return `Excede capacidad máxima (Máx ${max} personas)`;
+      }
+    }
+    return null;
+  };
+
+  const copyToClipboard = (text: string, fieldName: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(fieldName);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
 
   // Calendar Logic
   const daysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
@@ -51,7 +160,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
     return false;
   };
 
-  const updateOccupant = (type: 'adults' | 'children' | 'pets', delta: number) => {
+  const updateOccupant = (type: 'adults' | 'children' | 'babies' | 'pets', delta: number) => {
     setOccupants(prev => ({
       ...prev,
       [type]: Math.max(0, prev[type] + delta)
@@ -100,10 +209,10 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
   const accommodationOptions = [
     {
       id: 1,
-      title: "Suites La Vega",
+      title: "Galería Suite La Vega",
       type: "Suite Comunicante",
-      price: 320,
-      capacity: "Hasta 7 Personas",
+      price: 137,
+      capacity: "Hasta 6 Personas",
       pets: "Consultar",
       image: "/assets/suites/la-vega/exterior.jpg",
       gallery: [
@@ -115,16 +224,16 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
         "/assets/suites/la-vega/hab-literas.png",
         "/assets/suites/la-vega/hab-triple.png",
       ],
-      description: "2 habitaciones comunicantes con baños propios y terrazas a ambos lados.",
+      description: "2 habitaciones comunicantes con baños propios y terrazas a ambos lados, ideal para familias medianas.",
       rooms: ["Matrimonial (cama King)", "2 literas (4 camas) o litera + individual (3 camas)"],
-      amenities: ["2 Baños Privados", "Terrazas Dobles", "Vistas a la Montaña"]
+      amenities: ["2 Baños Privados", "Neverita", "Terrazas Dobles", "Vistas a la Montaña"]
     },
     {
       id: 2,
       title: "Cabaña La Lomita",
       type: "Cabaña Privada",
-      price: 420,
-      capacity: "Hasta 6 Personas",
+      price: 297,
+      capacity: "Hasta 10 Personas (Mín. 6 Personas)",
       pets: "Pet Friendly",
       image: "/assets/suites/la-lomita/exterior.png",
       gallery: [
@@ -138,16 +247,16 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
         "/assets/suites/la-lomita/bano-1.png",
         "/assets/suites/la-lomita/bano-2.png",
       ],
-      description: "Cabaña independiente con 3 habitaciones, salón con chimenea de piedra, mini cocina equipada y terraza privada.",
-      rooms: ["3 Habitaciones dobles", "Salón con chimenea", "Mini cocina equipada"],
+      description: "Cabaña independiente con 3 habitaciones, salón con chimenea de piedra, mini cocina equipada y terraza privada. Capacidad máxima de 10 personas.",
+      rooms: ["3 Habitaciones dobles/múltiples", "Salón con chimenea", "Mini cocina equipada"],
       amenities: ["3 Baños Privados", "Chimenea de Piedra", "Terraza", "Mini Cocina"]
     },
     {
       id: 4,
-      title: "Cabaña Mitibibo",
+      title: "Cabaña Mitibibó",
       type: "Cabaña Privada",
-      price: 400,
-      capacity: "Hasta 8 Personas",
+      price: 297,
+      capacity: "Hasta 9 Personas (Mín. 6 Personas)",
       pets: "Pet Friendly",
       image: "/assets/suites/mitibibo/exterior.png",
       gallery: [
@@ -159,16 +268,16 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
         "/assets/suites/mitibibo/hab-2.png",
         "/assets/suites/mitibibo/hab-3.png",
       ],
-      description: "Cabaña amarilla con paredes de piedra, salón con chimenea y ventanas panorámicas a la montaña, cocina completamente equipada.",
+      description: "Cabaña amarilla con paredes de piedra, salón con chimenea y ventanas panorámicas a la montaña, cocina completamente equipada. Capacidad máxima de 9 personas.",
       rooms: ["2 Habitaciones dobles", "1 Habitación múltiple (literas)", "Salón con chimenea"],
       amenities: ["3 Baños Privados", "Cocina Equipada", "Chimenea", "Vistas Panorámicas"]
     },
     {
       id: 5,
       title: "Galería Llano Grande",
-      type: "Galería de Habitaciones",
-      price: 160,
-      capacity: "Hasta 3 Personas por hab.",
+      type: "Habitación de Galería",
+      price: 64,
+      capacity: "Hasta 4 Personas",
       pets: "Consultar",
       image: "/assets/suites/llano-grande/exterior.png",
       gallery: [
@@ -182,16 +291,16 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
         "/assets/suites/llano-grande/hab-6.png",
         "/assets/suites/llano-grande/hab-7.png",
       ],
-      description: "6 habitaciones únicas, cada una con su propio encanto y estilo. Desde ambientes rústicos con paredes de piedra hasta habitaciones acogedoras con detalles artesanales.",
-      rooms: ["Habitaciones dobles", "Habitaciones con litera", "Habitaciones twin", "Baño privado en cada una"],
-      amenities: ["6 Baños Privados", "Cada hab. única", "Detalles artesanales", "Flores y jardines"]
+      description: "Habitaciones únicas y acogedoras con detalles artesanales y baño privado. Capacidad máxima de 4 personas.",
+      rooms: ["Habitaciones dobles/múltiples", "Baño privado en cada una"],
+      amenities: ["Baño Privado", "Detalles artesanales", "Acceso a jardines"]
     },
     {
       id: 3,
       title: "Galería La Manita",
-      type: "Galería de Habitaciones",
-      price: 180,
-      capacity: "Hasta 3 Personas por hab.",
+      type: "Habitación de Galería",
+      price: 60,
+      capacity: "Hasta 3 Personas",
       pets: "Consultar",
       image: "/assets/suites/la-manita/exterior.png",
       gallery: [
@@ -203,13 +312,48 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
         "/assets/suites/la-manita/bano-1.png",
         "/assets/suites/la-manita/bano-2.png",
       ],
-      description: "6 habitaciones independientes con baño privado, techos de madera y vistas a la montaña. Cada una con cama doble y litera.",
-      rooms: ["Cama doble + litera (hasta 3 personas)", "Baño privado por habitación", "6 habitaciones disponibles"],
-      amenities: ["6 Baños Privados", "Techos de Madera", "Vistas a la Montaña"]
+      description: "Habitaciones independientes con baño privado, techos de madera y vistas a la montaña. Capacidad máxima de 3 personas.",
+      rooms: ["Cama doble + litera", "Baño privado por habitación"],
+      amenities: ["Baño Privado", "Techos de Madera", "Vistas a la Montaña"]
     }
   ];
 
   const selectedData = accommodationOptions.find(o => o.id === selectedUnit);
+  const totalNights = selectedDates.start && selectedDates.end
+    ? Math.ceil(Math.abs(selectedDates.end.getTime() - selectedDates.start.getTime()) / (1000 * 60 * 60 * 24))
+    : 1;
+
+  const isDecember = selectedDates.start ? getSeason(selectedDates.start) === 'dec' : false;
+  const isHighSeason = selectedDates.start ? getSeason(selectedDates.start) !== 'low' : false;
+
+  const pricing = selectedUnit
+    ? calculateStayPrice(selectedUnit, occupants.adults, occupants.children, totalNights, isDecember)
+    : { roomNightly: 0, mealsNightly: 0, roomTotal: 0, mealsTotal: 0, nightlyRate: 0, totalStayPrice: 0 };
+
+  const totalStayPrice = pricing.totalStayPrice;
+
+  // Lógica dinámica de depósito
+  const today = new Date();
+  const checkInDate = selectedDates.start || today;
+  const daysUntilArrival = Math.ceil((checkInDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  const isConTiempo = daysUntilArrival > 15;
+
+  let depositPercent = 100;
+  let remainingPolicyText = '';
+
+  if (isConTiempo) {
+    depositPercent = 50;
+    if (isHighSeason) {
+      remainingPolicyText = 'El 50% restante se debe abonar 1 mes antes de la llegada (Temporada Alta).';
+    } else {
+      remainingPolicyText = 'El 50% restante se debe abonar 1 semana antes de la llegada (Temporada Baja).';
+    }
+  } else {
+    remainingPolicyText = 'Reserva a corto plazo (menos de 15 días): pago del 100% requerido para formalizar.';
+  }
+
+  const depositAmount = totalStayPrice * (depositPercent / 100);
+  const remainingAmount = totalStayPrice - depositAmount;
 
   return (
     <motion.div
@@ -226,8 +370,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
         <div className="flex flex-col items-center">
           <span className="text-[10px] uppercase tracking-[0.3em] font-bold text-brand-terracotta mb-1">Reserva de Estancia</span>
           <div className="flex gap-1">
-            {[1, 2, 3].map((s) => (
-              <div key={s} className={`h-1 w-8 rounded-full transition-all duration-500 ${s <= step ? 'bg-brand-terracotta' : 'bg-brand-primary/10'}`} />
+            {[1, 2, 3, 4, 5].map((s) => (
+              <div key={s} className={`h-1 w-6 rounded-full transition-all duration-500 ${s <= step ? 'bg-brand-terracotta' : 'bg-brand-primary/10'}`} />
             ))}
           </div>
         </div>
@@ -348,8 +492,9 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
               </div>
 
               <div className="bg-white rounded-[2.5rem] p-8 shadow-xl shadow-black/5 border border-brand-primary/5 space-y-12">
-                <OccupantRow icon={<Users size={28} />} label="Adultos" sub="Mayores de 12" value={occupants.adults} onUpdate={(d) => updateOccupant('adults', d)} />
-                <OccupantRow icon={<Users size={28} className="scale-75" />} label="Niños" sub="De 2 a 11" value={occupants.children} onUpdate={(d) => updateOccupant('children', d)} />
+                <OccupantRow icon={<Users size={28} />} label="Adultos" sub="Mayores de 12 años" value={occupants.adults} onUpdate={(d) => updateOccupant('adults', d)} />
+                <OccupantRow icon={<Users size={28} className="scale-75" />} label="Niños" sub="De 3 a 12 años" value={occupants.children} onUpdate={(d) => updateOccupant('children', d)} />
+                <OccupantRow icon={<Users size={28} className="scale-50" />} label="Bebés" sub="De 0 a 2 años" value={occupants.babies} onUpdate={(d) => updateOccupant('babies', d)} />
                 <OccupantRow icon={<Dog size={28} />} label="Mascotas" sub="Hasta 15kg" value={occupants.pets} onUpdate={(d) => updateOccupant('pets', d)} hasBadge />
               </div>
 
@@ -402,12 +547,21 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
                     setGalleryIndex(prev => ({ ...prev, [opt.id]: (currentImg - 1 + total) % total }));
                   };
 
+                  const isAvailable = isRoomAvailable(opt.id, occupants.adults, occupants.children);
+                  const availabilityError = getRoomAvailabilityError(opt.id, occupants.adults, occupants.children);
+                  const roomPriceDetails = calculateStayPrice(opt.id, occupants.adults, occupants.children, totalNights, isDecember);
+
                   return (
                     <motion.div
                       key={opt.id}
-                      onClick={() => setSelectedUnit(opt.id)}
-                      whileTap={{ scale: 0.98 }}
-                      className={`w-full text-left bg-white rounded-[2.5rem] overflow-hidden shadow-xl shadow-black/5 border-2 transition-all relative cursor-pointer
+                      onClick={() => {
+                        if (isAvailable) {
+                          setSelectedUnit(opt.id);
+                        }
+                      }}
+                      whileTap={isAvailable ? { scale: 0.98 } : {}}
+                      className={`w-full text-left bg-white rounded-[2.5rem] overflow-hidden shadow-xl shadow-black/5 border-2 transition-all relative
+                        ${!isAvailable ? 'opacity-60 cursor-not-allowed bg-brand-neutral/20 grayscale-50' : 'cursor-pointer'}
                         ${selectedUnit === opt.id ? 'border-brand-terracotta' : 'border-transparent'}
                       `}
                     >
@@ -468,15 +622,32 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
                       </div>
 
                       <div className="p-6">
-                        <div className="flex justify-between items-start mb-3">
+                        <div className="flex justify-between items-start mb-3 gap-2">
                           <div>
-                            <h3 className="text-2xl font-serif text-brand-wood">{opt.title}</h3>
-                            <p className="text-brand-primary/40 text-xs uppercase tracking-widest mt-0.5">{opt.capacity} • {opt.pets}</p>
+                            <h3 className="text-2xl font-serif text-brand-wood leading-tight">{opt.title}</h3>
+                            <p className="text-brand-primary/40 text-[10px] uppercase tracking-widest mt-1">Capacidad: {opt.capacity} • {opt.pets}</p>
+                            
+                            {!isAvailable ? (
+                              <span className="inline-block mt-2 bg-red-50 text-red-600 border border-red-100 text-[8px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md">
+                                ⚠️ {availabilityError}
+                              </span>
+                            ) : (
+                              <span className="inline-block mt-2 bg-brand-terracotta/10 text-brand-terracotta border border-brand-terracotta/20 text-[9px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-lg">
+                                Media Pensión Incluida 🍲
+                              </span>
+                            )}
                           </div>
-                          <div className="text-right">
-                            <span className="text-2xl font-serif text-brand-terracotta">${opt.price}</span>
-                            <p className="text-[10px] text-brand-primary/40 uppercase tracking-widest">/ noche</p>
-                          </div>
+                          {isAvailable ? (
+                            <div className="text-right shrink-0">
+                              <span className="text-2xl font-serif text-brand-terracotta">${roomPriceDetails.nightlyRate}</span>
+                              <p className="text-[9px] text-brand-primary/40 uppercase tracking-widest leading-none">/ noche total</p>
+                              <p className="text-[8px] text-brand-primary/30 mt-1 font-mono">Hab: ${roomPriceDetails.roomNightly} | Alim: ${roomPriceDetails.mealsNightly}</p>
+                            </div>
+                          ) : (
+                            <div className="text-right shrink-0 opacity-40">
+                              <span className="text-sm font-serif text-brand-primary/60">No disponible</span>
+                            </div>
+                          )}
                         </div>
 
                         <p className="text-brand-primary/60 text-xs leading-relaxed mb-4">{opt.description}</p>
@@ -506,6 +677,316 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
               </div>
             </motion.div>
           )}
+
+          {step === 4 && (
+            <motion.div
+              key="step4"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="px-6 py-10 space-y-8"
+            >
+              <div className="flex items-center gap-4">
+                <button onClick={() => setStep(3)} className="p-2 bg-brand-primary/5 rounded-full">
+                  <ChevronLeft size={20} />
+                </button>
+                <div>
+                  <h2 className="text-4xl font-serif mb-2">Ficha de Reserva</h2>
+                  <p className="text-brand-primary/60">Por favor, complete sus datos para continuar.</p>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-[2.5rem] p-8 shadow-xl shadow-black/5 border border-brand-primary/5 space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase tracking-widest text-brand-primary/40 font-bold">Nombre *</label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.nombre}
+                      onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+                      className="w-full px-4 py-3 rounded-xl border border-brand-primary/10 text-sm focus:outline-none focus:border-brand-terracotta bg-brand-neutral/20"
+                      placeholder="Ej: Juan"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase tracking-widest text-brand-primary/40 font-bold">Apellido *</label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.apellido}
+                      onChange={(e) => setFormData({ ...formData, apellido: e.target.value })}
+                      className="w-full px-4 py-3 rounded-xl border border-brand-primary/10 text-sm focus:outline-none focus:border-brand-terracotta bg-brand-neutral/20"
+                      placeholder="Ej: Pérez"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-widest text-brand-primary/40 font-bold">Cédula de Identidad (CI) *</label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.ci}
+                    onChange={(e) => setFormData({ ...formData, ci: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl border border-brand-primary/10 text-sm focus:outline-none focus:border-brand-terracotta bg-brand-neutral/20"
+                    placeholder="Ej: 10345954"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-widest text-brand-primary/40 font-bold">Teléfono de Contacto (Tlf) *</label>
+                  <input
+                    type="tel"
+                    required
+                    value={formData.tlf}
+                    onChange={(e) => setFormData({ ...formData, tlf: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl border border-brand-primary/10 text-sm focus:outline-none focus:border-brand-terracotta bg-brand-neutral/20"
+                    placeholder="Ej: 04141294308"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-widest text-brand-primary/40 font-bold">Correo Electrónico *</label>
+                  <input
+                    type="email"
+                    required
+                    value={formData.correo}
+                    onChange={(e) => setFormData({ ...formData, correo: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl border border-brand-primary/10 text-sm focus:outline-none focus:border-brand-terracotta bg-brand-neutral/20"
+                    placeholder="Ej: cliente@correo.com"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-widest text-brand-primary/40 font-bold">Persona que lo refirió (Opcional)</label>
+                  <input
+                    type="text"
+                    value={formData.referido}
+                    onChange={(e) => setFormData({ ...formData, referido: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl border border-brand-primary/10 text-sm focus:outline-none focus:border-brand-terracotta bg-brand-neutral/20"
+                    placeholder="¿Quién le recomendó la Estancia?"
+                  />
+                </div>
+
+                <div className="flex items-center gap-3 pt-2">
+                  <input
+                    type="checkbox"
+                    id="circuito"
+                    checked={formData.sigueCircuito}
+                    onChange={(e) => setFormData({ ...formData, sigueCircuito: e.target.checked })}
+                    className="w-4 h-4 rounded text-brand-terracotta focus:ring-brand-terracotta border-brand-primary/10"
+                  />
+                  <label htmlFor="circuito" className="text-xs text-brand-primary/70 leading-tight cursor-pointer select-none">
+                    Sigo la página de Instagram del <span className="font-bold text-brand-terracotta">@Circuitodelaexcelencia</span>
+                  </label>
+                </div>
+              </div>
+
+              <button
+                disabled={!formData.nombre || !formData.apellido || !formData.ci || !formData.tlf || !formData.correo}
+                onClick={() => setStep(5)}
+                className={`w-full py-5 rounded-2xl font-bold text-lg transition-all active:scale-[0.98] shadow-xl 
+                  ${(formData.nombre && formData.apellido && formData.ci && formData.tlf && formData.correo)
+                    ? 'bg-brand-primary text-white hover:bg-brand-terracotta'
+                    : 'bg-brand-primary/10 text-brand-primary/30 cursor-not-allowed'
+                  }
+                `}
+              >
+                Continuar al Pago
+              </button>
+            </motion.div>
+          )}
+
+          {step === 5 && (
+            <motion.div
+              key="step5"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="px-6 py-10 pb-40 space-y-8"
+            >
+              <div className="flex items-center gap-4">
+                <button onClick={() => setStep(4)} className="p-2 bg-brand-primary/5 rounded-full">
+                  <ChevronLeft size={20} />
+                </button>
+                <div>
+                  <h2 className="text-4xl font-serif mb-2">Métodos de Pago</h2>
+                  <p className="text-brand-primary/60">Garantice su reserva abonando el 50%.</p>
+                </div>
+              </div>
+
+              {/* Booking Summary Card */}
+              <div className="bg-white rounded-[2.5rem] p-6 shadow-xl border border-brand-primary/5 space-y-4">
+                <div>
+                  <span className="text-[9px] uppercase tracking-widest text-brand-primary/40 font-bold block">Resumen de Estadía</span>
+                  <h3 className="text-lg font-serif text-brand-wood">{selectedData?.title}</h3>
+                  <p className="text-xs text-brand-primary/60">
+                    {selectedDates.start?.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} a{' '}
+                    {selectedDates.end?.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} ({totalNights} {totalNights === 1 ? 'noche' : 'noches'})
+                  </p>
+                </div>
+
+                <div className="pt-3 border-t border-brand-primary/5 space-y-2.5 text-xs">
+                  <div className="flex justify-between text-brand-primary/60">
+                    <span>Hospedaje ({totalNights} {totalNights === 1 ? 'noche' : 'noches'}):</span>
+                    <span className="font-semibold font-mono">${pricing.roomTotal}</span>
+                  </div>
+                  <div className="flex justify-between text-brand-primary/60">
+                    <span>Alimentación ({totalNights} {totalNights === 1 ? 'noche' : 'noches'}):</span>
+                    <span className="font-semibold font-mono">${pricing.mealsTotal}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-sm pt-2 border-t border-brand-primary/5">
+                    <span className="text-brand-primary">Total Estadía:</span>
+                    <span className="text-brand-wood font-mono">${totalStayPrice}</span>
+                  </div>
+                  
+                  <div className="flex justify-between p-3 bg-brand-neutral/40 rounded-xl font-serif text-brand-wood text-sm mt-2">
+                    <span>Adelanto Requerido ({depositPercent}%):</span>
+                    <span className="font-bold text-brand-terracotta font-mono">${depositAmount}</span>
+                  </div>
+                  {remainingAmount > 0 && (
+                    <div className="flex justify-between text-brand-primary/60 px-3 text-[11px] font-mono">
+                      <span>Saldo restante (50%):</span>
+                      <span>${remainingAmount}</span>
+                    </div>
+                  )}
+                  <p className="text-[10px] text-brand-terracotta text-center font-medium mt-2 leading-relaxed bg-brand-terracotta/5 p-2.5 rounded-xl border border-brand-terracotta/10">
+                    💡 {remainingPolicyText}
+                  </p>
+                </div>
+              </div>
+
+              {/* Payment Methods Selection */}
+              <div className="space-y-4">
+                <div
+                  onClick={() => setSelectedPayment('zelle')}
+                  className={`p-6 rounded-[2rem] border-2 cursor-pointer transition-all bg-white flex flex-col gap-2
+                    ${selectedPayment === 'zelle' ? 'border-brand-terracotta shadow-lg' : 'border-transparent shadow-md'}
+                  `}
+                >
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center font-bold text-purple-700">Z</div>
+                      <span className="font-serif font-semibold text-brand-wood">Pago vía Zelle</span>
+                    </div>
+                    <input
+                      type="radio"
+                      checked={selectedPayment === 'zelle'}
+                      onChange={() => setSelectedPayment('zelle')}
+                      className="text-brand-terracotta focus:ring-brand-terracotta"
+                    />
+                  </div>
+                  {selectedPayment === 'zelle' && (
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="pt-4 border-t border-brand-primary/5 space-y-3 text-xs">
+                      <div className="flex justify-between items-center p-2.5 bg-brand-neutral/40 rounded-xl">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-brand-primary/40">Correo Zelle</p>
+                          <p className="font-medium font-mono text-brand-primary">mariasusana01@hotmail.com</p>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyToClipboard('mariasusana01@hotmail.com', 'zelle_email'); }}
+                          className="px-3 py-1.5 bg-brand-terracotta text-white rounded-lg font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all shrink-0"
+                        >
+                          {copiedField === 'zelle_email' ? 'Copiado!' : 'Copiar'}
+                        </button>
+                      </div>
+                      <div className="flex justify-between items-center p-2.5 bg-brand-neutral/40 rounded-xl">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-brand-primary/40">Titular</p>
+                          <p className="font-medium text-brand-primary">Maria Araujo</p>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyToClipboard('Maria Araujo', 'zelle_holder'); }}
+                          className="px-3 py-1.5 bg-brand-terracotta text-white rounded-lg font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all shrink-0"
+                        >
+                          {copiedField === 'zelle_holder' ? 'Copiado!' : 'Copiar'}
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+
+                <div
+                  onClick={() => setSelectedPayment('pago_movil')}
+                  className={`p-6 rounded-[2rem] border-2 cursor-pointer transition-all bg-white flex flex-col gap-2
+                    ${selectedPayment === 'pago_movil' ? 'border-brand-terracotta shadow-lg' : 'border-transparent shadow-md'}
+                  `}
+                >
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center font-bold text-green-700">PM</div>
+                      <span className="font-serif font-semibold text-brand-wood text-xs">Pago Móvil (Bancamiga)</span>
+                    </div>
+                    <input
+                      type="radio"
+                      checked={selectedPayment === 'pago_movil'}
+                      onChange={() => setSelectedPayment('pago_movil')}
+                      className="text-brand-terracotta focus:ring-brand-terracotta"
+                    />
+                  </div>
+                  {selectedPayment === 'pago_movil' && (
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="pt-4 border-t border-brand-primary/5 space-y-3 text-xs">
+                      <div className="flex justify-between items-center p-2.5 bg-brand-neutral/40 rounded-xl">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-brand-primary/40">Banco</p>
+                          <p className="font-medium text-brand-primary">Bancamiga (0172)</p>
+                        </div>
+                      </div>
+                      <div className="flex justify-between items-center p-2.5 bg-brand-neutral/40 rounded-xl">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-brand-primary/40">Teléfono</p>
+                          <p className="font-medium font-mono text-brand-primary">04141294308</p>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyToClipboard('04141294308', 'pm_phone'); }}
+                          className="px-3 py-1.5 bg-brand-terracotta text-white rounded-lg font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all shrink-0"
+                        >
+                          {copiedField === 'pm_phone' ? 'Copiado!' : 'Copiar'}
+                        </button>
+                      </div>
+                      <div className="flex justify-between items-center p-2.5 bg-brand-neutral/40 rounded-xl">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-brand-primary/40">Cédula</p>
+                          <p className="font-medium font-mono text-brand-primary">10345954</p>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyToClipboard('10345954', 'pm_ci'); }}
+                          className="px-3 py-1.5 bg-brand-terracotta text-white rounded-lg font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all shrink-0"
+                        >
+                          {copiedField === 'pm_ci' ? 'Copiado!' : 'Copiar'}
+                        </button>
+                      </div>
+                      <div className="flex justify-between items-center p-2.5 bg-brand-neutral/40 rounded-xl">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-brand-primary/40">Número de Cuenta</p>
+                          <p className="font-medium font-mono text-brand-primary text-[10px]">01720110701108762467</p>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyToClipboard('01720110701108762467', 'pm_acc'); }}
+                          className="px-3 py-1.5 bg-brand-terracotta text-white rounded-lg font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all shrink-0"
+                        >
+                          {copiedField === 'pm_acc' ? 'Copiado!' : 'Copiar'}
+                        </button>
+                      </div>
+                      <div className="flex justify-between items-center p-2.5 bg-brand-neutral/40 rounded-xl">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-brand-primary/40">Titular y Correo</p>
+                          <p className="font-medium text-brand-primary">María Araujo (Escagueyelc@gmail.com)</p>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyToClipboard('Escagueyelc@gmail.com', 'pm_email'); }}
+                          className="px-3 py-1.5 bg-brand-terracotta text-white rounded-lg font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all shrink-0"
+                        >
+                          {copiedField === 'pm_email' ? 'Copiado!' : 'Copiar'}
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
         </AnimatePresence>
       </main>
 
@@ -516,27 +997,99 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
           className="absolute bottom-0 left-0 w-full bg-brand-primary p-6 px-8 flex items-center justify-between shadow-2xl z-[110] pb-10"
         >
           <div>
-            <p className="text-white/50 text-[10px] uppercase tracking-[0.2em] font-bold">Total Estancia</p>
+            <p className="text-white/50 text-[10px] uppercase tracking-[0.2em] font-bold">Total Estadía ({totalNights} {totalNights === 1 ? 'noche' : 'noches'})</p>
             <p className="text-white text-2xl font-serif">
-              {selectedData ? `$${selectedData.price}` : '--'}
+              {selectedUnit ? `$${totalStayPrice}` : '--'}
             </p>
           </div>
           <button 
             disabled={!selectedUnit}
             onClick={() => {
-              if (selectedData && selectedDates.start && selectedDates.end) {
-                const bookingCode = Math.random().toString(36).substring(2, 7).toUpperCase();
-                onComplete({
-                  unitName: selectedData.title,
-                  checkIn: selectedDates.start.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }),
-                  checkOut: selectedDates.end.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }),
-                  bookingCode: bookingCode
-                });
+              if (selectedUnit) {
+                setStep(4);
               }
             }}
             className={`bg-brand-accent text-brand-wood px-10 py-4 rounded-2xl font-bold transition-all active:scale-95 ${!selectedUnit ? 'opacity-50 grayscale' : 'hover:bg-brand-accent/90'}`}
           >
-            Confirmar Reserva
+            Continuar Reserva
+          </button>
+        </motion.div>
+      )}
+
+      {step === 5 && (
+        <motion.div 
+          initial={{ y: 100 }}
+          animate={{ y: 0 }}
+          className="absolute bottom-0 left-0 w-full bg-brand-primary p-6 px-8 flex items-center justify-between shadow-2xl z-[110] pb-10"
+        >
+          <div>
+            <p className="text-white/50 text-[10px] uppercase tracking-[0.2em] font-bold">{depositPercent}% para Reservar</p>
+            <p className="text-white text-2xl font-serif">${depositAmount}</p>
+          </div>
+          <button 
+            disabled={!selectedPayment}
+            onClick={() => {
+              if (selectedData && selectedDates.start && selectedDates.end && selectedPayment) {
+                const bookingCode = 'LC-' + Math.random().toString(36).substring(2, 7).toUpperCase();
+                
+                // Formatear el texto de WhatsApp
+                const whatsappText = `*Ficha de Reserva - Estancia La Cañada* 🏔️
+              
+*Nombre:* ${formData.nombre}
+*Apellido:* ${formData.apellido}
+*CI:* ${formData.ci}
+*Tlf:* ${formData.tlf}
+*Correo:* ${formData.correo}
+*Fecha de entrada:* ${selectedDates.start.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
+*Fecha de salida:* ${selectedDates.end.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })} (${totalNights} ${totalNights === 1 ? 'noche' : 'noches'})
+*Tipo de Habitación:* ${selectedData.title}
+*Cantidad adultos:* ${occupants.adults}
+*Cantidad de niños (3 a 12 años):* ${occupants.children}
+*Cantidad de bebés (0 a 2 años):* ${occupants.babies}
+*Persona que lo refirió:* ${formData.referido || 'Ninguna'}
+*Sigue la Pag. @Circuitodelaexcelencia:* ${formData.sigueCircuito ? 'Sí ✅' : 'No ❌'}
+
+---
+*Resumen de Pago:*
+*Hospedaje (${totalNights} ${totalNights === 1 ? 'noche' : 'noches'}):* $${pricing.roomTotal}
+*Alimentación (${totalNights} ${totalNights === 1 ? 'noche' : 'noches'}):* $${pricing.mealsTotal}
+*Total Estadía:* $${totalStayPrice}
+*Monto de Adelanto Requerido (${depositPercent}%):* $${depositAmount}
+${remainingAmount > 0 ? `*Monto restante (50%):* $${remainingAmount}\n*Política de saldo restante:* ${remainingPolicyText}` : '*Monto restante:* $0 (Reserva liquidada al 100%)'}
+
+*Método de Pago Seleccionado:* ${selectedPayment === 'zelle' ? 'Zelle' : 'Pago Móvil (Bancamiga)'}
+*Código de Reserva:* ${bookingCode}
+
+Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
+
+                // URL encode the text
+                const encodedText = encodeURIComponent(whatsappText);
+                const whatsappUrl = `https://wa.me/584141294308?text=${encodedText}`;
+
+                // Abrir enlace de WhatsApp en una pestaña nueva
+                window.open(whatsappUrl, '_blank');
+
+                onComplete({
+                  unitName: selectedData.title,
+                  checkIn: selectedDates.start.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }),
+                  checkOut: selectedDates.end.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }),
+                  bookingCode: bookingCode,
+                  formData: formData,
+                  occupants: occupants,
+                  pricing: pricing,
+                  totalStayPrice: totalStayPrice,
+                  depositAmount: depositAmount,
+                  remainingAmount: remainingAmount,
+                  depositPercent: depositPercent,
+                  remainingPolicyText: remainingPolicyText,
+                  selectedPayment: selectedPayment,
+                  totalNights: totalNights
+                });
+              }
+            }}
+            className={`bg-brand-accent text-brand-wood px-8 py-4 rounded-2xl font-bold transition-all active:scale-95 ${!selectedPayment ? 'opacity-50 grayscale' : 'hover:bg-brand-accent/90'}`}
+          >
+            Reservar y Enviar a WhatsApp
           </button>
         </motion.div>
       )}

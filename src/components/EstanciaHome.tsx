@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Utensils, Compass, Award, ChevronRight, Menu as MenuIcon, X, Home, Calendar } from 'lucide-react';
+import { Utensils, Compass, Award, ChevronRight, Menu as MenuIcon, X, Home, Calendar, HelpCircle, ChevronDown, MapPin, Phone, Mail } from 'lucide-react';
 
 const EstanciaHome: React.FC<{
   onOpenMenu: () => void,
@@ -9,6 +9,38 @@ const EstanciaHome: React.FC<{
   onNavigate: (s: any) => void
 }> = ({ onOpenExcursions, onOpenBooking, onNavigate }) => {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
+  const [openFaq, setOpenFaq] = React.useState<number | null>(null);
+
+  const faqs = [
+    {
+      question: "¿Qué precio tiene la habitación para 2 personas?",
+      answer: "La tarifa para 2 personas por noche ronda entre $172 y $176 en temporada baja (según la habitación). Nuestras tarifas incluyen hospedaje en habitaciones confortables y pensión completa: ¡exquisitas cenas servidas con un menú dirigido en 4 tiempos ($36/persona) y deliciosos desayunos típicos andinos ($20/persona) incluidos! 😃"
+    },
+    {
+      question: "¿Qué precio tiene la habitación para 2 adultos y 1 niño?",
+      answer: "La tarifa para 2 adultos y 1 niño (3 a 12 años) por noche ronda entre $220 y $224 en temporada baja. Incluye el hospedaje, desayunos típicos andinos para los tres, cenas de 4 tiempos para los adultos y cenas adaptadas para niños ($28). 😃"
+    },
+    {
+      question: "¿Cuál es la tarifa para 2 adultos y 2 niños?",
+      answer: "La tarifa para 2 adultos y 2 niños (3 a 12 años) por noche es de $272 en temporada baja (en nuestra Galería Llano Grande). Incluye hospedaje y alimentación completa (cenas y desayunos) para todo el grupo. Los bebés de 0 a 2 años se hospedan gratis. 😃"
+    },
+    {
+      question: "¿Cuál es el costo para 3 adultos?",
+      answer: "La tarifa para 3 adultos por noche ronda entre $228 y $232 en temporada baja. Incluye el hospedaje de tres personas y su alimentación completa de cenas dirigidas y desayunos típicos."
+    },
+    {
+      question: "¿Cuáles son las capacidades de las Cabañas Grandes?",
+      answer: "Nuestras cabañas de 3 habitaciones y 3 baños (La Lomita y Mitibibó) se reservan para un mínimo de 6 personas y admiten un máximo de 10 y 9 personas respectivamente. Cuentan con salón con chimenea de piedra, cocina equipada y estacionamiento propio."
+    },
+    {
+      question: "¿Aceptan hospedaje sin comidas?",
+      answer: "No. Solo aceptamos hospedaje con cenas y desayunos incluidos. La gastronomía andina y la cena de 4 tiempos son parte fundamental de la experiencia en la estancia."
+    },
+    {
+      question: "¿Cómo se formaliza la reservación y cuáles son las políticas?",
+      answer: "Nuestra política de pago es:\n• Para reservas con 15 días o menos de anticipación: se requiere el 100% por adelantado.\n• Para reservas con más tiempo: se abona el 50% por adelantado y el 50% restante se cancela 1 mes antes si es Temporada Alta (Diciembre, feriados, etc.) o 1 semana antes si es Temporada Baja."
+    }
+  ];
 
   const menuItems = [
     { id: 'home', label: 'Inicio', icon: <Home size={20} />, action: () => { onNavigate('home'); setIsMenuOpen(false); } },
@@ -30,8 +62,18 @@ const EstanciaHome: React.FC<{
             transition={{ type: 'spring', damping: 30, stiffness: 300 }}
             className="absolute inset-0 z-[100] bg-brand-wood text-white p-8 flex flex-col"
           >
-            <div className="flex justify-between items-center mb-16">
-              <span className="text-[10px] uppercase tracking-[0.5em] font-bold text-brand-accent">Menu</span>
+            <div className="flex justify-between items-center mb-10">
+              <div className="flex items-center gap-3">
+                <img 
+                  src="/assets/logo-nuevo.png" 
+                  alt="Estancia La Cañada Logo" 
+                  className="w-12 h-12 object-contain bg-white/10 p-1.5 rounded-full backdrop-blur-sm border border-white/10 shadow-md"
+                />
+                <div>
+                  <span className="text-white text-lg font-serif block">La Cañada</span>
+                  <span className="text-[8px] uppercase tracking-[0.3em] font-bold text-brand-accent block">Estancia de Montaña</span>
+                </div>
+              </div>
               <button onClick={() => setIsMenuOpen(false)} className="p-2 bg-white/10 rounded-full">
                 <X size={24} />
               </button>
@@ -88,7 +130,13 @@ const EstanciaHome: React.FC<{
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, ease: "easeOut" }}
+            className="flex items-center gap-3"
           >
+            <img 
+              src="/assets/logo-nuevo.png" 
+              alt="Estancia La Cañada Logo" 
+              className="w-10 h-10 object-contain rounded-full bg-white/10 p-1 backdrop-blur-sm border border-white/20 shadow-lg"
+            />
             <h1 className="text-white text-base tracking-widest font-sans uppercase opacity-90">
               Estancia La Cañada
             </h1>
@@ -117,7 +165,7 @@ const EstanciaHome: React.FC<{
             transition={{ duration: 1, ease: "easeOut" }}
           >
             <h2 className="text-white text-2xl mb-2 font-serif italic">
-              Donde el lujo encuentra la tierra
+              En el Corazón del Páramo Andino
             </h2>
             <p className="text-white/70 text-xs font-sans tracking-widest max-w-xs mx-auto uppercase">
               Una experiencia exclusiva en el corazón de la pampa.
@@ -210,7 +258,7 @@ const EstanciaHome: React.FC<{
               className="bg-white rounded-3xl overflow-hidden shadow-lg shadow-black/5"
             >
               <div className="relative h-64 overflow-hidden">
-                <img src="/assets/instalaciones/salon.jpg" alt="Salón Principal" className="w-full h-full object-cover" />
+                <img src="/assets/instalaciones/comedor-1.jpg" alt="Salón Principal" className="w-full h-full object-cover" />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
                 <span className="absolute bottom-4 left-5 text-[10px] uppercase tracking-[0.3em] text-white/80 font-bold">Encuentros con estilo</span>
               </div>
@@ -227,7 +275,7 @@ const EstanciaHome: React.FC<{
               className="bg-white rounded-3xl overflow-hidden shadow-lg shadow-black/5 flex h-44"
             >
               <div className="relative w-2/5 flex-none overflow-hidden">
-                <img src="/assets/instalaciones/comedor-1.jpg" alt="Comedor" className="w-full h-full object-cover" />
+                <img src="/assets/restaurante/Comedor.png" alt="Comedor" className="w-full h-full object-cover" />
               </div>
               <div className="flex flex-col justify-center p-5 flex-1">
                 <span className="text-brand-terracotta text-[9px] uppercase tracking-widest font-bold mb-2">Gastronomía</span>
@@ -477,6 +525,167 @@ const EstanciaHome: React.FC<{
               </div>
             </motion.div>
 
+          </div>
+        </div>
+
+        {/* Circuito de la Excelencia Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: '-60px' }}
+          transition={{ duration: 0.7 }}
+          className="mt-16 bg-[#3D2B1F] rounded-[2.5rem] overflow-hidden shadow-xl border border-white/5 relative"
+        >
+          <div className="absolute inset-0 bg-gradient-to-br from-[#3D2B1F] via-[#4d3728] to-[#3D2B1F]" />
+          
+          {/* Subtle light shine */}
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#C5A059]/10 via-transparent to-transparent pointer-events-none" />
+          
+          <div className="relative p-6 space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-[#C5A059]/10 rounded-2xl flex items-center justify-center text-[#C5A059] border border-[#C5A059]/20">
+                <Award size={24} />
+              </div>
+              <div>
+                <span className="text-[#C5A059] text-[9px] uppercase tracking-[0.3em] font-bold block">Sello de Calidad</span>
+                <h2 className="text-xl font-serif text-white">Circuito de la Excelencia</h2>
+              </div>
+            </div>
+
+            {/* Certificado Image */}
+            <div className="relative group rounded-2xl overflow-hidden shadow-lg border border-white/10 bg-black/20">
+              <img 
+                src="/assets/circuito-excelencia.jpeg" 
+                alt="Certificado Circuito de la Excelencia" 
+                className="w-full h-auto block transition-transform duration-500 group-hover:scale-102"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent pointer-events-none" />
+              <div className="absolute bottom-3 right-3 bg-black/60 backdrop-blur-md text-[8px] text-white/80 uppercase tracking-widest px-2.5 py-1 rounded-full border border-white/10">
+                Miembro Oficial
+              </div>
+            </div>
+
+            {/* Description Copy */}
+            <div className="space-y-3">
+              <p className="text-white/80 text-xs leading-relaxed font-sans">
+                Estancia La Cañada forma parte de la prestigiosa red del <strong className="text-[#C5A059] font-serif font-medium">Circuito de la Excelencia</strong>, una selecta alianza que agrupa a las 30 mejores posadas boutique y hoteles de diseño en toda Venezuela.
+              </p>
+              <p className="text-white/60 text-[11px] leading-relaxed">
+                Nuestra membresía garantiza a los huéspedes un sello inquebrantable de calidad superior, confort refinado y hospitalidad excepcional, auditado de forma rigurosa para preservar la esencia del turismo de lujo en nuestro país.
+              </p>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* FAQ Section */}
+        <div className="mt-16 bg-white rounded-[2.5rem] p-8 shadow-xl border border-brand-primary/5">
+          <div className="mb-6 flex items-center gap-3">
+            <div className="w-12 h-12 bg-brand-terracotta/10 rounded-2xl flex items-center justify-center text-brand-terracotta">
+              <HelpCircle size={24} />
+            </div>
+            <div>
+              <span className="text-brand-terracotta text-[9px] uppercase tracking-[0.3em] font-bold block">Respuestas Rápidas</span>
+              <h2 className="text-xl font-serif text-brand-primary">Preguntas Frecuentes</h2>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {faqs.map((faq, idx) => {
+              const isOpen = openFaq === idx;
+              return (
+                <div key={idx} className="border-b border-brand-primary/5 last:border-b-0 pb-4 last:pb-0">
+                  <button
+                    onClick={() => setOpenFaq(isOpen ? null : idx)}
+                    className="w-full flex items-center justify-between text-left py-3 gap-4 group"
+                  >
+                    <span className="font-serif text-brand-wood text-sm font-medium group-hover:text-brand-terracotta transition-colors">{faq.question}</span>
+                    <motion.div
+                      animate={{ rotate: isOpen ? 180 : 0 }}
+                      className="text-brand-terracotta/60 shrink-0"
+                    >
+                      <ChevronDown size={18} />
+                    </motion.div>
+                  </button>
+                  <AnimatePresence initial={false}>
+                    {isOpen && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.3 }}
+                        className="overflow-hidden"
+                      >
+                        <p className="text-xs text-brand-primary/60 leading-relaxed pt-1 pb-3 pr-2 whitespace-pre-line">
+                          {faq.answer}
+                        </p>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Ubicación y Dirección Section */}
+        <div className="mt-16 bg-white rounded-[2.5rem] p-6 shadow-xl border border-brand-primary/5 space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 bg-brand-terracotta/10 rounded-2xl flex items-center justify-center text-brand-terracotta">
+              <MapPin size={24} />
+            </div>
+            <div>
+              <span className="text-brand-terracotta text-[9px] uppercase tracking-[0.3em] font-bold block">Encuéntranos</span>
+              <h2 className="text-xl font-serif text-brand-primary">Ubicación y Dirección</h2>
+            </div>
+          </div>
+
+          {/* Map Container */}
+          <div className="relative rounded-2xl overflow-hidden shadow-inner border border-brand-primary/5 h-64 bg-brand-neutral/20">
+            <iframe
+              src="https://maps.google.com/maps?q=Estancia%20La%20Ca%C3%B1ada,%20Escag%C3%BCey,%20M%C3%A9rida,%20Venezuela&t=&z=15&ie=UTF8&iwloc=&output=embed"
+              className="w-full h-full border-0 grayscale hover:grayscale-0 transition-all duration-700"
+              allowFullScreen={true}
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+              title="Estancia La Cañada Google Map"
+            />
+          </div>
+
+          {/* Address Details */}
+          <div className="space-y-4 text-xs text-brand-primary/70">
+            <div className="flex gap-4 p-4 bg-brand-neutral/30 rounded-2xl items-start">
+              <MapPin size={18} className="text-brand-terracotta shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-brand-wood text-[10px] uppercase tracking-wider mb-0.5">Dirección de la Estancia</p>
+                <p className="leading-relaxed">Sector La Cañada, Carretera Trasandina (entre Cacute y Mucurubá), Escagüey, Mérida, Venezuela.</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <a href="tel:+584141294308" className="flex gap-3 p-3 bg-brand-neutral/30 rounded-2xl items-center active:scale-95 transition-all text-inherit decoration-none">
+                <Phone size={16} className="text-brand-terracotta shrink-0" />
+                <div className="overflow-hidden">
+                  <p className="font-bold text-brand-wood text-[8px] uppercase tracking-wider mb-0.5">Llámanos</p>
+                  <p className="truncate text-[10px] font-mono">+58 414-1294308</p>
+                </div>
+              </a>
+
+              <a href="mailto:Escagueyelc@gmail.com" className="flex gap-3 p-3 bg-brand-neutral/30 rounded-2xl items-center active:scale-95 transition-all text-inherit decoration-none">
+                <Mail size={16} className="text-brand-terracotta shrink-0" />
+                <div className="overflow-hidden">
+                  <p className="font-bold text-brand-wood text-[8px] uppercase tracking-wider mb-0.5">Escríbenos</p>
+                  <p className="truncate text-[10px] font-mono">Escagueyelc@gmail.com</p>
+                </div>
+              </a>
+            </div>
+
+            <button
+              onClick={() => window.open("https://maps.google.com/?q=Estancia+La+Cañada,+Escagüey,+Mérida,+Venezuela", "_blank")}
+              className="w-full bg-brand-primary text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 active:scale-98 transition-all hover:bg-brand-terracotta text-xs tracking-wider uppercase shadow-md shadow-brand-primary/10 cursor-pointer"
+            >
+              <Compass size={16} />
+              Cómo Llegar (Google Maps)
+            </button>
           </div>
         </div>
 

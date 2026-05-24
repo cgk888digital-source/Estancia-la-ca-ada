@@ -151,10 +151,7 @@ const ExcursionCard: React.FC<{ exp: Experience }> = ({ exp }) => {
           </>
         )}
 
-        {/* Points badge */}
-        <div className="absolute top-4 right-4 z-10 bg-brand-accent/90 backdrop-blur-md text-white text-[9px] uppercase tracking-widest font-bold py-1.5 px-3 rounded-full">
-          +{exp.points} pts
-        </div>
+
 
         {/* Category badge */}
         <div className="absolute bottom-4 left-4 z-10">

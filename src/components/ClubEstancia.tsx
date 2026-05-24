@@ -8,9 +8,9 @@ const ClubEstancia: React.FC = () => {
   const progress = (points / nextLevelPoints) * 100;
 
   const benefits = [
-    { id: 1, title: "Cena de Bienvenida", cost: 500, icon: <Gift size={18} /> },
-    { id: 2, title: "Cabalgata al Atardecer", cost: 800, icon: <Sparkles size={18} /> },
-    { id: 3, title: "Upgrade de Habitación", cost: 1200, icon: <Crown size={18} /> },
+    { id: 1, title: "Almuerzo Especial para Dos", cost: 600, icon: <Gift size={18} /> },
+    { id: 2, title: "Botella de Vino de la Cava", cost: 800, icon: <Sparkles size={18} /> },
+    { id: 3, title: "Descuento de $50 USD en Reserva", cost: 1500, icon: <Crown size={18} /> },
   ];
 
   const history = [
@@ -92,7 +92,7 @@ const ClubEstancia: React.FC = () => {
             {
               icon: <ShoppingBag size={20} />,
               title: 'Acumula con cada consumo',
-              desc: 'Gana 1 punto por cada $1 que gastes en hospedaje, restaurante o excursiones.',
+              desc: 'Gana 1 punto por cada $1 gastado en hospedaje, restaurante o consumos de bodega. (Las excursiones se pagan por separado a terceros y no acumulan puntos).',
               color: 'bg-brand-accent/10 text-brand-accent',
             },
             {
@@ -104,7 +104,7 @@ const ClubEstancia: React.FC = () => {
             {
               icon: <Repeat2 size={20} />,
               title: 'Canjea tus puntos',
-              desc: 'Usa tus puntos para cenas de bienvenida, upgrades de habitación, cabalgatas y más.',
+              desc: 'Usa tus puntos acumulados para obtener almuerzos especiales, botellas de vino de la cava o descuentos en tus futuras reservas.',
               color: 'bg-brand-olive/10 text-brand-olive',
             },
           ].map((step, i) => (
@@ -213,14 +213,14 @@ const ClubEstancia: React.FC = () => {
           <span className="text-brand-terracotta text-[10px] uppercase tracking-[0.4em] font-bold block mb-1">El regalo perfecto</span>
           <h3 className="text-xl font-serif">Gift Cards</h3>
           <p className="text-brand-primary/50 text-xs mt-1 leading-relaxed">
-            Regala una experiencia única en La Cañada a tus familiares y amigos. Válidas para hospedaje, restaurante y excursiones.
+            Regala una experiencia única en La Cañada a tus familiares y amigos. Válidas únicamente para consumos de hospedaje, restaurante y nuestra selecta bodega de vinos. (Excluye excursiones externas).
           </p>
         </div>
 
         <div className="flex flex-col gap-4">
           {[
-            { value: 100, pay: 80,  discount: 20 },
-            { value: 200, pay: 160, discount: 20 },
+            { value: 100, pay: 90,  discount: 10 },
+            { value: 200, pay: 180, discount: 10 },
           ].map((card) => (
             <motion.div
               key={card.value}
@@ -280,7 +280,7 @@ const ClubEstancia: React.FC = () => {
         </div>
 
         <p className="text-center text-brand-primary/40 text-[10px] mt-4 leading-relaxed">
-          Las Gift Cards son válidas por 12 meses · Sin restricciones de temporada
+          Las Gift Cards son válidas por 12 meses · Pago exclusivo en dólares (USD) · Excluye excursiones externas
         </p>
       </section>
 
