@@ -6,15 +6,17 @@ import Excursions from './components/Excursions'
 import BookingFlow from './components/BookingFlow'
 import ClubEstancia from './components/ClubEstancia'
 import BookingSuccess from './components/BookingSuccess'
+import CabinsGallery from './components/CabinsGallery'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Home, Utensils, Calendar, Award, ChevronLeft } from 'lucide-react'
+import { Home, Utensils, Calendar, Award, ChevronLeft, Bed } from 'lucide-react'
 
-type Screen = 'home' | 'restaurant' | 'excursions' | 'club' | 'cava' | 'success'
+type Screen = 'home' | 'restaurant' | 'excursions' | 'club' | 'cava' | 'success' | 'cabins'
 
 function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home')
   const [isBookingOpen, setIsBookingOpen] = useState(false)
   const [bookingData, setBookingData] = useState<any>(null)
+  const [bookingInitialUnitId, setBookingInitialUnitId] = useState<number | null>(null)
 
   const slideVariants = {
     initial: (direction: number) => ({
@@ -36,7 +38,7 @@ function App() {
   const [direction, setDirection] = useState(0)
 
   const navigateTo = (screen: Screen) => {
-    const screenOrder: Screen[] = ['home', 'restaurant', 'excursions', 'club', 'success']
+    const screenOrder: Screen[] = ['home', 'cabins', 'restaurant', 'excursions', 'club', 'success']
     const currentIndex = screenOrder.indexOf(currentScreen as any)
     const nextIndex = screenOrder.indexOf(screen as any)
     
@@ -48,6 +50,8 @@ function App() {
     <div className="bg-[#121212] h-[100dvh] flex justify-center items-start md:py-8 overflow-hidden">
       {/* Mobile Container */}
       <div className="w-full max-w-[430px] h-[100dvh] md:h-[850px] bg-brand-neutral relative shadow-2xl md:rounded-[3rem] overflow-hidden flex flex-col">
+        {/* Modal Portal Root */}
+        <div id="modal-root" className="absolute inset-0 pointer-events-none z-[160]" />
         
         {/* Screen Content */}
         <div className="flex-grow overflow-hidden relative">
@@ -79,8 +83,19 @@ function App() {
                 <EstanciaHome 
                   onOpenMenu={() => navigateTo('restaurant')} 
                   onOpenExcursions={() => navigateTo('excursions')}
-                  onOpenBooking={() => setIsBookingOpen(true)}
+                  onOpenBooking={() => {
+                    setBookingInitialUnitId(null);
+                    setIsBookingOpen(true);
+                  }}
                   onNavigate={(s) => navigateTo(s)}
+                />
+              )}
+              {currentScreen === 'cabins' && (
+                <CabinsGallery 
+                  onBookCabin={(cabinId) => {
+                    setBookingInitialUnitId(cabinId);
+                    setIsBookingOpen(true);
+                  }}
                 />
               )}
               {currentScreen === 'restaurant' && (
@@ -110,12 +125,18 @@ function App() {
         </div>
 
         {/* Bottom Navigation Bar */}
-        <nav className="shrink-0 bg-white/80 backdrop-blur-xl border-t border-brand-primary/5 px-8 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] flex justify-between items-center z-50">
+        <nav className="shrink-0 bg-white/80 backdrop-blur-xl border-t border-brand-primary/5 px-4 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] flex justify-between items-center z-50">
           <NavItem 
             icon={<Home size={22} />} 
             label="Inicio" 
             isActive={currentScreen === 'home'} 
             onClick={() => navigateTo('home')} 
+          />
+          <NavItem 
+            icon={<Bed size={22} />} 
+            label="Cabañas" 
+            isActive={currentScreen === 'cabins'} 
+            onClick={() => navigateTo('cabins')} 
           />
           <NavItem 
             icon={<Utensils size={22} />} 
@@ -127,7 +148,10 @@ function App() {
             icon={<Calendar size={22} />} 
             label="Reservas" 
             isActive={isBookingOpen} 
-            onClick={() => setIsBookingOpen(true)} 
+            onClick={() => {
+              setBookingInitialUnitId(null);
+              setIsBookingOpen(true);
+            }} 
           />
           <NavItem 
             icon={<Award size={22} />} 
@@ -141,10 +165,15 @@ function App() {
         <AnimatePresence>
           {isBookingOpen && (
             <BookingFlow 
-              onClose={() => setIsBookingOpen(false)} 
+              onClose={() => {
+                setIsBookingOpen(false);
+                setBookingInitialUnitId(null);
+              }} 
+              initialUnitId={bookingInitialUnitId}
               onComplete={(data) => {
                 setBookingData(data);
                 setIsBookingOpen(false);
+                setBookingInitialUnitId(null);
                 navigateTo('success');
               }}
             />

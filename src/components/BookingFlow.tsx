@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, X, Users, Dog, Calendar as CalendarIcon, Award } from 'lucide-react';
+import { accommodationOptions } from '../data/accommodations';
 
 interface BookingFlowProps {
   onClose: () => void;
   onComplete: (data: { unitName: string; checkIn: string; checkOut: string; bookingCode: string }) => void;
+  initialUnitId?: number | null;
 }
 
-const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
+const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialUnitId }) => {
   const [step, setStep] = useState(1);
   const [selectedDates, setSelectedDates] = useState<{ start: Date | null, end: Date | null }>({
     start: null,
@@ -15,7 +17,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
   });
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [occupants, setOccupants] = useState({ adults: 1, children: 0, pets: 0 });
-  const [selectedUnit, setSelectedUnit] = useState<number | null>(null);
+  const [selectedUnit, setSelectedUnit] = useState<number | null>(initialUnitId ?? null);
   const [galleryIndex, setGalleryIndex] = useState<Record<number, number>>({});
 
   // Calendar Logic
@@ -96,118 +98,6 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete }) => {
 
   const nextMonth = () => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() + 1)));
   const prevMonth = () => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() - 1)));
-
-  const accommodationOptions = [
-    {
-      id: 1,
-      title: "Suites La Vega",
-      type: "Suite Comunicante",
-      price: 320,
-      capacity: "Hasta 7 Personas",
-      pets: "Consultar",
-      image: "/assets/suites/la-vega/exterior.jpg",
-      gallery: [
-        "/assets/suites/la-vega/exterior.jpg",
-        "/assets/suites/la-vega/terraza.png",
-        "/assets/suites/la-vega/hab-suite.png",
-        "/assets/suites/la-vega/hab-king.png",
-        "/assets/suites/la-vega/hab-matrimonial.png",
-        "/assets/suites/la-vega/hab-literas.png",
-        "/assets/suites/la-vega/hab-triple.png",
-      ],
-      description: "2 habitaciones comunicantes con baños propios y terrazas a ambos lados.",
-      rooms: ["Matrimonial (cama King)", "2 literas (4 camas) o litera + individual (3 camas)"],
-      amenities: ["2 Baños Privados", "Terrazas Dobles", "Vistas a la Montaña"]
-    },
-    {
-      id: 2,
-      title: "Cabaña La Lomita",
-      type: "Cabaña Privada",
-      price: 420,
-      capacity: "Hasta 6 Personas",
-      pets: "Pet Friendly",
-      image: "/assets/suites/la-lomita/exterior.png",
-      gallery: [
-        "/assets/suites/la-lomita/exterior.png",
-        "/assets/suites/la-lomita/salon-chimenea.png",
-        "/assets/suites/la-lomita/salon.png",
-        "/assets/suites/la-lomita/hab-1.png",
-        "/assets/suites/la-lomita/hab-2.png",
-        "/assets/suites/la-lomita/hab-3.png",
-        "/assets/suites/la-lomita/cocina.png",
-        "/assets/suites/la-lomita/bano-1.png",
-        "/assets/suites/la-lomita/bano-2.png",
-      ],
-      description: "Cabaña independiente con 3 habitaciones, salón con chimenea de piedra, mini cocina equipada y terraza privada.",
-      rooms: ["3 Habitaciones dobles", "Salón con chimenea", "Mini cocina equipada"],
-      amenities: ["3 Baños Privados", "Chimenea de Piedra", "Terraza", "Mini Cocina"]
-    },
-    {
-      id: 4,
-      title: "Cabaña Mitibibo",
-      type: "Cabaña Privada",
-      price: 400,
-      capacity: "Hasta 8 Personas",
-      pets: "Pet Friendly",
-      image: "/assets/suites/mitibibo/exterior.png",
-      gallery: [
-        "/assets/suites/mitibibo/exterior.png",
-        "/assets/suites/mitibibo/salon-cocina.png",
-        "/assets/suites/mitibibo/salon.png",
-        "/assets/suites/mitibibo/cocina.png",
-        "/assets/suites/mitibibo/hab-1.png",
-        "/assets/suites/mitibibo/hab-2.png",
-        "/assets/suites/mitibibo/hab-3.png",
-      ],
-      description: "Cabaña amarilla con paredes de piedra, salón con chimenea y ventanas panorámicas a la montaña, cocina completamente equipada.",
-      rooms: ["2 Habitaciones dobles", "1 Habitación múltiple (literas)", "Salón con chimenea"],
-      amenities: ["3 Baños Privados", "Cocina Equipada", "Chimenea", "Vistas Panorámicas"]
-    },
-    {
-      id: 5,
-      title: "Galería Llano Grande",
-      type: "Galería de Habitaciones",
-      price: 160,
-      capacity: "Hasta 3 Personas por hab.",
-      pets: "Consultar",
-      image: "/assets/suites/llano-grande/exterior.png",
-      gallery: [
-        "/assets/suites/llano-grande/exterior.png",
-        "/assets/suites/llano-grande/hab-8.png",
-        "/assets/suites/llano-grande/hab-1.png",
-        "/assets/suites/llano-grande/hab-2.png",
-        "/assets/suites/llano-grande/hab-3.png",
-        "/assets/suites/llano-grande/hab-4.png",
-        "/assets/suites/llano-grande/hab-5.png",
-        "/assets/suites/llano-grande/hab-6.png",
-        "/assets/suites/llano-grande/hab-7.png",
-      ],
-      description: "6 habitaciones únicas, cada una con su propio encanto y estilo. Desde ambientes rústicos con paredes de piedra hasta habitaciones acogedoras con detalles artesanales.",
-      rooms: ["Habitaciones dobles", "Habitaciones con litera", "Habitaciones twin", "Baño privado en cada una"],
-      amenities: ["6 Baños Privados", "Cada hab. única", "Detalles artesanales", "Flores y jardines"]
-    },
-    {
-      id: 3,
-      title: "Galería La Manita",
-      type: "Galería de Habitaciones",
-      price: 180,
-      capacity: "Hasta 3 Personas por hab.",
-      pets: "Consultar",
-      image: "/assets/suites/la-manita/exterior.png",
-      gallery: [
-        "/assets/suites/la-manita/exterior.png",
-        "/assets/suites/la-manita/fachada.png",
-        "/assets/suites/la-manita/hab-1.png",
-        "/assets/suites/la-manita/hab-2.png",
-        "/assets/suites/la-manita/hab-3.png",
-        "/assets/suites/la-manita/bano-1.png",
-        "/assets/suites/la-manita/bano-2.png",
-      ],
-      description: "6 habitaciones independientes con baño privado, techos de madera y vistas a la montaña. Cada una con cama doble y litera.",
-      rooms: ["Cama doble + litera (hasta 3 personas)", "Baño privado por habitación", "6 habitaciones disponibles"],
-      amenities: ["6 Baños Privados", "Techos de Madera", "Vistas a la Montaña"]
-    }
-  ];
 
   const selectedData = accommodationOptions.find(o => o.id === selectedUnit);
 

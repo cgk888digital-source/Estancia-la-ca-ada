@@ -194,6 +194,58 @@ const EstanciaHome: React.FC<{
           </motion.button>
         </div>
 
+        {/* Featured Cabin Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: '-60px' }}
+          transition={{ duration: 0.6 }}
+          className="bg-white rounded-[2.5rem] overflow-hidden shadow-xl shadow-black/5 border border-brand-primary/5 mt-12 p-6 space-y-5"
+        >
+          <div>
+            <span className="text-brand-terracotta text-[10px] uppercase tracking-[0.4em] font-bold block mb-1">Refugio Destacado</span>
+            <h2 className="text-2xl font-serif text-brand-primary">Cabaña La Lomita</h2>
+          </div>
+
+          <div className="relative h-60 overflow-hidden rounded-3xl">
+            <img src="/assets/suites/la-lomita/exterior.png" alt="Cabaña La Lomita" className="w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
+            <span className="absolute bottom-4 left-5 text-[10px] uppercase tracking-[0.3em] text-white/80 font-bold">Vistas al Páramo</span>
+          </div>
+
+          {/* Strip of 3 photos showing different spaces (Kitchen, Bathroom, Bedroom) */}
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { src: '/assets/suites/la-lomita/cocina.png', label: 'Cocina' },
+              { src: '/assets/suites/la-lomita/bano-1.png', label: 'Baño' },
+              { src: '/assets/suites/la-lomita/hab-1.png', label: 'Dormitorio' },
+            ].map((img, i) => (
+              <div key={i} className="h-16 overflow-hidden rounded-2xl border border-brand-primary/5 relative group">
+                <img src={img.src} alt={img.label} className="w-full h-full object-cover hover:scale-105 transition-transform" />
+                <div className="absolute inset-0 bg-black/10 flex items-end justify-center pb-1">
+                  <span className="text-[8px] text-white font-semibold uppercase tracking-widest bg-black/40 px-1.5 py-0.5 rounded-md">
+                    {img.label}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-4">
+            <p className="text-brand-primary/60 text-xs leading-relaxed">
+              Cabaña independiente de piedra con salón con chimenea, mini cocina equipada, 3 baños privados y terraza privada. El refugio perfecto de calidez y desconexión total.
+            </p>
+
+            <button
+              onClick={() => onNavigate('cabins')}
+              className="w-full py-4 bg-brand-primary hover:bg-brand-terracotta text-white font-bold rounded-2xl flex items-center justify-center gap-2 active:scale-[0.98] transition-all text-[10px] uppercase tracking-wider shadow-lg shadow-black/10"
+            >
+              <span>Explorar Todas las Cabañas</span>
+              <ChevronRight size={14} />
+            </button>
+          </div>
+        </motion.div>
+
         {/* Instalaciones Section */}
         <div className="mt-12">
           <div className="mb-8">
