@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, ChevronRight, X, Users, Dog, Bed, Eye, Calendar } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Dog, Bed, Eye, Calendar } from 'lucide-react';
 import { accommodationOptions } from '../data/accommodations';
 import type { AccommodationOption } from '../data/accommodations';
 
