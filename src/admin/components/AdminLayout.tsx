@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import {
   LayoutDashboard, ArrowDownCircle, ArrowUpCircle,
-  Users, BarChart3, Menu, X, Hotel, LogOut, UtensilsCrossed
+  Users, BarChart3, Menu, X, LogOut, UtensilsCrossed
 } from 'lucide-react'
 
 const navItems = [
@@ -34,9 +34,11 @@ const AdminLayout: React.FC = () => {
       >
         {/* Logo */}
         <div className="flex items-center gap-3 px-6 py-6 border-b border-white/10">
-          <div className="w-9 h-9 bg-[#C5A059] rounded-xl flex items-center justify-center">
-            <Hotel size={20} className="text-[#3D2B1F]" />
-          </div>
+          <img 
+            src="/assets/logo-nuevo.png" 
+            alt="Logo Estancia La Cañada" 
+            className="w-9 h-9 object-contain bg-white/95 p-1 rounded-xl shadow-inner border border-white/10"
+          />
           <div>
             <p className="text-sm font-bold leading-tight">La Cañada</p>
             <p className="text-[10px] text-white/40 uppercase tracking-widest">Administración</p>

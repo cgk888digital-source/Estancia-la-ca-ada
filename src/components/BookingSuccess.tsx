@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Check, ArrowRight, Home } from 'lucide-react';
+import { Check, ArrowRight, Home, MessageSquare } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface BookingData {
@@ -8,6 +8,32 @@ interface BookingData {
   checkIn: string;
   checkOut: string;
   bookingCode: string;
+  formData?: {
+    nombre: string;
+    apellido: string;
+    ci: string;
+    tlf: string;
+    correo: string;
+    referido?: string;
+    sigueCircuito: boolean;
+  };
+  occupants?: {
+    adults: number;
+    children: number;
+    babies: number;
+    pets: number;
+  };
+  pricing?: {
+    roomTotal: number;
+    mealsTotal: number;
+  };
+  totalStayPrice?: number;
+  depositAmount?: number;
+  remainingAmount?: number;
+  depositPercent?: number;
+  remainingPolicyText?: string;
+  selectedPayment?: 'zelle' | 'pago_movil';
+  totalNights?: number;
 }
 
 interface BookingSuccessProps {
@@ -46,31 +72,68 @@ const BookingSuccess: React.FC<BookingSuccessProps> = ({ data, onGoToClub, onBac
     frame();
   }, []);
 
+  const handleReSendWhatsApp = () => {
+    if (!data.formData) return;
+    
+    const whatsappText = `*Ficha de Reserva - Estancia La Cañada* 🏔️
+              
+*Nombre:* ${data.formData.nombre}
+*Apellido:* ${data.formData.apellido}
+*CI:* ${data.formData.ci}
+*Tlf:* ${data.formData.tlf}
+*Correo:* ${data.formData.correo}
+*Fecha de entrada:* ${data.checkIn}
+*Fecha de salida:* ${data.checkOut} (${data.totalNights || 1} ${data.totalNights === 1 ? 'noche' : 'noches'})
+*Tipo de Habitación:* ${data.unitName}
+*Cantidad adultos:* ${data.occupants?.adults || 2}
+*Cantidad de niños (3 a 12 años):* ${data.occupants?.children || 0}
+*Cantidad de bebés (0 a 2 años):* ${data.occupants?.babies || 0}
+*Persona que lo refirió:* ${data.formData.referido || 'Ninguna'}
+*Sigue la Pag. @Circuitodelaexcelencia:* ${data.formData.sigueCircuito ? 'Sí ✅' : 'No ❌'}
+
+---
+*Resumen de Pago:*
+*Hospedaje (${data.totalNights || 1} ${data.totalNights === 1 ? 'noche' : 'noches'}):* $${data.pricing?.roomTotal || 0}
+*Alimentación (${data.totalNights || 1} ${data.totalNights === 1 ? 'noche' : 'noches'}):* $${data.pricing?.mealsTotal || 0}
+*Total Estadía:* $${data.totalStayPrice || 0}
+*Monto de Adelanto Requerido (${data.depositPercent || 50}%):* $${data.depositAmount || 0}
+${data.remainingAmount !== undefined && data.remainingAmount > 0 ? `*Monto restante:* $${data.remainingAmount}\n*Política de saldo restante:* ${data.remainingPolicyText}` : '*Monto restante:* $0 (Reserva liquidada al 100%)'}
+
+*Método de Pago Seleccionado:* ${data.selectedPayment === 'zelle' ? 'Zelle' : 'Pago Móvil (Bancamiga)'}
+*Código de Reserva:* ${data.bookingCode}
+
+Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
+
+    const encodedText = encodeURIComponent(whatsappText);
+    const whatsappUrl = `https://wa.me/584141294308?text=${encodedText}`;
+    window.open(whatsappUrl, '_blank');
+  };
+
   return (
-    <div className="min-h-full bg-[#FAF9F6] flex flex-col items-center px-8 py-16">
+    <div className="min-h-full bg-[#FAF9F6] flex flex-col items-center px-6 py-10 overflow-y-auto custom-scrollbar">
       {/* Success Icon */}
       <motion.div
         initial={{ scale: 0 }}
         animate={{ scale: 1 }}
         transition={{ type: 'spring', damping: 12, stiffness: 200, delay: 0.2 }}
-        className="w-24 h-24 bg-[#C5A059]/10 rounded-full flex items-center justify-center mb-8"
+        className="w-16 h-16 bg-[#C5A059]/10 rounded-full flex items-center justify-center mb-6 shrink-0"
       >
         <motion.div
           initial={{ scale: 0.5, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ delay: 0.4 }}
         >
-          <Check size={48} className="text-[#C5A059]" strokeWidth={3} />
+          <Check size={32} className="text-[#C5A059]" strokeWidth={3} />
         </motion.div>
       </motion.div>
 
       {/* Messages */}
-      <div className="text-center space-y-4 mb-12">
+      <div className="text-center space-y-2 mb-8 shrink-0">
         <motion.h1
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
-          className="text-4xl font-serif text-brand-primary"
+          className="text-3xl font-serif text-brand-primary"
         >
           ¡Tu Estancia comienza aquí!
         </motion.h1>
@@ -78,9 +141,9 @@ const BookingSuccess: React.FC<BookingSuccessProps> = ({ data, onGoToClub, onBac
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.6 }}
-          className="text-brand-primary/70 leading-relaxed max-w-[280px] mx-auto"
+          className="text-brand-primary/70 text-xs leading-relaxed max-w-[320px] mx-auto"
         >
-          Tu reservación en <span className="font-semibold">Estancia La Cañada</span> se ha registrado satisfactoriamente. Hemos enviado los detalles y el código de confirmación a tu correo electrónico.
+          Tu reservación en <span className="font-semibold">Estancia La Cañada</span> se ha registrado satisfactoriamente. Por favor formaliza tu reserva realizando el pago correspondiente.
         </motion.p>
       </div>
 
@@ -89,42 +152,118 @@ const BookingSuccess: React.FC<BookingSuccessProps> = ({ data, onGoToClub, onBac
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.7 }}
-        className="w-full bg-white rounded-[2rem] p-8 border border-[#A65D47]/10 shadow-xl shadow-black/5 space-y-6 mb-12"
+        className="w-full bg-white rounded-[2rem] p-6 border border-[#A65D47]/10 shadow-xl shadow-black/5 space-y-4 mb-8 text-xs"
       >
         <div className="space-y-1">
-          <p className="text-[10px] uppercase tracking-[0.2em] text-brand-primary/40 font-bold">Alojamiento</p>
-          <h3 className="text-xl font-serif text-brand-wood">{data.unitName}</h3>
+          <p className="text-[9px] uppercase tracking-[0.2em] text-brand-primary/40 font-bold">Alojamiento Seleccionado</p>
+          <h3 className="text-lg font-serif text-brand-wood">{data.unitName}</h3>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1">
-            <p className="text-[10px] uppercase tracking-[0.2em] text-brand-primary/40 font-bold">Check-in</p>
-            <p className="font-medium text-brand-primary">{data.checkIn}</p>
+        <div className="grid grid-cols-2 gap-4 py-2 border-y border-brand-primary/5">
+          <div className="space-y-0.5">
+            <p className="text-[9px] uppercase tracking-[0.2em] text-brand-primary/40 font-bold">Check-in</p>
+            <p className="font-medium text-brand-primary text-xs">{data.checkIn}</p>
           </div>
-          <div className="space-y-1">
-            <p className="text-[10px] uppercase tracking-[0.2em] text-brand-primary/40 font-bold">Check-out</p>
-            <p className="font-medium text-brand-primary">{data.checkOut}</p>
+          <div className="space-y-0.5">
+            <p className="text-[9px] uppercase tracking-[0.2em] text-brand-primary/40 font-bold">Check-out</p>
+            <p className="font-medium text-brand-primary text-xs">{data.checkOut}</p>
           </div>
         </div>
 
-        <div className="pt-6 border-t border-brand-primary/5 flex justify-between items-center">
+        {data.formData && (
+          <div className="space-y-2 py-1">
+            <p className="text-[9px] uppercase tracking-[0.2em] text-brand-primary/40 font-bold">Datos del Huésped</p>
+            <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-brand-primary/70">
+              <p><span className="font-semibold">Nombre:</span> {data.formData.nombre} {data.formData.apellido}</p>
+              <p><span className="font-semibold">CI:</span> {data.formData.ci}</p>
+              <p><span className="font-semibold">Teléfono:</span> {data.formData.tlf}</p>
+              <p className="col-span-2"><span className="font-semibold">Correo:</span> {data.formData.correo}</p>
+              {data.occupants && (
+                <p className="col-span-2 mt-1 bg-brand-neutral/40 p-2 rounded-lg text-[10px] text-brand-wood">
+                  👪 <span className="font-bold">Grupo:</span> {data.occupants.adults} Ad. 
+                  {data.occupants.children > 0 && ` | ${data.occupants.children} Niñ.`}
+                  {data.occupants.babies > 0 && ` | ${data.occupants.babies} Beb.`}
+                  {data.occupants.pets > 0 && ` | ${data.occupants.pets} Masc.`}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {data.totalStayPrice && (
+          <div className="pt-3 border-t border-brand-primary/5 space-y-2 bg-[#FDFBF7] p-3.5 rounded-2xl border border-brand-primary/5">
+            <div className="flex justify-between text-[11px] text-brand-primary/70">
+              <span>Hospedaje ({data.totalNights || 1} {data.totalNights === 1 ? 'noche' : 'noches'}):</span>
+              <span className="font-semibold text-brand-primary">${data.pricing?.roomTotal || 0}</span>
+            </div>
+            <div className="flex justify-between text-[11px] text-brand-primary/70">
+              <span>Alimentación ({data.totalNights || 1} {data.totalNights === 1 ? 'noche' : 'noches'}):</span>
+              <span className="font-semibold text-brand-primary">${data.pricing?.mealsTotal || 0}</span>
+            </div>
+            <div className="flex justify-between text-[11.5px] font-semibold text-brand-primary border-t border-brand-primary/5 pt-1.5">
+              <span>Total Estadía:</span>
+              <span className="font-bold">${data.totalStayPrice}</span>
+            </div>
+            
+            <div className="flex justify-between text-[11.5px] font-bold text-brand-wood bg-brand-neutral/80 p-2 rounded-xl border border-brand-primary/5">
+              <span>Adelanto Requerido ({data.depositPercent || 50}%):</span>
+              <span className="text-brand-terracotta">${data.depositAmount}</span>
+            </div>
+
+            {data.remainingAmount !== undefined && data.remainingAmount > 0 ? (
+              <div className="space-y-1 bg-[#FAF9F6] p-2 rounded-xl border border-brand-primary/5 mt-1">
+                <div className="flex justify-between text-[11px] text-brand-primary/70">
+                  <span>Saldo Restante (50%):</span>
+                  <span className="font-bold text-brand-primary">${data.remainingAmount}</span>
+                </div>
+                {data.remainingPolicyText && (
+                  <p className="text-[9px] text-brand-terracotta font-medium leading-tight mt-0.5">
+                    ⚠️ {data.remainingPolicyText}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-100 p-2 rounded-xl text-center font-bold mt-1">
+                ✅ Reserva pre-pagada al 100%
+              </div>
+            )}
+
+            <p className="text-[9px] text-brand-primary/50 text-center italic leading-tight pt-1">
+              Método seleccionado: <span className="font-bold uppercase text-brand-wood">{data.selectedPayment === 'zelle' ? 'Zelle' : 'Pago Móvil'}</span>
+            </p>
+          </div>
+        )}
+
+        <div className="pt-4 border-t border-brand-primary/5 flex justify-between items-center">
           <div>
-            <p className="text-[10px] uppercase tracking-[0.2em] text-brand-primary/40 font-bold">Código de Reserva</p>
-            <p className="text-lg font-mono font-bold text-brand-terracotta">{data.bookingCode}</p>
+            <p className="text-[9px] uppercase tracking-[0.2em] text-brand-primary/40 font-bold">Código de Reserva</p>
+            <p className="text-base font-mono font-bold text-brand-terracotta">{data.bookingCode}</p>
           </div>
-          <div className="w-12 h-12 bg-brand-neutral rounded-xl flex items-center justify-center text-brand-terracotta border border-brand-terracotta/10">
-            <Check size={20} />
+          <div className="w-10 h-10 bg-brand-neutral rounded-xl flex items-center justify-center text-brand-terracotta border border-brand-terracotta/10">
+            <Check size={16} />
           </div>
         </div>
       </motion.div>
 
       {/* Action Buttons */}
-      <div className="w-full space-y-4">
+      <div className="w-full space-y-3 shrink-0">
+        {data.formData && (
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={handleReSendWhatsApp}
+            className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-xl shadow-emerald-600/20 text-sm"
+          >
+            <MessageSquare size={18} />
+            Enviar Ficha por WhatsApp
+          </motion.button>
+        )}
+
         <motion.button
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
           onClick={onGoToClub}
-          className="w-full bg-brand-primary text-white py-5 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-xl shadow-brand-primary/20"
+          className="w-full bg-brand-primary text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-xl shadow-brand-primary/10 text-sm"
         >
           Ir a mis puntos Club Estancia
           <ArrowRight size={18} />
@@ -134,9 +273,9 @@ const BookingSuccess: React.FC<BookingSuccessProps> = ({ data, onGoToClub, onBac
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
           onClick={onBackToHome}
-          className="w-full py-5 rounded-2xl font-bold text-brand-primary/60 flex items-center justify-center gap-2"
+          className="w-full py-4 rounded-2xl font-bold text-brand-primary/60 flex items-center justify-center gap-2 text-xs"
         >
-          <Home size={18} />
+          <Home size={16} />
           Volver al Inicio
         </motion.button>
       </div>
