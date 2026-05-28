@@ -530,9 +530,9 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                           </div>
                           {isAvailable ? (
                             <div className="text-right shrink-0">
-                              <span className="text-2xl font-serif text-brand-terracotta">${roomPriceDetails.nightlyRate}</span>
+                              <span className="text-2xl font-serif text-brand-terracotta">€{roomPriceDetails.nightlyRate}</span>
                               <p className="text-[9px] text-brand-primary/40 uppercase tracking-widest leading-none">/ noche total</p>
-                              <p className="text-[8px] text-brand-primary/30 mt-1 font-mono">Hab: ${roomPriceDetails.roomNightly} | Alim: ${roomPriceDetails.mealsNightly}</p>
+                              <p className="text-[8px] text-brand-primary/30 mt-1 font-mono">Hab: €{roomPriceDetails.roomNightly} | Alim: €{roomPriceDetails.mealsNightly}</p>
                             </div>
                           ) : (
                             <div className="text-right shrink-0 opacity-40">
@@ -721,25 +721,25 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                 <div className="pt-3 border-t border-brand-primary/5 space-y-2.5 text-xs">
                   <div className="flex justify-between text-brand-primary/60">
                     <span>Hospedaje ({totalNights} {totalNights === 1 ? 'noche' : 'noches'}):</span>
-                    <span className="font-semibold font-mono">${pricing.roomTotal}</span>
+                    <span className="font-semibold font-mono">€{pricing.roomTotal}</span>
                   </div>
                   <div className="flex justify-between text-brand-primary/60">
                     <span>Alimentación ({totalNights} {totalNights === 1 ? 'noche' : 'noches'}):</span>
-                    <span className="font-semibold font-mono">${pricing.mealsTotal}</span>
+                    <span className="font-semibold font-mono">€{pricing.mealsTotal}</span>
                   </div>
                   <div className="flex justify-between font-bold text-sm pt-2 border-t border-brand-primary/5">
                     <span className="text-brand-primary">Total Estadía:</span>
-                    <span className="text-brand-wood font-mono">${totalStayPrice}</span>
+                    <span className="text-brand-wood font-mono">€{totalStayPrice}</span>
                   </div>
                   
                   <div className="flex justify-between p-3 bg-brand-neutral/40 rounded-xl font-serif text-brand-wood text-sm mt-2">
                     <span>Adelanto Requerido ({depositPercent}%):</span>
-                    <span className="font-bold text-brand-terracotta font-mono">${depositAmount}</span>
+                    <span className="font-bold text-brand-terracotta font-mono">€{depositAmount}</span>
                   </div>
                   {remainingAmount > 0 && (
                     <div className="flex justify-between text-brand-primary/60 px-3 text-[11px] font-mono">
                       <span>Saldo restante (50%):</span>
-                      <span>${remainingAmount}</span>
+                      <span>€{remainingAmount}</span>
                     </div>
                   )}
                   <p className="text-[10px] text-brand-terracotta text-center font-medium mt-2 leading-relaxed bg-brand-terracotta/5 p-2.5 rounded-xl border border-brand-terracotta/10">
@@ -890,7 +890,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
           <div>
             <p className="text-white/50 text-[10px] uppercase tracking-[0.2em] font-bold">Total Estadía ({totalNights} {totalNights === 1 ? 'noche' : 'noches'})</p>
             <p className="text-white text-2xl font-serif">
-              {selectedUnit ? `$${totalStayPrice}` : '--'}
+              {selectedUnit ? `€${totalStayPrice}` : '--'}
             </p>
           </div>
           <button 
@@ -915,7 +915,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
         >
           <div>
             <p className="text-white/50 text-[10px] uppercase tracking-[0.2em] font-bold">{depositPercent}% para Reservar</p>
-            <p className="text-white text-2xl font-serif">${depositAmount}</p>
+            <p className="text-white text-2xl font-serif">€{depositAmount}</p>
           </div>
           <button 
             disabled={!selectedPayment}
@@ -942,11 +942,11 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
 
 ---
 *Resumen de Pago:*
-*Hospedaje (${totalNights} ${totalNights === 1 ? 'noche' : 'noches'}):* $${pricing.roomTotal}
-*Alimentación (${totalNights} ${totalNights === 1 ? 'noche' : 'noches'}):* $${pricing.mealsTotal}
-*Total Estadía:* $${totalStayPrice}
-*Monto de Adelanto Requerido (${depositPercent}%):* $${depositAmount}
-${remainingAmount > 0 ? `*Monto restante (50%):* $${remainingAmount}\n*Política de saldo restante:* ${remainingPolicyText}` : '*Monto restante:* $0 (Reserva liquidada al 100%)'}
+*Hospedaje (${totalNights} ${totalNights === 1 ? 'noche' : 'noches'}):* €${pricing.roomTotal}
+*Alimentación (${totalNights} ${totalNights === 1 ? 'noche' : 'noches'}):* €${pricing.mealsTotal}
+*Total Estadía:* €${totalStayPrice}
+*Monto de Adelanto Requerido (${depositPercent}%):* €${depositAmount}
+${remainingAmount > 0 ? `*Monto restante (50%):* €${remainingAmount}\n*Política de saldo restante:* ${remainingPolicyText}` : '*Monto restante:* €0 (Reserva liquidada al 100%)'}
 
 *Método de Pago Seleccionado:* ${selectedPayment === 'zelle' ? 'Zelle' : 'Pago Móvil (Bancamiga)'}
 *Código de Reserva:* ${bookingCode}

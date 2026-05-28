@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Utensils, Compass, Award, ChevronRight, Menu as MenuIcon, X, Home, Calendar, HelpCircle, ChevronDown, MapPin, Phone, Mail } from 'lucide-react';
+import { Utensils, Compass, Award, ChevronRight, Menu as MenuIcon, X, Home, Calendar, HelpCircle, ChevronDown, MapPin, Phone, Mail, Leaf } from 'lucide-react';
 
 const EstanciaHome: React.FC<{
   onOpenMenu: () => void,
@@ -14,23 +14,31 @@ const EstanciaHome: React.FC<{
   const faqs = [
     {
       question: "¿Qué precio tiene la habitación para 2 personas?",
-      answer: "La tarifa para 2 personas por noche ronda entre $172 y $176 en temporada baja (según la habitación). Nuestras tarifas incluyen hospedaje en habitaciones confortables y pensión completa: ¡exquisitas cenas servidas con un menú dirigido en 4 tiempos ($36/persona) y deliciosos desayunos típicos andinos ($20/persona) incluidos! 😃"
+      answer: "La tarifa para 2 personas por noche ronda entre €172 y €178 en temporada baja (según la habitación). Nuestras tarifas incluyen: hospedaje en habitaciones confortables, exquisitas cenas servidas con un menú dirigido en 4 tiempos y deliciosos desayunos típicos andinos! 😃"
     },
     {
       question: "¿Qué precio tiene la habitación para 2 adultos y 1 niño?",
-      answer: "La tarifa para 2 adultos y 1 niño (3 a 12 años) por noche ronda entre $220 y $224 en temporada baja. Incluye el hospedaje, desayunos típicos andinos para los tres, cenas de 4 tiempos para los adultos y cenas adaptadas para niños ($28). 😃"
+      answer: "La tarifa para 2 adultos y 1 niño (3 a 12 años) por noche ronda entre €222 y €226 en temporada baja. Incluye el hospedaje, desayunos típicos andinos para los tres, cenas de 4 tiempos para los adultos y cenas adaptadas para niños. 😃"
     },
     {
       question: "¿Cuál es la tarifa para 2 adultos y 2 niños?",
-      answer: "La tarifa para 2 adultos y 2 niños (3 a 12 años) por noche es de $272 en temporada baja (en nuestra Galería Llano Grande). Incluye hospedaje y alimentación completa (cenas y desayunos) para todo el grupo. Los bebés de 0 a 2 años se hospedan gratis. 😃"
+      answer: "La tarifa para 2 adultos y 2 niños (3 a 12 años) por noche es de €274 en temporada baja (en nuestra Galería Llano Grande). Incluye hospedaje y alimentación completa (cenas y desayunos) para todo el grupo. Los bebés de 0 a 2 años se hospedan gratis. 😃"
     },
     {
       question: "¿Cuál es el costo para 3 adultos?",
-      answer: "La tarifa para 3 adultos por noche ronda entre $228 y $232 en temporada baja. Incluye el hospedaje de tres personas y su alimentación completa de cenas dirigidas y desayunos típicos."
+      answer: "La tarifa para 3 adultos por noche ronda entre €228 y €232 en temporada baja. Incluye el hospedaje, cenas y desayunos para los 3."
+    },
+    {
+      question: "¿Cuánto cuesta una cabaña para 6 personas?",
+      answer: "¡Buen día! Para 6 personas tenemos 3 opciones:\n• La tarifa por 2 adultos en habitación matrimonial con cama Queen o King, entre €172 y €178 c/u.\n• Una Cabaña para 6 personas (3 habitaciones matrimoniales con 3 baños, salón con chimenea, cocina, terraza): €636.\n• Una Suite (2 habitaciones con 2 baños, cama matrimonial y 2 literas) para 6 adultos: €476.\n\nNuestras tarifas incluyen: hospedaje en habitaciones confortables, exquisitas cenas servidas con un menú dirigido en 4 tiempos y deliciosos desayunos típicos andinos! 😃"
     },
     {
       question: "¿Cuáles son las capacidades de las Cabañas Grandes?",
-      answer: "Nuestras cabañas de 3 habitaciones y 3 baños (La Lomita y Mitibibó) se reservan para un mínimo de 6 personas y admiten un máximo de 10 y 9 personas respectivamente. Cuentan con salón con chimenea de piedra, cocina equipada y estacionamiento propio."
+      answer: "Nuestras cabañas de 3 habitaciones y 3 baños (La Lomita y Mitibibó) normalmente se reservan para un mínimo de 6 personas (admitiendo un máximo de 10 y 9 personas respectivamente), pero si deseas reservarlas para menos personas, es totalmente posible. En ese caso, la tarifa base de la cabaña sola es mayor y solo se suman las comidas de las personas que se hospedan. Cuentan con salón con chimenea de piedra, cocina equipada y estacionamiento propio."
+    },
+    {
+      question: "¿Se aceptan mascotas?",
+      answer: "Solo aceptamos perros pequeños, bien portados, con sus propias camitas y con dueños responsables. Se cobra un fee adicional de €15 por día y un depósito de €50 reembolsable si la mascota no causó daños. 😃"
     },
     {
       question: "¿Aceptan hospedaje sin comidas?",
@@ -316,7 +324,12 @@ const EstanciaHome: React.FC<{
               </div>
               <div className="p-5">
                 <h3 className="text-xl font-serif text-brand-wood mb-2">Salón Principal</h3>
-                <p className="text-brand-primary/60 text-xs leading-relaxed">Un espacio amplio y elegante diseñado para reuniones sociales, eventos privados y momentos especiales en familia.</p>
+                <p className="text-brand-primary/60 text-xs leading-relaxed">
+                  Salón Estiti para cualquier tipo de eventos.
+                  <span className="block mt-1">
+                    Capacidad en mesas cuadradas o redondas hasta 90 personas, tipo teatro 60 personas, tipo escuela con mesas de convenciones 40 personas.
+                  </span>
+                </p>
               </div>
             </motion.div>
 
@@ -324,7 +337,7 @@ const EstanciaHome: React.FC<{
             <motion.div
               initial={{ opacity: 0, x: -30 }} whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.6 }}
-              className="bg-white rounded-3xl overflow-hidden shadow-lg shadow-black/5 flex h-44"
+              className="bg-white rounded-3xl overflow-hidden shadow-lg shadow-black/5 flex min-h-[11rem] h-auto"
             >
               <div className="relative w-2/5 flex-none overflow-hidden">
                 <img src="/assets/restaurante/Comedor.png" alt="Comedor" className="w-full h-full object-cover" />
@@ -332,7 +345,13 @@ const EstanciaHome: React.FC<{
               <div className="flex flex-col justify-center p-5 flex-1">
                 <span className="text-brand-terracotta text-[9px] uppercase tracking-widest font-bold mb-2">Gastronomía</span>
                 <h3 className="text-lg font-serif text-brand-wood mb-2 leading-tight">Comedor</h3>
-                <p className="text-brand-primary/60 text-[11px] leading-relaxed">Desayunos y cenas con productos frescos de la región andina.</p>
+                <p className="text-brand-primary/60 text-[11px] leading-relaxed">
+                  Comedor La Cañada. Capacidad hasta 36 comensales. En temporadas Altas se realizan hasta 3 turnos.
+                  <span className="block mt-1.5 font-medium">
+                    Horarios:
+                  </span>
+                  Desayunos a partir de las 7 am hasta las 10:30 am y Cenas entre 7:30 pm y 10:30 pm.
+                </p>
               </div>
             </motion.div>
 
@@ -396,12 +415,12 @@ const EstanciaHome: React.FC<{
               viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.7 }}
               className="relative h-72 rounded-3xl overflow-hidden shadow-lg shadow-black/5"
             >
-              <img src="/assets/instalaciones/sala-chimenea.png" alt="Sala de Chimenea" className="w-full h-full object-cover" />
+              <img src="/assets/instalaciones/sala-chimenea.png" alt="Bar Micata" className="w-full h-full object-cover" />
               <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent" />
               <div className="absolute bottom-0 left-0 right-0 p-6">
                 <span className="text-brand-accent text-[9px] uppercase tracking-[0.4em] font-bold block mb-1">Confort & Calidez</span>
-                <h3 className="text-2xl font-serif text-white mb-2">Sala de Chimenea</h3>
-                <p className="text-white/70 text-xs leading-relaxed max-w-xs">Un rincón íntimo donde el fuego de leña convierte cada velada en un momento especial.</p>
+                <h3 className="text-2xl font-serif text-white mb-2">Bar Micata</h3>
+                <p className="text-white/70 text-xs leading-relaxed max-w-xs">Bar Micata para disfrutar con familia y amigos del calor de la Chimenea y un calentadito!</p>
               </div>
             </motion.div>
 
@@ -618,13 +637,41 @@ const EstanciaHome: React.FC<{
             </div>
 
             {/* Description Copy */}
-            <div className="space-y-3">
+            <div className="space-y-4">
               <p className="text-white/80 text-xs leading-relaxed font-sans">
                 Estancia La Cañada forma parte de la prestigiosa red del <strong className="text-[#C5A059] font-serif font-medium">Circuito de la Excelencia</strong>, una selecta alianza que agrupa a las 30 mejores posadas boutique y hoteles de diseño en toda Venezuela.
               </p>
               <p className="text-white/60 text-[11px] leading-relaxed">
                 Nuestra membresía garantiza a los huéspedes un sello inquebrantable de calidad superior, confort refinado y hospitalidad excepcional, auditado de forma rigurosa para preservar la esencia del turismo de lujo en nuestro país.
               </p>
+
+              {/* Highlight Distintivo Verde */}
+              <div className="bg-emerald-950/40 border border-emerald-500/20 rounded-3xl p-5 space-y-3 shadow-inner mt-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 bg-emerald-500/10 rounded-xl flex items-center justify-center text-emerald-400 border border-emerald-500/25 shrink-0">
+                    <Leaf size={18} className="fill-emerald-400/10" />
+                  </div>
+                  <div>
+                    <span className="bg-emerald-500/20 text-emerald-300 text-[8px] uppercase tracking-widest font-bold px-2.5 py-0.5 rounded-full border border-emerald-500/30">
+                      Sostenibilidad Certificada
+                    </span>
+                    <h4 className="text-sm font-serif font-bold text-white mt-1">Galardonados con el Distintivo Verde 🌿</h4>
+                  </div>
+                </div>
+
+                {/* Imagen del Distintivo Verde */}
+                <div className="relative overflow-hidden rounded-2xl my-4 flex justify-center">
+                  <img 
+                    src="/assets/distintivo-verde.jpeg" 
+                    alt="Distintivo Verde de Sostenibilidad Turística" 
+                    className="w-full h-auto rounded-xl block scale-[1.04] origin-center"
+                  />
+                </div>
+
+                <p className="text-white/70 text-[11px] leading-relaxed">
+                  Nos enorgullece ser una de las <strong>primeras posadas de Venezuela</strong> en recibir este exclusivo galardón de sostenibilidad turística del <em>Circuito de la Excelencia</em>, respaldado por el programa <strong>AL-INVEST Verde</strong> de la <strong>Unión Europea</strong>, en reconocimiento a nuestras prácticas de economía verde y desarrollo local en el páramo andino.
+                </p>
+              </div>
             </div>
           </div>
         </motion.div>

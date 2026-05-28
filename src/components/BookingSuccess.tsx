@@ -93,11 +93,11 @@ const BookingSuccess: React.FC<BookingSuccessProps> = ({ data, onGoToClub, onBac
 
 ---
 *Resumen de Pago:*
-*Hospedaje (${data.totalNights || 1} ${data.totalNights === 1 ? 'noche' : 'noches'}):* $${data.pricing?.roomTotal || 0}
-*Alimentación (${data.totalNights || 1} ${data.totalNights === 1 ? 'noche' : 'noches'}):* $${data.pricing?.mealsTotal || 0}
-*Total Estadía:* $${data.totalStayPrice || 0}
-*Monto de Adelanto Requerido (${data.depositPercent || 50}%):* $${data.depositAmount || 0}
-${data.remainingAmount !== undefined && data.remainingAmount > 0 ? `*Monto restante:* $${data.remainingAmount}\n*Política de saldo restante:* ${data.remainingPolicyText}` : '*Monto restante:* $0 (Reserva liquidada al 100%)'}
+*Hospedaje (${data.totalNights || 1} ${data.totalNights === 1 ? 'noche' : 'noches'}):* €${data.pricing?.roomTotal || 0}
+*Alimentación (${data.totalNights || 1} ${data.totalNights === 1 ? 'noche' : 'noches'}):* €${data.pricing?.mealsTotal || 0}
+*Total Estadía:* €${data.totalStayPrice || 0}
+*Monto de Adelanto Requerido (${data.depositPercent || 50}%):* €${data.depositAmount || 0}
+${data.remainingAmount !== undefined && data.remainingAmount > 0 ? `*Monto restante:* €${data.remainingAmount}\n*Política de saldo restante:* ${data.remainingPolicyText}` : '*Monto restante:* €0 (Reserva liquidada al 100%)'}
 
 *Método de Pago Seleccionado:* ${data.selectedPayment === 'zelle' ? 'Zelle' : 'Pago Móvil (Bancamiga)'}
 *Código de Reserva:* ${data.bookingCode}
@@ -194,27 +194,27 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
           <div className="pt-3 border-t border-brand-primary/5 space-y-2 bg-[#FDFBF7] p-3.5 rounded-2xl border border-brand-primary/5">
             <div className="flex justify-between text-[11px] text-brand-primary/70">
               <span>Hospedaje ({data.totalNights || 1} {data.totalNights === 1 ? 'noche' : 'noches'}):</span>
-              <span className="font-semibold text-brand-primary">${data.pricing?.roomTotal || 0}</span>
+              <span className="font-semibold text-brand-primary">€{data.pricing?.roomTotal || 0}</span>
             </div>
             <div className="flex justify-between text-[11px] text-brand-primary/70">
               <span>Alimentación ({data.totalNights || 1} {data.totalNights === 1 ? 'noche' : 'noches'}):</span>
-              <span className="font-semibold text-brand-primary">${data.pricing?.mealsTotal || 0}</span>
+              <span className="font-semibold text-brand-primary">€{data.pricing?.mealsTotal || 0}</span>
             </div>
             <div className="flex justify-between text-[11.5px] font-semibold text-brand-primary border-t border-brand-primary/5 pt-1.5">
               <span>Total Estadía:</span>
-              <span className="font-bold">${data.totalStayPrice}</span>
+              <span className="font-bold">€{data.totalStayPrice}</span>
             </div>
             
             <div className="flex justify-between text-[11.5px] font-bold text-brand-wood bg-brand-neutral/80 p-2 rounded-xl border border-brand-primary/5">
               <span>Adelanto Requerido ({data.depositPercent || 50}%):</span>
-              <span className="text-brand-terracotta">${data.depositAmount}</span>
+              <span className="text-brand-terracotta">€{data.depositAmount}</span>
             </div>
 
             {data.remainingAmount !== undefined && data.remainingAmount > 0 ? (
               <div className="space-y-1 bg-[#FAF9F6] p-2 rounded-xl border border-brand-primary/5 mt-1">
                 <div className="flex justify-between text-[11px] text-brand-primary/70">
                   <span>Saldo Restante (50%):</span>
-                  <span className="font-bold text-brand-primary">${data.remainingAmount}</span>
+                  <span className="font-bold text-brand-primary">€{data.remainingAmount}</span>
                 </div>
                 {data.remainingPolicyText && (
                   <p className="text-[9px] text-brand-terracotta font-medium leading-tight mt-0.5">
