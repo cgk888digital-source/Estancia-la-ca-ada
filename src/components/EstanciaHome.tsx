@@ -176,7 +176,7 @@ const EstanciaHome: React.FC<{
               En el Corazón del Páramo Andino
             </h2>
             <p className="text-white/70 text-xs font-sans tracking-widest max-w-xs mx-auto uppercase">
-              Una experiencia exclusiva en el corazón de la pampa.
+              Una Experiencia exclusiva rodeados de Montañas.
             </p>
           </motion.div>
         </div>
