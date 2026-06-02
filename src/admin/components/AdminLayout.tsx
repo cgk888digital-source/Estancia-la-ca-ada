@@ -2,11 +2,12 @@ import React, { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import {
   LayoutDashboard, ArrowDownCircle, ArrowUpCircle,
-  Users, BarChart3, Menu, X, LogOut, UtensilsCrossed
+  Users, BarChart3, Menu, X, LogOut, UtensilsCrossed, Calendar
 } from 'lucide-react'
 
 const navItems = [
   { to: '/admin', label: 'Dashboard', icon: <LayoutDashboard size={20} />, end: true },
+  { to: '/admin/reservas', label: 'Planner Reservas', icon: <Calendar size={20} /> },
   { to: '/admin/ingresos', label: 'Ingresos', icon: <ArrowDownCircle size={20} /> },
   { to: '/admin/egresos', label: 'Egresos', icon: <ArrowUpCircle size={20} /> },
   { to: '/admin/empleados', label: 'Empleados', icon: <Users size={20} /> },

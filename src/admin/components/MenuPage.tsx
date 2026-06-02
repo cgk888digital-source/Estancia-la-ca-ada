@@ -61,9 +61,17 @@ export default function MenuPage() {
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  const activeSection = menu.find(s => s.id === activeTab)!
+  const activeSection = menu.find(s => s.id === activeTab)
 
   useEffect(() => { getMenu().then(setMenu) }, [])
+
+  if (!activeSection) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px] text-gray-400 font-bold text-sm">
+        Cargando menú...
+      </div>
+    )
+  }
 
   async function handleSave() {
     await saveMenu(menu)

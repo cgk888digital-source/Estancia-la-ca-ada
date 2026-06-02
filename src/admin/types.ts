@@ -33,3 +33,26 @@ export interface MonthlyData {
   ingresos: number
   egresos: number
 }
+
+export interface Booking {
+  id: string
+  guestName: string
+  guestPhone: string
+  guestEmail: string
+  accommodationId: number
+  checkIn: string
+  checkOut: string
+  guestsCount: {
+    adults: number
+    children: number
+    babies: number
+    pets: number
+  }
+  totalAmount: number
+  amountPaid: number
+  paymentStatus: 'completo' | 'parcial' | 'pendiente'
+  paymentMethod: 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque'
+  status: 'checkout_hoy' | 'checkin_hoy' | 'ocupado' | 'confirmado' | 'limpieza'
+  specialNotes?: string
+}
+
