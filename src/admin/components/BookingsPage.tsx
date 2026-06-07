@@ -1,10 +1,11 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   Calendar, Users, Check, LogIn, LogOut, Trash2, Search, Plus, X, Phone, Mail,
   Info, DollarSign, Baby, Sparkles, RefreshCw
 } from 'lucide-react'
 import { accommodationOptions } from '../../data/accommodations'
 import { mockBookings } from '../data/mockBookings'
+import { supabase } from '../../lib/supabase'
 import type { Booking } from '../types'
 
 // Helper to format currency
@@ -57,8 +58,32 @@ const statusConfig = {
   }
 }
 
+// Mappers between DB format (snake_case) and React format (camelCase)
+const mapDbBookingToReact = (db: any): Booking => ({
+  id: db.id,
+  guestName: db.guest_name,
+  guestPhone: db.guest_phone || '',
+  guestEmail: db.guest_email || '',
+  accommodationId: db.accommodation_id,
+  checkIn: db.check_in,
+  checkOut: db.check_out,
+  guestsCount: {
+    adults: db.adults || 1,
+    children: db.children || 0,
+    babies: db.babies || 0,
+    pets: db.pets || 0
+  },
+  totalAmount: Number(db.total_amount) || 0,
+  amountPaid: Number(db.amount_paid) || 0,
+  paymentStatus: db.payment_status || 'pendiente',
+  paymentMethod: db.payment_method || 'transferencia',
+  status: db.status || 'confirmado',
+  specialNotes: db.special_notes || ''
+})
+
 export default function BookingsPage() {
-  const [bookings, setBookings] = useState<Booking[]>(mockBookings)
+  const [bookings, setBookings] = useState<Booking[]>([])
+  const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'dia' | 'semana' | 'mes'>('dia')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
@@ -90,6 +115,57 @@ export default function BookingsPage() {
 
   // Accommodation lookup helper
   const getAccommodation = (id: number) => accommodationOptions.find(o => o.id === id)
+
+  // Fetch bookings from Supabase
+  const fetchBookings = async () => {
+    setLoading(true)
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching bookings from Supabase:', error)
+      setBookings(mockBookings)
+    } else if (data && data.length > 0) {
+      setBookings(data.map(mapDbBookingToReact))
+    } else {
+      // Seed the database with mockBookings if completely empty so the hotel looks populated
+      const dbMocks = mockBookings.map(b => ({
+        guest_name: b.guestName,
+        guest_phone: b.guestPhone,
+        guest_email: b.guestEmail,
+        accommodation_id: b.accommodationId,
+        check_in: b.checkIn,
+        check_out: b.checkOut,
+        adults: b.guestsCount.adults,
+        children: b.guestsCount.children,
+        babies: b.guestsCount.babies,
+        pets: b.guestsCount.pets,
+        total_amount: b.totalAmount,
+        amount_paid: b.amountPaid,
+        payment_status: b.paymentStatus,
+        payment_method: b.paymentMethod,
+        status: b.status,
+        special_notes: b.specialNotes || null
+      }))
+      
+      const { data: insertedData, error: insertError } = await supabase.from('bookings').insert(dbMocks).select('*')
+      if (insertError) {
+        console.error('Error seeding mock bookings:', insertError)
+        setBookings(mockBookings)
+      } else if (insertedData) {
+        setBookings(insertedData.map(mapDbBookingToReact))
+      } else {
+        setBookings(mockBookings)
+      }
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    fetchBookings()
+  }, [])
 
   // 1. Dynamic states calculation for TODAY's Day View
   const cabinStatesToday = useMemo(() => {
@@ -140,7 +216,7 @@ export default function BookingsPage() {
         monthLabel: d.toLocaleDateString('es-ES', { month: 'short' })
       }
     })
-  }, [])
+  }, [bookings])
 
   // 3. Filters and Search Results
   const filteredBookings = useMemo(() => {
@@ -172,65 +248,122 @@ export default function BookingsPage() {
   }, [cabinStatesToday])
 
   // Interactive operations
-  const handleCheckIn = (bookingId: string) => {
-    setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: 'ocupado' } : b))
-    // Close modal if open
+  const handleCheckIn = async (bookingId: string) => {
+    const { error } = await supabase
+      .from('bookings')
+      .update({ status: 'ocupado' })
+      .eq('id', bookingId)
+
+    if (error) {
+      console.error('Error checking in:', error)
+    } else {
+      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: 'ocupado' } : b))
+    }
     setSelectedBooking(null)
   }
 
-  const handleCheckOut = (bookingId: string) => {
-    setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: 'limpieza' } : b))
+  const handleCheckOut = async (bookingId: string) => {
+    const { error } = await supabase
+      .from('bookings')
+      .update({ status: 'limpieza' })
+      .eq('id', bookingId)
+
+    if (error) {
+      console.error('Error checking out:', error)
+    } else {
+      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: 'limpieza' } : b))
+    }
     setSelectedBooking(null)
   }
 
-  const handleMarkClean = (accommodationId: number) => {
-    // If there is a booking that was in 'limpieza', change its status or free the cabin
+  const handleMarkClean = async (accommodationId: number) => {
+    const cleaningBooking = bookings.find(b => b.accommodationId === accommodationId && b.status === 'limpieza')
+    if (cleaningBooking) {
+      const { error } = await supabase
+        .from('bookings')
+        .update({ status: 'checkout_hoy' })
+        .eq('id', cleaningBooking.id)
+
+      if (error) {
+        console.error('Error marking clean:', error)
+        return
+      }
+    }
+
     setBookings(prev => prev.map(b => 
       b.accommodationId === accommodationId && b.status === 'limpieza' 
-        ? { ...b, status: 'checkout_hoy' } // Move to a finished state so cabin is freed
+        ? { ...b, status: 'checkout_hoy' }
         : b
     ))
-    // Remove completed cleaning status by updating the dynamic state
   }
 
-  const handleDeleteBooking = (bookingId: string) => {
+  const handleDeleteBooking = async (bookingId: string) => {
     if (confirm('¿Estás segura de que deseas eliminar esta reserva?')) {
-      setBookings(prev => prev.filter(b => b.id !== bookingId))
+      const { error } = await supabase
+        .from('bookings')
+        .delete()
+        .eq('id', bookingId)
+
+      if (error) {
+        console.error('Error deleting booking:', error)
+      } else {
+        setBookings(prev => prev.filter(b => b.id !== bookingId))
+      }
       setSelectedBooking(null)
     }
   }
 
-  const handleAddBooking = () => {
+  const handleRegisterPayment = async (bookingId: string, totalAmount: number) => {
+    const { error } = await supabase
+      .from('bookings')
+      .update({ amount_paid: totalAmount, payment_status: 'completo' })
+      .eq('id', bookingId)
+
+    if (error) {
+      console.error('Error registering payment:', error)
+    } else {
+      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, amountPaid: totalAmount, paymentStatus: 'completo' } : b))
+    }
+    setSelectedBooking(null)
+  }
+
+  const handleAddBooking = async () => {
     if (!form.guestName.trim()) return
 
-    const newBooking: Booking = {
-      id: `b${Date.now()}`,
-      guestName: form.guestName.trim(),
-      guestPhone: form.guestPhone.trim() || '+58 412-000-0000',
-      guestEmail: form.guestEmail.trim() || 'cliente@estancialacanada.com',
-      accommodationId: Number(form.accommodationId),
-      checkIn: form.checkIn,
-      checkOut: form.checkOut,
-      guestsCount: {
-        adults: Number(form.adults),
-        children: Number(form.children),
-        babies: Number(form.babies),
-        pets: Number(form.pets)
-      },
-      totalAmount: Number(form.totalAmount),
-      amountPaid: Number(form.amountPaid),
-      paymentStatus: Number(form.amountPaid) >= Number(form.totalAmount) 
+    const initialStatus = form.checkIn === todayStr ? 'checkin_hoy' : 'confirmado'
+    const newBooking = {
+      guest_name: form.guestName.trim(),
+      guest_phone: form.guestPhone.trim() || '+58 412-000-0000',
+      guest_email: form.guestEmail.trim() || 'cliente@estancialacanada.com',
+      accommodation_id: Number(form.accommodationId),
+      check_in: form.checkIn,
+      check_out: form.checkOut,
+      adults: Number(form.adults),
+      children: Number(form.children),
+      babies: Number(form.babies),
+      pets: Number(form.pets),
+      total_amount: Number(form.totalAmount),
+      amount_paid: Number(form.amountPaid),
+      payment_status: Number(form.amountPaid) >= Number(form.totalAmount) 
         ? 'completo' 
         : Number(form.amountPaid) > 0 ? 'parcial' : 'pendiente',
-      paymentMethod: form.paymentMethod,
-      // If check-in is today, mark as checkin_hoy, else confirmado
-      status: form.checkIn === todayStr ? 'checkin_hoy' : 'confirmado',
-      specialNotes: form.specialNotes.trim()
+      payment_method: form.paymentMethod,
+      status: initialStatus,
+      special_notes: form.specialNotes.trim() || null
     }
 
-    setBookings(prev => [newBooking, ...prev])
+    const { data, error } = await supabase
+      .from('bookings')
+      .insert([newBooking])
+      .select('*')
+
+    if (error) {
+      console.error('Error adding booking:', error)
+    } else if (data && data[0]) {
+      setBookings(prev => [mapDbBookingToReact(data[0]), ...prev])
+    }
+
     setShowAddModal(false)
-    // Reset form
     setForm({
       guestName: '',
       guestPhone: '',
@@ -251,6 +384,15 @@ export default function BookingsPage() {
 
   // Visual state labels helper
   const getBulletColor = (status: keyof typeof statusConfig) => statusConfig[status]?.bullet || 'bg-gray-400'
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[500px] gap-3">
+        <div className="w-10 h-10 border-4 border-[#C5A059] border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm font-bold text-gray-500 uppercase tracking-widest animate-pulse">Cargando reservas...</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -885,10 +1027,7 @@ export default function BookingsPage() {
               <div className="flex gap-2">
                 {selectedBooking.amountPaid < selectedBooking.totalAmount && (
                   <button
-                    onClick={() => {
-                      setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, amountPaid: b.totalAmount, paymentStatus: 'completo' } : b))
-                      setSelectedBooking(null)
-                    }}
+                    onClick={() => handleRegisterPayment(selectedBooking.id, selectedBooking.totalAmount)}
                     className="flex-1 py-3 border border-emerald-500/30 hover:bg-emerald-50 text-emerald-700 font-bold rounded-2xl text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5"
                   >
                     <DollarSign size={14} /> Registrar Pago

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, X, Users, Dog, Calendar as CalendarIcon, Award } from 'lucide-react';
 import { accommodationOptions } from '../data/accommodations';
+import { supabase } from '../lib/supabase';
 
 interface BookingFlowProps {
   onClose: () => void;
@@ -959,6 +960,49 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
 
                 // Abrir enlace de WhatsApp en una pestaña nueva
                 window.open(whatsappUrl, '_blank');
+
+                // Guardar reserva en Supabase
+                const formatLocalDate = (d: Date) => {
+                  const yr = d.getFullYear();
+                  const mo = String(d.getMonth() + 1).padStart(2, '0');
+                  const dy = String(d.getDate()).padStart(2, '0');
+                  return `${yr}-${mo}-${dy}`;
+                };
+
+                const checkInStr = formatLocalDate(selectedDates.start);
+                const checkOutStr = formatLocalDate(selectedDates.end);
+                
+                const todayLocalStr = formatLocalDate(new Date());
+                const initialStatus = checkInStr === todayLocalStr ? 'checkin_hoy' : 'confirmado';
+
+                const notes = [
+                  formData.referido ? `Referido: ${formData.referido}` : '',
+                  formData.sigueCircuito ? 'Sigue al Circuito de la Excelencia' : '',
+                  `Cédula: ${formData.ci}`
+                ].filter(Boolean).join('. ');
+
+                supabase.from('bookings').insert([{
+                  guest_name: `${formData.nombre} ${formData.apellido}`,
+                  guest_phone: formData.tlf,
+                  guest_email: formData.correo,
+                  accommodation_id: selectedUnit,
+                  check_in: checkInStr,
+                  check_out: checkOutStr,
+                  adults: occupants.adults,
+                  children: occupants.children,
+                  babies: occupants.babies,
+                  pets: occupants.pets,
+                  total_amount: totalStayPrice,
+                  amount_paid: depositAmount,
+                  payment_status: depositPercent === 100 ? 'completo' : 'parcial',
+                  payment_method: 'transferencia',
+                  status: initialStatus,
+                  special_notes: notes
+                }]).then(({ error }) => {
+                  if (error) {
+                    console.error('Error guardando la reserva en Supabase:', error);
+                  }
+                });
 
                 onComplete({
                   unitName: selectedData.title,
