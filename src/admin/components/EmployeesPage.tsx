@@ -1,53 +1,174 @@
-import React, { useState } from 'react'
-import { Plus, Check, X, UserCheck, UserX, DollarSign } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { Plus, Check, X, UserCheck, UserX, DollarSign, Loader2 } from 'lucide-react'
 import { mockEmployees } from '../data/mockData'
 import type { Employee } from '../types'
+import { supabase } from '../../lib/supabase'
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 
+const mapDbEmployeeToReact = (db: any): Employee => ({
+  id: db.id,
+  name: db.name,
+  role: db.role,
+  salary: Number(db.salary) || 0,
+  status: db.status as 'activo' | 'inactivo',
+  hireDate: db.hire_date,
+  lastPayment: db.last_payment || '',
+  pendingPayment: db.pending_payment
+})
+
 const EmployeesPage: React.FC = () => {
-  const [employees, setEmployees] = useState<Employee[]>(mockEmployees)
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [paidId, setPaidId] = useState<string | null>(null)
   const [form, setForm] = useState({ name: '', role: '', salary: '', hireDate: '' })
   const [saved, setSaved] = useState(false)
+
+  const fetchEmployees = async () => {
+    setLoading(true)
+    const { data, error } = await supabase
+      .from('employees')
+      .select('*')
+      .order('name', { ascending: true })
+
+    if (error) {
+      console.error('Error fetching employees:', error)
+      setEmployees(mockEmployees)
+    } else if (data && data.length > 0) {
+      setEmployees(data.map(mapDbEmployeeToReact))
+    } else {
+      // Seed table with mockEmployees
+      const dbMocks = mockEmployees.map(e => ({
+        name: e.name,
+        role: e.role,
+        salary: e.salary,
+        status: e.status,
+        hire_date: e.hireDate,
+        last_payment: e.lastPayment || null,
+        pending_payment: e.pendingPayment
+      }))
+      const { data: inserted, error: insErr } = await supabase
+        .from('employees')
+        .insert(dbMocks)
+        .select('*')
+
+      if (insErr) {
+        console.error('Error seeding employees:', insErr)
+        setEmployees(mockEmployees)
+      } else if (inserted) {
+        setEmployees(inserted.map(mapDbEmployeeToReact))
+      } else {
+        setEmployees(mockEmployees)
+      }
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    fetchEmployees()
+  }, [])
 
   const active = employees.filter(e => e.status === 'activo')
   const totalPayroll = active.reduce((s, e) => s + e.salary, 0)
   const pendingCount = active.filter(e => e.pendingPayment).length
   const pendingTotal = active.filter(e => e.pendingPayment).reduce((s, e) => s + e.salary, 0)
 
-  const handlePay = (id: string) => {
+  const handlePay = async (id: string) => {
     setPaidId(id)
-    setTimeout(() => {
-      setEmployees(prev =>
-        prev.map(e => e.id === id ? { ...e, pendingPayment: false, lastPayment: new Date().toISOString().split('T')[0] } : e)
-      )
+    const today = new Date().toISOString().split('T')[0]
+    const emp = employees.find(e => e.id === id)
+
+    const { error } = await supabase
+      .from('employees')
+      .update({ pending_payment: false, last_payment: today })
+      .eq('id', id)
+
+    if (error) {
+      console.error('Error paying employee:', error)
       setPaidId(null)
-    }, 1000)
+      return
+    }
+
+    if (emp) {
+      await supabase.from('transactions').insert([{
+        date: today,
+        type: 'egreso',
+        category: 'empleados',
+        description: `Pago de sueldo — ${emp.name}`,
+        amount: emp.salary,
+        payment_method: 'transferencia',
+        related_to: emp.name
+      }])
+    }
+
+    setEmployees(prev =>
+      prev.map(e => e.id === id ? { ...e, pendingPayment: false, lastPayment: today } : e)
+    )
+    setPaidId(null)
   }
 
-  const handlePayAll = () => {
+  const handlePayAll = async () => {
     const today = new Date().toISOString().split('T')[0]
+    const pendingEmployees = employees.filter(e => e.status === 'activo' && e.pendingPayment)
+    if (pendingEmployees.length === 0) return
+
+    const { error } = await supabase
+      .from('employees')
+      .update({ pending_payment: false, last_payment: today })
+      .eq('status', 'activo')
+      .eq('pending_payment', true)
+
+    if (error) {
+      console.error('Error paying all employees:', error)
+      return
+    }
+
+    const txs = pendingEmployees.map(emp => ({
+      date: today,
+      type: 'egreso',
+      category: 'empleados',
+      description: `Pago de sueldo — ${emp.name}`,
+      amount: emp.salary,
+      payment_method: 'transferencia',
+      related_to: emp.name
+    }))
+
+    await supabase.from('transactions').insert(txs)
+
     setEmployees(prev =>
       prev.map(e => e.status === 'activo' && e.pendingPayment ? { ...e, pendingPayment: false, lastPayment: today } : e)
     )
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.name || !form.role || !form.salary) return
-    const newEmp: Employee = {
-      id: `e${Date.now()}`,
+
+    const dbEmp = {
       name: form.name,
       role: form.role,
       salary: Number(form.salary),
       status: 'activo',
-      hireDate: form.hireDate || new Date().toISOString().split('T')[0],
-      lastPayment: '',
-      pendingPayment: true,
+      hire_date: form.hireDate || new Date().toISOString().split('T')[0],
+      last_payment: null,
+      pending_payment: true
     }
-    setEmployees(prev => [newEmp, ...prev])
+
+    const { data, error } = await supabase
+      .from('employees')
+      .insert([dbEmp])
+      .select('*')
+
+    if (error) {
+      console.error('Error saving employee:', error)
+      return
+    }
+
+    if (data && data[0]) {
+      setEmployees(prev => [mapDbEmployeeToReact(data[0]), ...prev])
+    }
+
     setSaved(true)
     setTimeout(() => {
       setSaved(false)
@@ -113,7 +234,21 @@ const EmployeesPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {employees.map(emp => (
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="text-center py-16">
+                    <Loader2 size={32} className="text-[#C5A059] mx-auto animate-spin mb-3" />
+                    <p className="text-sm text-gray-400 font-medium">Cargando nómina...</p>
+                  </td>
+                </tr>
+              ) : employees.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="text-center py-16">
+                    <p className="text-sm text-gray-400 font-medium">No hay empleados registrados</p>
+                  </td>
+                </tr>
+              ) : (
+                employees.map(emp => (
                 <tr key={emp.id} className={`hover:bg-gray-50 transition-colors ${emp.status === 'inactivo' ? 'opacity-50' : ''}`}>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
@@ -168,7 +303,8 @@ const EmployeesPage: React.FC = () => {
                     )}
                   </td>
                 </tr>
-              ))}
+              ))
+              )}
             </tbody>
           </table>
         </div>

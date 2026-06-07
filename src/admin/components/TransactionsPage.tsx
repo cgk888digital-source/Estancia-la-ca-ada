@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react'
-import { Plus, Search, X, Check, CalendarDays, ChevronDown } from 'lucide-react'
+import React, { useState, useMemo, useEffect } from 'react'
+import { Plus, Search, X, Check, CalendarDays, ChevronDown, Loader2 } from 'lucide-react'
 import { mockTransactions, categoryLabels, categoryColors } from '../data/mockData'
 import type { Transaction, TransactionType, TransactionCategory, PaymentMethod } from '../types'
+import { supabase } from '../../lib/supabase'
 
 interface Props {
   typeFilter?: TransactionType
@@ -24,6 +25,17 @@ const periodLabels: Record<DatePeriod, string> = {
   personalizado: 'Personalizado',
   todo: 'Todo',
 }
+
+const mapDbTransactionToReact = (db: any): Transaction => ({
+  id: db.id,
+  date: db.date,
+  type: db.type as TransactionType,
+  category: db.category as TransactionCategory,
+  description: db.description,
+  amount: Number(db.amount) || 0,
+  paymentMethod: db.payment_method as PaymentMethod,
+  relatedTo: db.related_to || ''
+})
 
 function getDateRange(period: DatePeriod, customFrom: string, customTo: string): { from: Date | null; to: Date | null } {
   const now = new Date()
@@ -52,7 +64,8 @@ function getDateRange(period: DatePeriod, customFrom: string, customTo: string):
 }
 
 const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
-  const [transactions, setTransactions] = useState<Transaction[]>(mockTransactions)
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [categoryF, setCategoryF] = useState<TransactionCategory | 'todas'>('todas')
   const [period, setPeriod] = useState<DatePeriod>('mes')
@@ -71,6 +84,50 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
     paymentMethod: 'transferencia',
     relatedTo: '',
   })
+
+  const fetchTransactions = async () => {
+    setLoading(true)
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .order('date', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching transactions:', error)
+      setTransactions(mockTransactions)
+    } else if (data && data.length > 0) {
+      setTransactions(data.map(mapDbTransactionToReact))
+    } else {
+      // Seed table with mockTransactions
+      const dbMocks = mockTransactions.map(t => ({
+        date: t.date,
+        type: t.type,
+        category: t.category,
+        description: t.description,
+        amount: t.amount,
+        payment_method: t.paymentMethod,
+        related_to: t.relatedTo || null
+      }))
+      const { data: inserted, error: insErr } = await supabase
+        .from('transactions')
+        .insert(dbMocks)
+        .select('*')
+      
+      if (insErr) {
+        console.error('Error seeding transactions:', insErr)
+        setTransactions(mockTransactions)
+      } else if (inserted) {
+        setTransactions(inserted.map(mapDbTransactionToReact))
+      } else {
+        setTransactions(mockTransactions)
+      }
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    fetchTransactions()
+  }, [])
 
   const filtered = useMemo(() => {
     const { from, to } = getDateRange(period, customFrom, customTo)
@@ -98,10 +155,33 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   const totalEgresos = filtered.filter(t => t.type === 'egreso').reduce((s, t) => s + t.amount, 0)
   const total = typeFilter === 'ingreso' ? totalIngresos : typeFilter === 'egreso' ? totalEgresos : totalIngresos - totalEgresos
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.description || form.amount <= 0) return
-    const newTx: Transaction = { ...form, id: `t${Date.now()}` }
-    setTransactions(prev => [newTx, ...prev])
+    
+    const dbTx = {
+      date: form.date,
+      type: form.type,
+      category: form.category,
+      description: form.description,
+      amount: form.amount,
+      payment_method: form.paymentMethod,
+      related_to: form.relatedTo || null
+    }
+
+    const { data, error } = await supabase
+      .from('transactions')
+      .insert([dbTx])
+      .select('*')
+
+    if (error) {
+      console.error('Error saving transaction:', error)
+      return
+    }
+
+    if (data && data[0]) {
+      setTransactions(prev => [mapDbTransactionToReact(data[0]), ...prev])
+    }
+
     setSaved(true)
     setTimeout(() => {
       setSaved(false)
@@ -287,7 +367,14 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {filtered.length === 0 ? (
+              {loading ? (
+                <tr>
+                  <td colSpan={5} className="text-center py-16">
+                    <Loader2 size={32} className="text-[#C5A059] mx-auto animate-spin mb-3" />
+                    <p className="text-sm text-gray-400 font-medium">Cargando transacciones...</p>
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="text-center py-16">
                     <CalendarDays size={32} className="text-gray-200 mx-auto mb-3" />

@@ -1,20 +1,101 @@
-import React from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend
 } from 'recharts'
-import { TrendingUp, TrendingDown, DollarSign, Users, ArrowUpRight, ArrowDownRight } from 'lucide-react'
+import { TrendingUp, TrendingDown, DollarSign, Users, ArrowUpRight, ArrowDownRight, Loader2 } from 'lucide-react'
 import { mockTransactions, mockMonthlyData, mockEmployees, categoryLabels, categoryColors } from '../data/mockData'
+import type { Transaction, TransactionType, TransactionCategory, PaymentMethod, Employee } from '../types'
+import { supabase } from '../../lib/supabase'
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 
 const Dashboard: React.FC = () => {
-  const mayTx = mockTransactions.filter(t => t.date.startsWith('2026-05'))
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const fetchData = async () => {
+    setLoading(true)
+    const [txRes, empRes] = await Promise.all([
+      supabase.from('transactions').select('*').order('date', { ascending: false }),
+      supabase.from('employees').select('*')
+    ])
+
+    if (txRes.error) {
+      console.error('Error fetching transactions:', txRes.error)
+    } else if (txRes.data) {
+      setTransactions(txRes.data.map((db: any) => ({
+        id: db.id,
+        date: db.date,
+        type: db.type as TransactionType,
+        category: db.category as TransactionCategory,
+        description: db.description,
+        amount: Number(db.amount) || 0,
+        paymentMethod: db.payment_method as PaymentMethod,
+        relatedTo: db.related_to || ''
+      })))
+    }
+
+    if (empRes.error) {
+      console.error('Error fetching employees:', empRes.error)
+    } else if (empRes.data) {
+      setEmployees(empRes.data.map((db: any) => ({
+        id: db.id,
+        name: db.name,
+        role: db.role,
+        salary: Number(db.salary) || 0,
+        status: db.status as 'activo' | 'inactivo',
+        hireDate: db.hire_date,
+        lastPayment: db.last_payment || '',
+        pendingPayment: db.pending_payment
+      })))
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    fetchData()
+  }, [])
+
+  const txList = transactions.length > 0 ? transactions : mockTransactions
+  const empList = employees.length > 0 ? employees : mockEmployees
+
+  const mayTx = txList.filter(t => t.date.startsWith('2026-05'))
   const totalIngresos = mayTx.filter(t => t.type === 'ingreso').reduce((s, t) => s + t.amount, 0)
   const totalEgresos = mayTx.filter(t => t.type === 'egreso').reduce((s, t) => s + t.amount, 0)
   const balance = totalIngresos - totalEgresos
-  const pendingPayroll = mockEmployees.filter(e => e.pendingPayment && e.status === 'activo').reduce((s, e) => s + e.salary, 0)
+  const pendingPayroll = empList.filter(e => e.pendingPayment && e.status === 'activo').reduce((s, e) => s + e.salary, 0)
+
+  // Dynamic monthly data calculation merging mock history with live DB updates
+  const monthlyData = useMemo(() => {
+    const monthMappings: Record<string, string> = {
+      'Nov': '2025-11',
+      'Dic': '2025-12',
+      'Ene': '2026-01',
+      'Feb': '2026-02',
+      'Mar': '2026-03',
+      'Abr': '2026-04',
+      'May': '2026-05'
+    }
+
+    return mockMonthlyData.map(item => {
+      const prefix = monthMappings[item.month]
+      if (!prefix) return item
+
+      const monthTxs = txList.filter(t => t.date.startsWith(prefix))
+      if (monthTxs.length === 0) return item // fallback to mock if no real transactions
+
+      const ingresos = monthTxs.filter(t => t.type === 'ingreso').reduce((s, t) => s + t.amount, 0)
+      const egresos = monthTxs.filter(t => t.type === 'egreso').reduce((s, t) => s + t.amount, 0)
+      return {
+        month: item.month,
+        ingresos,
+        egresos
+      }
+    })
+  }, [txList])
 
   // Pie data — income breakdown
   const incomePie = mayTx
@@ -26,7 +107,7 @@ const Dashboard: React.FC = () => {
       return acc
     }, [] as { name: string; value: number; color: string }[])
 
-  const recent = [...mockTransactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6)
+  const recent = [...txList].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6)
 
   const kpis = [
     {
@@ -62,10 +143,19 @@ const Dashboard: React.FC = () => {
       icon: <Users size={20} />,
       color: 'text-violet-600',
       bg: 'bg-violet-50',
-      trend: `${mockEmployees.filter(e => e.pendingPayment && e.status === 'activo').length} empleados`,
+      trend: `${empList.filter(e => e.pendingPayment && e.status === 'activo').length} empleados`,
       trendUp: false,
     },
   ]
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
+        <Loader2 size={40} className="text-[#C5A059] animate-spin" />
+        <p className="text-sm font-medium text-gray-500">Cargando datos del panel...</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -99,7 +189,7 @@ const Dashboard: React.FC = () => {
         <div className="xl:col-span-2 bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
           <h2 className="text-sm font-bold text-gray-700 uppercase tracking-widest mb-6">Ingresos vs Egresos — Últimos 7 meses</h2>
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={mockMonthlyData} barGap={6}>
+            <BarChart data={monthlyData} barGap={6}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} />

@@ -1,49 +1,163 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, PieChart, Pie, Cell, Legend
 } from 'recharts'
+import { Loader2 } from 'lucide-react'
 import { mockTransactions, mockMonthlyData, categoryLabels, categoryColors } from '../data/mockData'
+import type { Transaction, TransactionType, TransactionCategory, PaymentMethod } from '../types'
+import { supabase } from '../../lib/supabase'
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 
 const ReportsPage: React.FC = () => {
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [loading, setLoading] = useState(true)
   const [selectedMonth, setSelectedMonth] = useState('2026-05')
 
-  const monthTx = mockTransactions.filter(t => t.date.startsWith(selectedMonth))
-  const ingresos = monthTx.filter(t => t.type === 'ingreso').reduce((s, t) => s + t.amount, 0)
-  const egresos = monthTx.filter(t => t.type === 'egreso').reduce((s, t) => s + t.amount, 0)
+  const fetchTransactions = async () => {
+    setLoading(true)
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .order('date', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching transactions:', error)
+    } else if (data) {
+      setTransactions(data.map((db: any) => ({
+        id: db.id,
+        date: db.date,
+        type: db.type as TransactionType,
+        category: db.category as TransactionCategory,
+        description: db.description,
+        amount: Number(db.amount) || 0,
+        paymentMethod: db.payment_method as PaymentMethod,
+        relatedTo: db.related_to || ''
+      })))
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    fetchTransactions()
+  }, [])
+
+  const txList = transactions.length > 0 ? transactions : mockTransactions
+
+  const monthTx = useMemo(() => {
+    return txList.filter(t => t.date.startsWith(selectedMonth))
+  }, [txList, selectedMonth])
+
+  const ingresos = useMemo(() => {
+    return monthTx.filter(t => t.type === 'ingreso').reduce((s, t) => s + t.amount, 0)
+  }, [monthTx])
+
+  const egresos = useMemo(() => {
+    return monthTx.filter(t => t.type === 'egreso').reduce((s, t) => s + t.amount, 0)
+  }, [monthTx])
 
   // Income breakdown by category
-  const incomeByCategory = monthTx
-    .filter(t => t.type === 'ingreso')
-    .reduce((acc, t) => {
-      const existing = acc.find(a => a.category === t.category)
-      if (existing) existing.value += t.amount
-      else acc.push({ category: t.category, name: categoryLabels[t.category], value: t.amount, color: categoryColors[t.category] })
-      return acc
-    }, [] as { category: string; name: string; value: number; color: string }[])
-    .sort((a, b) => b.value - a.value)
+  const incomeByCategory = useMemo(() => {
+    return monthTx
+      .filter(t => t.type === 'ingreso')
+      .reduce((acc, t) => {
+        const existing = acc.find(a => a.category === t.category)
+        if (existing) existing.value += t.amount
+        else acc.push({ category: t.category, name: categoryLabels[t.category], value: t.amount, color: categoryColors[t.category] })
+        return acc
+      }, [] as { category: string; name: string; value: number; color: string }[])
+      .sort((a, b) => b.value - a.value)
+  }, [monthTx])
 
   // Expense breakdown by category
-  const expenseByCategory = monthTx
-    .filter(t => t.type === 'egreso')
-    .reduce((acc, t) => {
-      const existing = acc.find(a => a.category === t.category)
-      if (existing) existing.value += t.amount
-      else acc.push({ category: t.category, name: categoryLabels[t.category], value: t.amount, color: categoryColors[t.category] })
-      return acc
-    }, [] as { category: string; name: string; value: number; color: string }[])
-    .sort((a, b) => b.value - a.value)
+  const expenseByCategory = useMemo(() => {
+    return monthTx
+      .filter(t => t.type === 'egreso')
+      .reduce((acc, t) => {
+        const existing = acc.find(a => a.category === t.category)
+        if (existing) existing.value += t.amount
+        else acc.push({ category: t.category, name: categoryLabels[t.category], value: t.amount, color: categoryColors[t.category] })
+        return acc
+      }, [] as { category: string; name: string; value: number; color: string }[])
+      .sort((a, b) => b.value - a.value)
+  }, [monthTx])
+
+  // Dynamic monthly data calculation merging mock history with live DB updates
+  const monthlyData = useMemo(() => {
+    const monthMappings: Record<string, string> = {
+      'Nov': '2025-11',
+      'Dic': '2025-12',
+      'Ene': '2026-01',
+      'Feb': '2026-02',
+      'Mar': '2026-03',
+      'Abr': '2026-04',
+      'May': '2026-05'
+    }
+
+    return mockMonthlyData.map(item => {
+      const prefix = monthMappings[item.month]
+      if (!prefix) return item
+
+      const monthTxs = txList.filter(t => t.date.startsWith(prefix))
+      if (monthTxs.length === 0) return item // fallback to mock if no real transactions
+
+      const ingresos = monthTxs.filter(t => t.type === 'ingreso').reduce((s, t) => s + t.amount, 0)
+      const egresos = monthTxs.filter(t => t.type === 'egreso').reduce((s, t) => s + t.amount, 0)
+      return {
+        month: item.month,
+        ingresos,
+        egresos
+      }
+    })
+  }, [txList])
 
   // Net profit trend
-  const netTrend = mockMonthlyData.map(m => ({
-    ...m,
-    neto: m.ingresos - m.egresos
-  }))
+  const netTrend = useMemo(() => {
+    return monthlyData.map(m => ({
+      ...m,
+      neto: m.ingresos - m.egresos
+    }))
+  }, [monthlyData])
 
   const margin = ingresos > 0 ? ((ingresos - egresos) / ingresos * 100) : 0
+
+  // Extract all unique months in transactions to populate reports selector dynamically
+  const availableMonths = useMemo(() => {
+    const monthsSet = new Set<string>()
+    // Always include mock baseline months
+    monthsSet.add('2026-05')
+    monthsSet.add('2026-04')
+    monthsSet.add('2026-03')
+    
+    txList.forEach(t => {
+      if (t.date && t.date.length >= 7) {
+        monthsSet.add(t.date.substring(0, 7))
+      }
+    })
+
+    return Array.from(monthsSet).sort().reverse()
+  }, [txList])
+
+  const formatMonthLabel = (yrMo: string) => {
+    const [year, month] = yrMo.split('-')
+    const monthNames: Record<string, string> = {
+      '01': 'Enero', '02': 'Febrero', '03': 'Marzo', '04': 'Abril',
+      '05': 'Mayo', '06': 'Junio', '07': 'Julio', '08': 'Agosto',
+      '09': 'Septiembre', '10': 'Octubre', '11': 'Noviembre', '12': 'Diciembre'
+    }
+    return `${monthNames[month] || month} ${year}`
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
+        <Loader2 size={40} className="text-[#C5A059] animate-spin" />
+        <p className="text-sm font-medium text-gray-500">Cargando reportes...</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -56,11 +170,11 @@ const ReportsPage: React.FC = () => {
           <select
             value={selectedMonth}
             onChange={e => setSelectedMonth(e.target.value)}
-            className="text-sm outline-none bg-transparent text-gray-700 cursor-pointer"
+            className="text-sm outline-none bg-transparent text-gray-700 cursor-pointer font-bold"
           >
-            <option value="2026-05">Mayo 2026</option>
-            <option value="2026-04">Abril 2026</option>
-            <option value="2026-03">Marzo 2026</option>
+            {availableMonths.map(m => (
+              <option key={m} value={m}>{formatMonthLabel(m)}</option>
+            ))}
           </select>
         </div>
       </div>
