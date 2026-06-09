@@ -40,7 +40,7 @@ const CabinsGallery: React.FC<CabinsGalleryProps> = ({ onBookCabin }) => {
         
         <div className="relative z-20 space-y-2">
           <span className="text-[10px] tracking-[0.3em] font-bold text-[#C5A059] uppercase">Nuestra Estancia</span>
-          <h1 className="text-4xl font-serif leading-none">Nuestros Refugios</h1>
+          <h1 className="text-4xl font-serif leading-none">Nuestros Hospedajes</h1>
           <p className="text-xs text-white/70 max-w-[320px] font-light leading-relaxed">
             Descubre nuestras cabañas de montaña y habitaciones boutique diseñadas para tu máximo confort.
           </p>
@@ -184,7 +184,7 @@ const CabinsGallery: React.FC<CabinsGalleryProps> = ({ onBookCabin }) => {
               >
                 <div className="space-y-2">
                   <div className="flex justify-between items-baseline">
-                    <span className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Descripción del Refugio</span>
+                    <span className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Descripción del Hospedaje</span>
                     <span className="text-[#C5A059] font-serif text-xl">${selectedCabin.price} / noche</span>
                   </div>
                   <p className="text-white/70 text-xs leading-relaxed font-light">

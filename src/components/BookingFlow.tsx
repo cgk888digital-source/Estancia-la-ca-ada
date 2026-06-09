@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, ChevronRight, X, Users, Dog, Calendar as CalendarIcon, Award } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Users, Dog, Calendar as CalendarIcon, Award, Check } from 'lucide-react';
 import { accommodationOptions } from '../data/accommodations';
 import { supabase } from '../lib/supabase';
 
@@ -18,8 +18,9 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
   });
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [occupants, setOccupants] = useState({ adults: 2, children: 0, babies: 0, pets: 0 });
-  const [selectedUnit, setSelectedUnit] = useState<number | null>(initialUnitId ?? null);
+  const [selectedUnits, setSelectedUnits] = useState<number[]>(initialUnitId ? [initialUnitId] : []);
   const [galleryIndex, setGalleryIndex] = useState<Record<number, number>>({});
+  const [mealsInfoOpen, setMealsInfoOpen] = useState(false);
 
   // Ficha de Reserva & Payment state
   const [formData, setFormData] = useState({
@@ -57,7 +58,9 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
 
   const getRoomPrice = (roomId: number, isDecember: boolean) => {
     switch (roomId) {
-      case 1: // Suite La Vega
+      case 1: // Suite La Vega (6p)
+      case 6: // Suite La Vega (5p)
+      case 7: // Suite La Vega (4p)
         return isDecember ? 158 : 137;
       case 2: // Cabaña La Lomita
         return isDecember ? 337 : 297;
@@ -87,42 +90,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
     };
   };
 
-  const isRoomAvailable = (roomId: number, adults: number, children: number) => {
-    const totalOccupants = adults + children;
-    switch (roomId) {
-      case 1: // Suite La Vega: Max 6
-        return totalOccupants <= 6;
-      case 2: // Cabaña La Lomita: Min 6 Personas, Max 10
-        return totalOccupants >= 6 && totalOccupants <= 10;
-      case 4: // Cabaña Mitibibo: Min 6 Personas, Max 9
-        return totalOccupants >= 6 && totalOccupants <= 9;
-      case 5: // Galería Llano Grande: Max 4
-        return totalOccupants <= 4;
-      case 3: // Galería La Manita: Max 3
-        return totalOccupants <= 3;
-      default:
-        return false;
-    }
-  };
 
-  const getRoomAvailabilityError = (roomId: number, adults: number, children: number) => {
-    const totalOccupants = adults + children;
-    if (roomId === 2 || roomId === 4) {
-      if (totalOccupants < 6) {
-        return "Mínimo 6 personas requeridas para cabañas grandes";
-      }
-      const max = roomId === 2 ? 10 : 9;
-      if (totalOccupants > max) {
-        return `Excede capacidad máxima (Máx ${max} personas)`;
-      }
-    } else {
-      const max = roomId === 1 ? 6 : (roomId === 5 ? 4 : 3);
-      if (totalOccupants > max) {
-        return `Excede capacidad máxima (Máx ${max} personas)`;
-      }
-    }
-    return null;
-  };
 
   const copyToClipboard = (text: string, fieldName: string) => {
     navigator.clipboard.writeText(text);
@@ -210,7 +178,9 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
   const prevMonth = () => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() - 1)));
 
 
-  const selectedData = accommodationOptions.find(o => o.id === selectedUnit);
+  const selectedData = selectedUnits.length > 0 
+    ? accommodationOptions.filter(o => selectedUnits.includes(o.id))
+    : [];
   const totalNights = selectedDates.start && selectedDates.end
     ? Math.ceil(Math.abs(selectedDates.end.getTime() - selectedDates.start.getTime()) / (1000 * 60 * 60 * 24))
     : 1;
@@ -218,10 +188,46 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
   const isDecember = selectedDates.start ? getSeason(selectedDates.start) === 'dec' : false;
   const isHighSeason = selectedDates.start ? getSeason(selectedDates.start) !== 'low' : false;
 
-  const pricing = selectedUnit
-    ? calculateStayPrice(selectedUnit, occupants.adults, occupants.children, totalNights, isDecember)
-    : { roomNightly: 0, mealsNightly: 0, roomTotal: 0, mealsTotal: 0, nightlyRate: 0, totalStayPrice: 0 };
+  const getRoomMaxCapacity = (roomId: number): number => {
+    switch (roomId) {
+      case 1: return 6; // Suite 6p
+      case 6: return 5; // Suite 5p
+      case 7: return 4; // Suite 4p
+      case 2: return 10; // Cabaña La Lomita
+      case 4: return 9; // Cabaña Mitibibo
+      case 5: return 2; // Llano Grande Matrimonial King
+      case 8: return 4; // Llano Grande King + Litera
+      case 9: return 4; // Llano Grande Queen + 2 Camas
+      case 3: return 3; // Galería La Manita
+      default: return 0;
+    }
+  };
 
+  const selectedCapacity = selectedUnits.reduce((acc, id) => acc + getRoomMaxCapacity(id), 0);
+  const totalOccupants = occupants.adults + occupants.children;
+  const isCapacitySufficient = selectedCapacity >= totalOccupants;
+
+  const getMultiRoomPricing = () => {
+    if (selectedUnits.length === 0) {
+      return { roomNightly: 0, mealsNightly: 0, roomTotal: 0, mealsTotal: 0, nightlyRate: 0, totalStayPrice: 0 };
+    }
+    let totalRoomNightly = 0;
+    selectedUnits.forEach(id => {
+      totalRoomNightly += getRoomPrice(id, isDecember);
+    });
+    const mealsNightlyRate = (occupants.adults * 56) + (occupants.children * 48);
+    const nightlyRate = totalRoomNightly + mealsNightlyRate;
+    return {
+      roomNightly: totalRoomNightly,
+      mealsNightly: mealsNightlyRate,
+      roomTotal: totalRoomNightly * totalNights,
+      mealsTotal: mealsNightlyRate * totalNights,
+      nightlyRate: nightlyRate,
+      totalStayPrice: nightlyRate * totalNights
+    };
+  };
+
+  const pricing = getMultiRoomPricing();
   const totalStayPrice = pricing.totalStayPrice;
 
   // Lógica dinámica de depósito
@@ -282,7 +288,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
             >
               <div>
                 <h2 className="text-4xl font-serif mb-2">Seleccione sus fechas</h2>
-                <p className="text-brand-primary/60">Disfrute de la tranquilidad de la pampa.</p>
+                <p className="text-brand-primary/60">Disfrute de la tranquilidad del páramo.</p>
               </div>
 
               <div className="bg-white rounded-[2.5rem] p-8 shadow-xl shadow-black/5 border border-brand-primary/5">
@@ -387,7 +393,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                 <OccupantRow icon={<Users size={28} />} label="Adultos" sub="Mayores de 12 años" value={occupants.adults} onUpdate={(d) => updateOccupant('adults', d)} />
                 <OccupantRow icon={<Users size={28} className="scale-75" />} label="Niños" sub="De 3 a 12 años" value={occupants.children} onUpdate={(d) => updateOccupant('children', d)} />
                 <OccupantRow icon={<Users size={28} className="scale-50" />} label="Bebés" sub="De 0 a 2 años" value={occupants.babies} onUpdate={(d) => updateOccupant('babies', d)} />
-                <OccupantRow icon={<Dog size={28} />} label="Mascotas" sub="Hasta 15kg" value={occupants.pets} onUpdate={(d) => updateOccupant('pets', d)} hasBadge />
+                <OccupantRow icon={<Dog size={28} />} label="Mascotas" sub="Perros pequeños hasta 5kg" value={occupants.pets} onUpdate={(d) => updateOccupant('pets', d)} hasBadge />
               </div>
 
               <AnimatePresence>
@@ -421,8 +427,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                   <ChevronLeft size={20} />
                 </button>
                 <div>
-                  <h2 className="text-4xl font-serif mb-2">Elija su refugio</h2>
-                  <p className="text-brand-primary/60">19 cabañas y 8 habitaciones boutique.</p>
+                  <h2 className="text-4xl font-serif mb-2">Elija su Hospedaje</h2>
+                  <p className="text-brand-primary/60">2 cabañas, 5 Suites y 12 habitaciones.</p>
                 </div>
               </div>
 
@@ -439,26 +445,34 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                     setGalleryIndex(prev => ({ ...prev, [opt.id]: (currentImg - 1 + total) % total }));
                   };
 
-                  const isAvailable = isRoomAvailable(opt.id, occupants.adults, occupants.children);
-                  const availabilityError = getRoomAvailabilityError(opt.id, occupants.adults, occupants.children);
-                  const roomPriceDetails = calculateStayPrice(opt.id, occupants.adults, occupants.children, totalNights, isDecember);
+                  const displayMealsAdults = Math.min(occupants.adults, getRoomMaxCapacity(opt.id));
+                  const displayMealsChildren = Math.min(occupants.children, Math.max(0, getRoomMaxCapacity(opt.id) - displayMealsAdults));
+                  const roomPriceDetails = calculateStayPrice(opt.id, displayMealsAdults, displayMealsChildren, totalNights, isDecember);
 
                   return (
                     <motion.div
                       key={opt.id}
                       onClick={() => {
-                        if (isAvailable) {
-                          setSelectedUnit(opt.id);
-                        }
+                        setSelectedUnits(prev => {
+                          if (prev.includes(opt.id)) {
+                            return prev.filter(id => id !== opt.id);
+                          } else {
+                            return [...prev, opt.id];
+                          }
+                        });
                       }}
-                      whileTap={isAvailable ? { scale: 0.98 } : {}}
-                      className={`w-full text-left bg-white rounded-[2.5rem] overflow-hidden shadow-xl shadow-black/5 border-2 transition-all relative
-                        ${!isAvailable ? 'opacity-60 cursor-not-allowed bg-brand-neutral/20 grayscale-50' : 'cursor-pointer'}
-                        ${selectedUnit === opt.id ? 'border-brand-terracotta' : 'border-transparent'}
+                      whileTap={{ scale: 0.98 }}
+                      className={`w-full text-left bg-white rounded-[2.5rem] overflow-hidden shadow-xl shadow-black/5 border-2 transition-all relative cursor-pointer
+                        ${selectedUnits.includes(opt.id) ? 'border-brand-terracotta' : 'border-transparent'}
                       `}
                     >
                       {/* Gallery */}
                       <div className="relative aspect-video overflow-hidden">
+                        {selectedUnits.includes(opt.id) && (
+                          <div className="absolute top-4 left-4 bg-brand-terracotta text-white p-2 rounded-full z-20 shadow-lg border border-white/20">
+                            <Check size={16} strokeWidth={3} />
+                          </div>
+                        )}
                         <AnimatePresence mode="wait">
                           <motion.img
                             key={currentImg}
@@ -519,27 +533,29 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                             <h3 className="text-2xl font-serif text-brand-wood leading-tight">{opt.title}</h3>
                             <p className="text-brand-primary/40 text-[10px] uppercase tracking-widest mt-1">Capacidad: {opt.capacity} • {opt.pets}</p>
                             
-                            {!isAvailable ? (
-                              <span className="inline-block mt-2 bg-red-50 text-red-600 border border-red-100 text-[8px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md">
-                                ⚠️ {availabilityError}
-                              </span>
-                            ) : (
-                              <span className="inline-block mt-2 bg-brand-terracotta/10 text-brand-terracotta border border-brand-terracotta/20 text-[9px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-lg">
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setMealsInfoOpen(true);
+                                }}
+                                className="inline-block bg-brand-terracotta/10 hover:bg-brand-terracotta/20 text-brand-terracotta border border-brand-terracotta/20 text-[9px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-lg cursor-pointer transition-colors active:scale-95"
+                              >
                                 Media Pensión Incluida 🍲
-                              </span>
-                            )}
+                              </button>
+                              {(opt.id === 2 || opt.id === 4) && (occupants.adults + occupants.children) < 6 && (
+                                <span className="inline-block bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-lg">
+                                  Tarifa Base Aplicada 🏕️
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          {isAvailable ? (
-                            <div className="text-right shrink-0">
-                              <span className="text-2xl font-serif text-brand-terracotta">€{roomPriceDetails.nightlyRate}</span>
-                              <p className="text-[9px] text-brand-primary/40 uppercase tracking-widest leading-none">/ noche total</p>
-                              <p className="text-[8px] text-brand-primary/30 mt-1 font-mono">Hab: €{roomPriceDetails.roomNightly} | Alim: €{roomPriceDetails.mealsNightly}</p>
-                            </div>
-                          ) : (
-                            <div className="text-right shrink-0 opacity-40">
-                              <span className="text-sm font-serif text-brand-primary/60">No disponible</span>
-                            </div>
-                          )}
+                          <div className="text-right shrink-0">
+                            <span className="text-2xl font-serif text-brand-terracotta">€{roomPriceDetails.nightlyRate}</span>
+                            <p className="text-[9px] text-brand-primary/40 uppercase tracking-widest leading-none">/ noche total</p>
+                            <p className="text-[8px] text-brand-primary/30 mt-1 font-mono">Hab: €{roomPriceDetails.roomNightly} | Alim: €{roomPriceDetails.mealsNightly}</p>
+                          </div>
                         </div>
 
                         <p className="text-brand-primary/60 text-xs leading-relaxed mb-4">{opt.description}</p>
@@ -622,7 +638,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                     value={formData.ci}
                     onChange={(e) => setFormData({ ...formData, ci: e.target.value })}
                     className="w-full px-4 py-3 rounded-xl border border-brand-primary/10 text-sm focus:outline-none focus:border-brand-terracotta bg-brand-neutral/20"
-                    placeholder="Ej: 10345954"
+                    placeholder="Ej: 12345678"
                   />
                 </div>
 
@@ -712,7 +728,12 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
               <div className="bg-white rounded-[2.5rem] p-6 shadow-xl border border-brand-primary/5 space-y-4">
                 <div>
                   <span className="text-[9px] uppercase tracking-widest text-brand-primary/40 font-bold block">Resumen de Estadía</span>
-                  <h3 className="text-lg font-serif text-brand-wood">{selectedData?.title}</h3>
+                  <h3 className="text-lg font-serif text-brand-wood">
+                    {selectedData.length > 1 
+                      ? `${selectedData.length} Hospedajes (${selectedData.map(d => d.title.replace("Galería ", "")).join(', ')})`
+                      : (selectedData[0]?.title || '')
+                    }
+                  </h3>
                   <p className="text-xs text-brand-primary/60">
                     {selectedDates.start?.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} a{' '}
                     {selectedDates.end?.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} ({totalNights} {totalNights === 1 ? 'noche' : 'noches'})
@@ -886,25 +907,45 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
         <motion.div 
           initial={{ y: 100 }}
           animate={{ y: 0 }}
-          className="absolute bottom-0 left-0 w-full bg-brand-primary p-6 px-8 flex items-center justify-between shadow-2xl z-[110] pb-10"
+          className="absolute bottom-0 left-0 w-full bg-brand-primary p-5 px-6 flex flex-col gap-3 shadow-2xl z-[110] pb-[max(1.5rem,env(safe-area-inset-bottom))]"
         >
-          <div>
-            <p className="text-white/50 text-[10px] uppercase tracking-[0.2em] font-bold">Total Estadía ({totalNights} {totalNights === 1 ? 'noche' : 'noches'})</p>
-            <p className="text-white text-2xl font-serif">
-              {selectedUnit ? `€${totalStayPrice}` : '--'}
-            </p>
+          {/* Capacity warning / status row */}
+          <div className="flex items-center justify-between text-[11px] text-white/85 bg-white/5 px-4 py-2 rounded-xl border border-white/5">
+            <span className="font-light">
+              Huéspedes: <span className="font-bold text-white">{totalOccupants}</span> | Capacidad seleccionada: <span className={`font-bold ${isCapacitySufficient ? 'text-emerald-400' : 'text-amber-400'}`}>{selectedCapacity} {selectedCapacity === 1 ? 'persona' : 'personas'}</span>
+            </span>
+            {selectedUnits.length > 0 && (
+              isCapacitySufficient ? (
+                <span className="text-emerald-400 font-bold flex items-center gap-1">✓ Capacidad Suficiente</span>
+              ) : (
+                <span className="text-amber-400 font-medium animate-pulse">⚠️ Seleccione más hospedajes</span>
+              )
+            )}
           </div>
-          <button 
-            disabled={!selectedUnit}
-            onClick={() => {
-              if (selectedUnit) {
-                setStep(4);
-              }
-            }}
-            className={`bg-brand-accent text-brand-wood px-10 py-4 rounded-2xl font-bold transition-all active:scale-95 ${!selectedUnit ? 'opacity-50 grayscale' : 'hover:bg-brand-accent/90'}`}
-          >
-            Continuar Reserva
-          </button>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-white/50 text-[10px] uppercase tracking-[0.2em] font-bold">
+                {selectedUnits.length} {selectedUnits.length === 1 ? 'Hospedaje' : 'Hospedajes'}
+              </p>
+              <p className="text-white text-2xl font-serif">
+                {selectedUnits.length > 0 ? `€${totalStayPrice}` : '--'}
+              </p>
+            </div>
+            <button 
+              disabled={selectedUnits.length === 0 || !isCapacitySufficient}
+              onClick={() => {
+                if (selectedUnits.length > 0 && isCapacitySufficient) {
+                  setStep(4);
+                }
+              }}
+              className={`bg-brand-accent text-brand-wood px-6 py-4 rounded-2xl font-bold transition-all active:scale-95 text-sm
+                ${(selectedUnits.length === 0 || !isCapacitySufficient) ? 'opacity-40 cursor-not-allowed grayscale' : 'hover:bg-brand-accent/90'}
+              `}
+            >
+              Continuar Reserva
+            </button>
+          </div>
         </motion.div>
       )}
 
@@ -921,7 +962,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
           <button 
             disabled={!selectedPayment}
             onClick={() => {
-              if (selectedData && selectedDates.start && selectedDates.end && selectedPayment) {
+              if (selectedData.length > 0 && selectedDates.start && selectedDates.end && selectedPayment) {
                 const bookingCode = 'LC-' + Math.random().toString(36).substring(2, 7).toUpperCase();
                 
                 // Formatear el texto de WhatsApp
@@ -934,7 +975,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
 *Correo:* ${formData.correo}
 *Fecha de entrada:* ${selectedDates.start.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
 *Fecha de salida:* ${selectedDates.end.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })} (${totalNights} ${totalNights === 1 ? 'noche' : 'noches'})
-*Tipo de Habitación:* ${selectedData.title}
+*Hospedajes:* ${selectedData.map(d => d.title).join(' + ')}
 *Cantidad adultos:* ${occupants.adults}
 *Cantidad de niños (3 a 12 años):* ${occupants.children}
 *Cantidad de bebés (0 a 2 años):* ${occupants.babies}
@@ -981,31 +1022,46 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
                   `Cédula: ${formData.ci}`
                 ].filter(Boolean).join('. ');
 
-                supabase.from('bookings').insert([{
-                  guest_name: `${formData.nombre} ${formData.apellido}`,
-                  guest_phone: formData.tlf,
-                  guest_email: formData.correo,
-                  accommodation_id: selectedUnit,
-                  check_in: checkInStr,
-                  check_out: checkOutStr,
-                  adults: occupants.adults,
-                  children: occupants.children,
-                  babies: occupants.babies,
-                  pets: occupants.pets,
-                  total_amount: totalStayPrice,
-                  amount_paid: depositAmount,
-                  payment_status: depositPercent === 100 ? 'completo' : 'parcial',
-                  payment_method: 'transferencia',
-                  status: initialStatus,
-                  special_notes: notes
-                }]).then(({ error }) => {
+                // Proportional split among selected rooms
+                const N = selectedUnits.length;
+                const insertRows = selectedUnits.map((id, idx) => {
+                  const allocatedAdults = Math.floor(occupants.adults / N) + (idx === 0 ? occupants.adults % N : 0);
+                  const allocatedChildren = Math.floor(occupants.children / N) + (idx === 0 ? occupants.children % N : 0);
+                  const allocatedBabies = Math.floor(occupants.babies / N) + (idx === 0 ? occupants.babies % N : 0);
+                  const allocatedPets = Math.floor(occupants.pets / N) + (idx === 0 ? occupants.pets % N : 0);
+
+                  const roomPriceDetails = calculateStayPrice(id, allocatedAdults, allocatedChildren, totalNights, isDecember);
+                  const roomTotal = roomPriceDetails.totalStayPrice;
+                  const roomDeposit = roomTotal * (depositPercent / 100);
+
+                  return {
+                    guest_name: `${formData.nombre} ${formData.apellido}${N > 1 ? ` (Habitación ${idx + 1}/${N})` : ''}`,
+                    guest_phone: formData.tlf,
+                    guest_email: formData.correo,
+                    accommodation_id: id,
+                    check_in: checkInStr,
+                    check_out: checkOutStr,
+                    adults: allocatedAdults,
+                    children: allocatedChildren,
+                    babies: allocatedBabies,
+                    pets: allocatedPets,
+                    total_amount: roomTotal,
+                    amount_paid: roomDeposit,
+                    payment_status: depositPercent === 100 ? 'completo' : 'parcial',
+                    payment_method: 'transferencia',
+                    status: initialStatus,
+                    special_notes: `${notes}${N > 1 ? `. Código de grupo: ${bookingCode}` : ''}`
+                  };
+                });
+
+                supabase.from('bookings').insert(insertRows).then(({ error }) => {
                   if (error) {
                     console.error('Error guardando la reserva en Supabase:', error);
                   }
                 });
 
                 onComplete({
-                  unitName: selectedData.title,
+                  unitName: selectedData.map(d => d.title).join(' + '),
                   checkIn: selectedDates.start.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }),
                   checkOut: selectedDates.end.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }),
                   bookingCode: bookingCode,
@@ -1029,6 +1085,50 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
         </motion.div>
       )}
 
+      {/* Media Pensión Info Modal */}
+      <AnimatePresence>
+        {mealsInfoOpen && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setMealsInfoOpen(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            {/* Content Card */}
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white rounded-[2rem] p-8 max-w-sm w-full relative z-10 shadow-2xl border border-brand-primary/5 text-center space-y-6"
+            >
+              <div className="w-16 h-16 bg-brand-terracotta/10 rounded-full flex items-center justify-center text-brand-terracotta mx-auto text-3xl">
+                🍲
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-2xl font-serif text-brand-wood">Media Pensión Incluida</h3>
+                <p className="text-xs uppercase tracking-widest text-[#C5A059] font-bold">¿Qué incluye tu tarifa?</p>
+              </div>
+              <div className="text-brand-primary/75 text-sm leading-relaxed font-light text-left bg-brand-neutral/40 p-5 rounded-2xl border border-brand-primary/5 space-y-2">
+                <p>Nuestras tarifas incluyen:</p>
+                <p>✨ <strong>Hospedaje</strong> en habitaciones confortables.</p>
+                <p>🍲 Exquisitas <strong>cenas servidas</strong> con un menú dirigido en <strong>4 tiempos</strong>.</p>
+                <p>🍳 Deliciosos <strong>desayunos típicos andinos</strong> para comenzar el día. 😃</p>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setMealsInfoOpen(false)}
+                className="w-full py-3.5 bg-brand-terracotta hover:bg-brand-terracotta/90 text-white font-bold rounded-xl text-sm transition-all active:scale-95 shadow-lg shadow-brand-terracotta/20 cursor-pointer"
+              >
+                Entendido
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <div className="absolute bottom-0 right-0 w-32 h-32 bg-brand-terracotta/5 rounded-tl-full -z-10" />
     </motion.div>
   );
@@ -1046,7 +1146,7 @@ function OccupantRow({ icon, label, sub, value, onUpdate, hasBadge }: { icon: Re
             <h3 className="text-xl font-serif">{label}</h3>
             {hasBadge && (
               <span className="text-[9px] bg-brand-olive/10 text-brand-olive px-2 py-0.5 rounded-full uppercase tracking-widest font-bold border border-brand-olive/20">
-                Máx 15kg
+                Máx 5kg
               </span>
             )}
           </div>

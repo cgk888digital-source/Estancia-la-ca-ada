@@ -259,7 +259,7 @@ const EstanciaHome: React.FC<{
           className="bg-white rounded-[2.5rem] overflow-hidden shadow-xl shadow-black/5 border border-brand-primary/5 mt-12 p-6 space-y-5"
         >
           <div>
-            <span className="text-brand-terracotta text-[10px] uppercase tracking-[0.4em] font-bold block mb-1">Refugio Destacado</span>
+            <span className="text-brand-terracotta text-[10px] uppercase tracking-[0.4em] font-bold block mb-1">Hospedaje Destacado</span>
             <h2 className="text-2xl font-serif text-brand-primary">Cabaña La Lomita</h2>
           </div>
 
@@ -289,7 +289,7 @@ const EstanciaHome: React.FC<{
 
           <div className="space-y-4">
             <p className="text-brand-primary/60 text-xs leading-relaxed">
-              Cabaña independiente de piedra con salón con chimenea, mini cocina equipada, 3 baños privados y terraza privada. El refugio perfecto de calidez y desconexión total.
+              Cabaña independiente de piedra con salón con chimenea, mini cocina equipada, 3 baños privados y terraza privada. El hospedaje perfecto de calidez y desconexión total.
             </p>
 
             <button
