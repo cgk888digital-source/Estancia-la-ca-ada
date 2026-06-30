@@ -206,10 +206,10 @@ const Excursions: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
         {/* Filter Bar */}
         <div className="flex bg-white p-1 rounded-2xl shadow-sm border border-brand-primary/5 self-start overflow-x-auto custom-scrollbar max-w-full">
-          {['Todas', 'Aventura', 'Relax', 'Logística'].map((f) => (
+          {(['Todas', 'Aventura', 'Relax', 'Logística'] as const).map((f) => (
             <button
               key={f}
-              onClick={() => setFilter(f as any)}
+              onClick={() => setFilter(f)}
               className={`px-4 py-2 rounded-xl text-[10px] uppercase tracking-widest font-bold transition-all whitespace-nowrap ${
                 filter === f
                   ? 'bg-brand-primary text-white shadow-lg'

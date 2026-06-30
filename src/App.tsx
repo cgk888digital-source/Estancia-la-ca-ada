@@ -3,7 +3,7 @@ import EstanciaHome from './components/EstanciaHome'
 import RestaurantMenu from './components/RestaurantMenu'
 import WineCellar from './components/WineCellar'
 import Excursions from './components/Excursions'
-import BookingFlow from './components/BookingFlow'
+import BookingFlow, { type BookingFlowData } from './components/BookingFlow'
 import ClubEstancia from './components/ClubEstancia'
 import BookingSuccess from './components/BookingSuccess'
 import CabinsGallery from './components/CabinsGallery'
@@ -15,7 +15,7 @@ type Screen = 'home' | 'restaurant' | 'excursions' | 'club' | 'cava' | 'success'
 function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home')
   const [isBookingOpen, setIsBookingOpen] = useState(false)
-  const [bookingData, setBookingData] = useState<any>(null)
+  const [bookingData, setBookingData] = useState<BookingFlowData | null>(null)
   const [bookingInitialUnitId, setBookingInitialUnitId] = useState<number | null>(null)
 
   const slideVariants = {
@@ -38,9 +38,9 @@ function App() {
   const [direction, setDirection] = useState(0)
 
   const navigateTo = (screen: Screen) => {
-    const screenOrder: Screen[] = ['home', 'cabins', 'restaurant', 'excursions', 'club', 'success']
-    const currentIndex = screenOrder.indexOf(currentScreen as any)
-    const nextIndex = screenOrder.indexOf(screen as any)
+    const screenOrder: string[] = ['home', 'cabins', 'restaurant', 'excursions', 'club', 'success']
+    const currentIndex = screenOrder.indexOf(currentScreen)
+    const nextIndex = screenOrder.indexOf(screen)
     
     setDirection(nextIndex > currentIndex ? 1 : -1)
     setCurrentScreen(screen)

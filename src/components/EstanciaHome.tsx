@@ -6,7 +6,7 @@ const EstanciaHome: React.FC<{
   onOpenMenu: () => void,
   onOpenExcursions: () => void,
   onOpenBooking: () => void,
-  onNavigate: (s: any) => void
+  onNavigate: (s: 'home' | 'restaurant' | 'excursions' | 'club' | 'cava' | 'success' | 'cabins') => void
 }> = ({ onOpenExcursions, onOpenBooking, onNavigate }) => {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
   const [openFaq, setOpenFaq] = React.useState<number | null>(null);
@@ -14,23 +14,23 @@ const EstanciaHome: React.FC<{
   const faqs = [
     {
       question: "¿Qué precio tiene la habitación para 2 personas?",
-      answer: "La tarifa para 2 personas por noche ronda entre €172 y €178 en temporada baja (según la habitación). Nuestras tarifas incluyen: hospedaje en habitaciones confortables, exquisitas cenas servidas con un menú dirigido en 4 tiempos y deliciosos desayunos típicos andinos! 😃"
+      answer: "La tarifa para 2 personas por noche ronda entre $172 y $178 en temporada baja (según la habitación). Nuestras tarifas incluyen: hospedaje en habitaciones confortables, exquisitas cenas servidas con un menú dirigido en 4 tiempos y deliciosos desayunos típicos andinos! 😃"
     },
     {
       question: "¿Qué precio tiene la habitación para 2 adultos y 1 niño?",
-      answer: "La tarifa para 2 adultos y 1 niño (3 a 12 años) por noche ronda entre €222 y €226 en temporada baja. Incluye el hospedaje, desayunos típicos andinos para los tres, cenas de 4 tiempos para los adultos y cenas adaptadas para niños. 😃"
+      answer: "La tarifa para 2 adultos y 1 niño (3 a 12 años) por noche ronda entre $222 y $226 en temporada baja. Incluye el hospedaje, desayunos típicos andinos para los tres, cenas de 4 tiempos para los adultos y cenas adaptadas para niños. 😃"
     },
     {
       question: "¿Cuál es la tarifa para 2 adultos y 2 niños?",
-      answer: "La tarifa para 2 adultos y 2 niños (3 a 12 años) por noche es de €274 en temporada baja (en nuestra Galería Llano Grande). Incluye hospedaje y alimentación completa (cenas y desayunos) para todo el grupo. Los bebés de 0 a 2 años se hospedan gratis. 😃"
+      answer: "La tarifa para 2 adultos y 2 niños (3 a 12 años) por noche es de $274 en temporada baja (en nuestra Galería Llano Grande). Incluye hospedaje y alimentación completa (cenas y desayunos) para todo el grupo. Los bebés de 0 a 2 años se hospedan gratis. 😃"
     },
     {
       question: "¿Cuál es el costo para 3 adultos?",
-      answer: "La tarifa para 3 adultos por noche ronda entre €228 y €232 en temporada baja. Incluye el hospedaje, cenas y desayunos para los 3."
+      answer: "La tarifa para 3 adultos por noche ronda entre $228 y $232 en temporada baja. Incluye el hospedaje, cenas y desayunos para los 3."
     },
     {
       question: "¿Cuánto cuesta una cabaña para 6 personas?",
-      answer: "¡Buen día! Para 6 personas tenemos 3 opciones:\n• La tarifa por 2 adultos en habitación matrimonial con cama Queen o King, entre €172 y €178 c/u.\n• Una Cabaña para 6 personas (3 habitaciones matrimoniales con 3 baños, salón con chimenea, cocina, terraza): €636.\n• Una Suite (2 habitaciones con 2 baños, cama matrimonial y 2 literas) para 6 adultos: €476.\n\nNuestras tarifas incluyen: hospedaje en habitaciones confortables, exquisitas cenas servidas con un menú dirigido en 4 tiempos y deliciosos desayunos típicos andinos! 😃"
+      answer: "¡Buen día! Para 6 personas tenemos 3 opciones:\n• La tarifa por 2 adultos en habitación matrimonial con cama Queen o King, entre $172 y $178 c/u.\n• Una Cabaña para 6 personas (3 habitaciones matrimoniales con 3 baños, salón con chimenea, cocina, terraza): $636.\n• Una Suite (2 habitaciones con 2 baños, cama matrimonial y 2 literas) para 6 adultos: $476.\n\nNuestras tarifas incluyen: hospedaje en habitaciones confortables, exquisitas cenas servidas con un menú dirigido en 4 tiempos y deliciosos desayunos típicos andinos! 😃"
     },
     {
       question: "¿Cuáles son las capacidades de las Cabañas Grandes?",
@@ -38,7 +38,7 @@ const EstanciaHome: React.FC<{
     },
     {
       question: "¿Se aceptan mascotas?",
-      answer: "Solo aceptamos perros pequeños, bien portados, con sus propias camitas y con dueños responsables. Se cobra un fee adicional de €15 por día y un depósito de €50 reembolsable si la mascota no causó daños. 😃"
+      answer: "Solo aceptamos perros pequeños, bien portados, con sus propias camitas y con dueños responsables. Se cobra un fee adicional de $15 por día y un depósito de $50 reembolsable si la mascota no causó daños. 😃"
     },
     {
       question: "¿Aceptan hospedaje sin comidas?",

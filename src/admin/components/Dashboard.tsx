@@ -9,54 +9,91 @@ import type { Transaction, TransactionType, TransactionCategory, PaymentMethod, 
 import { supabase } from '../../lib/supabase'
 
 const fmt = (n: number) =>
-  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
+  new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
+
+interface DbTransaction {
+  id: string
+  date: string
+  type: string
+  category: string
+  description: string
+  amount: number | string
+  payment_method: string
+  related_to?: string | null
+}
+
+interface DbEmployee {
+  id: string
+  name: string
+  role: string
+  salary: number | string
+  status: string
+  hire_date: string
+  last_payment: string | null
+  pending_payment: boolean
+  employee_type?: string
+  payment_frequency?: string
+  daily_rate?: number | string
+  contracted_days?: number
+}
 
 const Dashboard: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
 
-  const fetchData = async () => {
-    setLoading(true)
-    const [txRes, empRes] = await Promise.all([
-      supabase.from('transactions').select('*').order('date', { ascending: false }),
-      supabase.from('employees').select('*')
-    ])
-
-    if (txRes.error) {
-      console.error('Error fetching transactions:', txRes.error)
-    } else if (txRes.data) {
-      setTransactions(txRes.data.map((db: any) => ({
-        id: db.id,
-        date: db.date,
-        type: db.type as TransactionType,
-        category: db.category as TransactionCategory,
-        description: db.description,
-        amount: Number(db.amount) || 0,
-        paymentMethod: db.payment_method as PaymentMethod,
-        relatedTo: db.related_to || ''
-      })))
-    }
-
-    if (empRes.error) {
-      console.error('Error fetching employees:', empRes.error)
-    } else if (empRes.data) {
-      setEmployees(empRes.data.map((db: any) => ({
-        id: db.id,
-        name: db.name,
-        role: db.role,
-        salary: Number(db.salary) || 0,
-        status: db.status as 'activo' | 'inactivo',
-        hireDate: db.hire_date,
-        lastPayment: db.last_payment || '',
-        pendingPayment: db.pending_payment
-      })))
-    }
-    setLoading(false)
-  }
-
   useEffect(() => {
+    let active = true
+
+    const fetchData = async () => {
+      const [txRes, empRes] = await Promise.all([
+        supabase.from('transactions').select('*').order('date', { ascending: false }),
+        supabase.from('employees').select('*')
+      ])
+
+      if (!active) return
+
+      if (txRes.error) {
+        console.error('Error fetching transactions:', txRes.error)
+      } else if (txRes.data) {
+        setTransactions(txRes.data.map((db: DbTransaction) => ({
+          id: db.id,
+          date: db.date,
+          type: db.type as TransactionType,
+          category: db.category as TransactionCategory,
+          description: db.description,
+          amount: Number(db.amount) || 0,
+          paymentMethod: db.payment_method as PaymentMethod,
+          relatedTo: db.related_to || ''
+        })))
+      }
+
+      if (empRes.error) {
+        console.error('Error fetching employees:', empRes.error)
+      } else if (empRes.data) {
+        setEmployees(empRes.data.map((db: DbEmployee) => ({
+          id: db.id,
+          name: db.name,
+          role: db.role,
+          salary: Number(db.salary) || 0,
+          status: db.status as 'activo' | 'inactivo',
+          hireDate: db.hire_date,
+          lastPayment: db.last_payment || '',
+          pendingPayment: db.pending_payment,
+          employeeType: (db.employee_type || 'fijo') as 'fijo' | 'eventual',
+          paymentFrequency: (db.payment_frequency || 'mensual') as 'mensual' | 'semanal' | 'por_dias',
+          dailyRate: Number(db.daily_rate) || 0,
+          contractedDays: Number(db.contracted_days) || 0,
+        })))
+      }
+      setLoading(false)
+    }
+
     fetchData()
+
+    return () => {
+      active = false
+    }
   }, [])
 
   const txList = transactions.length > 0 ? transactions : mockTransactions

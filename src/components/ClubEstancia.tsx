@@ -10,7 +10,7 @@ const ClubEstancia: React.FC = () => {
   const benefits = [
     { id: 1, title: "Almuerzo Especial para Dos", cost: 600, icon: <Gift size={18} /> },
     { id: 2, title: "Botella de Vino de la Cava", cost: 800, icon: <Sparkles size={18} /> },
-    { id: 3, title: "Descuento de €50 en Reserva", cost: 1500, icon: <Crown size={18} /> },
+    { id: 3, title: "Descuento de $50 en Reserva", cost: 1500, icon: <Crown size={18} /> },
   ];
 
   const history = [
@@ -92,7 +92,7 @@ const ClubEstancia: React.FC = () => {
             {
               icon: <ShoppingBag size={20} />,
               title: 'Acumula con cada consumo',
-              desc: 'Gana 1 punto por cada €1 gastado en hospedaje, restaurante o consumos de bodega. (Las excursiones se pagan por separado a terceros y no acumulan puntos).',
+              desc: 'Gana 1 punto por cada $1 gastado en hospedaje, restaurante o consumos de bodega. (Las excursiones se pagan por separado a terceros y no acumulan puntos).',
               color: 'bg-brand-accent/10 text-brand-accent',
             },
             {
@@ -254,7 +254,7 @@ const ClubEstancia: React.FC = () => {
                 <div className="flex items-start justify-between mb-5">
                   <div>
                     <p className="text-[9px] uppercase tracking-[0.4em] text-[#C5A059]/70 font-bold mb-1">Estancia La Cañada</p>
-                    <h4 className="text-3xl font-serif text-white">€{card.value} <span className="text-base text-white/50">EUR</span></h4>
+                    <h4 className="text-3xl font-serif text-white">${card.value} <span className="text-base text-white/50">USD</span></h4>
                   </div>
                 </div>
 
@@ -266,8 +266,8 @@ const ClubEstancia: React.FC = () => {
                   <div>
                     <p className="text-white/40 text-[10px] uppercase tracking-widest mb-0.5">Precio especial</p>
                     <div className="flex items-baseline gap-2">
-                      <span className="text-2xl font-bold text-[#C5A059]">€{card.pay}</span>
-                      <span className="text-white/40 text-xs line-through">€{card.value}</span>
+                      <span className="text-2xl font-bold text-[#C5A059]">${card.pay}</span>
+                      <span className="text-white/40 text-xs line-through">${card.value}</span>
                     </div>
                   </div>
                   <button className="bg-[#C5A059] hover:bg-[#d4b96a] active:scale-95 text-white font-bold text-xs uppercase tracking-widest px-5 py-3 rounded-xl transition-all flex items-center gap-2">
@@ -280,7 +280,7 @@ const ClubEstancia: React.FC = () => {
         </div>
 
         <p className="text-center text-brand-primary/40 text-[10px] mt-4 leading-relaxed">
-          Las Gift Cards son válidas por 12 meses · Pago exclusivo en euros (EUR) · Excluye excursiones externas
+          Las Gift Cards son válidas por 12 meses · Pago exclusivo en dólares (USD) · Excluye excursiones externas
         </p>
       </section>
 

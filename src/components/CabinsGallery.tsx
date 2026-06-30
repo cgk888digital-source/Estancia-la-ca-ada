@@ -1,19 +1,52 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, X, Dog, Bed, Eye, Calendar } from 'lucide-react';
 import { accommodationOptions } from '../data/accommodations';
 import type { AccommodationOption } from '../data/accommodations';
+import { supabase } from '../lib/supabase';
+import { useHotelSettings } from '../utils/useHotelSettings';
 
 interface CabinsGalleryProps {
   onBookCabin: (cabinId: number) => void;
 }
 
+interface ExtendedCabin extends AccommodationOption {
+  originalPrice?: number;
+  discountPercent?: number;
+}
+
 const CabinsGallery: React.FC<CabinsGalleryProps> = ({ onBookCabin }) => {
-  const [selectedCabin, setSelectedCabin] = useState<AccommodationOption | null>(null);
+  const { settings: hotelSettings } = useHotelSettings();
+  const [cabins, setCabins] = useState<ExtendedCabin[]>(accommodationOptions);
+  const [selectedCabin, setSelectedCabin] = useState<ExtendedCabin | null>(null);
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
 
-  const handleOpenGallery = (cabin: AccommodationOption) => {
+  useEffect(() => {
+    const fetchRates = async () => {
+      const { data, error } = await supabase.from('accommodations').select('*');
+      if (!error && data) {
+        setCabins(prev => prev.map(cabin => {
+          const dbAcc = data.find(d => Number(d.id) === cabin.id);
+          if (dbAcc) {
+            const discount = Number(dbAcc.discount_percent || 0);
+            const basePrice = Number(dbAcc.price);
+            const finalPrice = discount > 0 ? Math.round(basePrice * (1 - discount / 100)) : basePrice;
+            return {
+              ...cabin,
+              price: finalPrice,
+              originalPrice: discount > 0 ? basePrice : undefined,
+              discountPercent: discount
+            };
+          }
+          return cabin;
+        }));
+      }
+    };
+    fetchRates();
+  }, []);
+
+  const handleOpenGallery = (cabin: ExtendedCabin) => {
     setSelectedCabin(cabin);
     setActivePhotoIndex(0);
   };
@@ -49,7 +82,7 @@ const CabinsGallery: React.FC<CabinsGalleryProps> = ({ onBookCabin }) => {
 
       {/* Grid List of Cabins */}
       <div className="px-6 space-y-8">
-        {accommodationOptions.map((cabin) => (
+        {cabins.map((cabin) => (
           <motion.div
             key={cabin.id}
             onClick={() => handleOpenGallery(cabin)}
@@ -87,9 +120,19 @@ const CabinsGallery: React.FC<CabinsGalleryProps> = ({ onBookCabin }) => {
                     {cabin.capacity} • {cabin.pets}
                   </p>
                 </div>
-                <div className="text-right">
-                  <span className="text-2xl font-serif text-brand-terracotta">${cabin.price}</span>
-                  <p className="text-[9px] text-brand-primary/40 uppercase tracking-widest">/ noche</p>
+                <div className="text-right flex flex-col items-end">
+                  {cabin.originalPrice ? (
+                    <div className="flex flex-col items-end leading-none">
+                      <span className="text-xs line-through text-brand-primary/30 font-mono mb-1">${cabin.originalPrice}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-2xl font-serif text-brand-terracotta">${cabin.price}</span>
+                        <span className="bg-emerald-100 text-emerald-800 text-[8px] font-extrabold px-1.5 py-0.5 rounded-md uppercase tracking-wider">{cabin.discountPercent}% OFF</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="text-2xl font-serif text-brand-terracotta">${cabin.price}</span>
+                  )}
+                  <p className="text-[9px] text-brand-primary/40 uppercase tracking-widest mt-0.5">/ noche</p>
                 </div>
               </div>
 
@@ -185,7 +228,17 @@ const CabinsGallery: React.FC<CabinsGalleryProps> = ({ onBookCabin }) => {
                 <div className="space-y-2">
                   <div className="flex justify-between items-baseline">
                     <span className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Descripción del Hospedaje</span>
-                    <span className="text-[#C5A059] font-serif text-xl">${selectedCabin.price} / noche</span>
+                    <div className="flex flex-col items-end leading-none">
+                      {selectedCabin.originalPrice ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs line-through text-white/30 font-mono">${selectedCabin.originalPrice}</span>
+                          <span className="text-[#C5A059] font-serif text-xl">${selectedCabin.price} / noche</span>
+                          <span className="bg-[#C5A059]/20 text-[#C5A059] text-[8px] font-extrabold px-1.5 py-0.5 rounded-md uppercase tracking-wider">{selectedCabin.discountPercent}% OFF</span>
+                        </div>
+                      ) : (
+                        <span className="text-[#C5A059] font-serif text-xl">${selectedCabin.price} / noche</span>
+                      )}
+                    </div>
                   </div>
                   <p className="text-white/70 text-xs leading-relaxed font-light">
                     {selectedCabin.description}
@@ -212,6 +265,18 @@ const CabinsGallery: React.FC<CabinsGalleryProps> = ({ onBookCabin }) => {
                     <p className="text-[10px] text-white/70 font-light">Mascotas: {selectedCabin.pets}</p>
                   </div>
                 </div>
+
+                  <div className="bg-white/5 border border-white/10 rounded-2xl px-4 py-3 flex items-center justify-around">
+                    <div className="text-center">
+                      <p className="text-[8px] uppercase tracking-widest text-white/40 font-bold">Check-in</p>
+                      <p className="text-xs font-bold text-[#C5A059] mt-0.5">🕑 {hotelSettings.checkin_time}</p>
+                    </div>
+                    <div className="w-px h-8 bg-white/10" />
+                    <div className="text-center">
+                      <p className="text-[8px] uppercase tracking-widest text-white/40 font-bold">Check-out</p>
+                      <p className="text-xs font-bold text-[#C5A059] mt-0.5">🕚 {hotelSettings.checkout_time}</p>
+                    </div>
+                  </div>
 
                 {/* CTA Booking Button */}
                 <button

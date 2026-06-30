@@ -1,6 +1,6 @@
 export type TransactionType = 'ingreso' | 'egreso'
 
-export type IncomeCategory = 'alojamiento' | 'restaurante' | 'excursiones' | 'bar_cava' | 'otros_ingresos'
+export type IncomeCategory = 'alojamiento' | 'restaurante' | 'bebidas' | 'almuerzos' | 'pasapalos' | 'excursiones' | 'bar_cava' | 'otros_ingresos'
 export type ExpenseCategory = 'empleados' | 'alimentos' | 'mantenimiento' | 'servicios' | 'comisiones' | 'otros_egresos'
 export type TransactionCategory = IncomeCategory | ExpenseCategory
 
@@ -26,6 +26,10 @@ export interface Employee {
   hireDate: string
   lastPayment: string
   pendingPayment: boolean
+  employeeType: 'fijo' | 'eventual'
+  paymentFrequency: 'mensual' | 'semanal' | 'por_dias'
+  dailyRate: number
+  contractedDays: number
 }
 
 export interface MonthlyData {
@@ -54,5 +58,6 @@ export interface Booking {
   paymentMethod: 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque'
   status: 'checkout_hoy' | 'checkin_hoy' | 'ocupado' | 'confirmado' | 'limpieza'
   specialNotes?: string
+  locator?: string
 }
 

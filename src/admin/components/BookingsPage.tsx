@@ -58,8 +58,33 @@ const statusConfig = {
   }
 }
 
+interface DbBooking {
+  id: string
+  guest_name: string
+  guest_phone?: string | null
+  guest_email?: string | null
+  accommodation_id: number
+  check_in: string
+  check_out: string
+  adults?: number | null
+  children?: number | null
+  babies?: number | null
+  pets?: number | null
+  total_amount?: number | string | null
+  amount_paid?: number | string | null
+  payment_status?: string | null
+  payment_method?: string | null
+  status?: string | null
+  special_notes?: string | null
+  locator?: string | null
+}
+
+// Selected date (anchored to 2026-06-02 as today's date for realistic representation)
+const todayStr = '2026-06-02'
+const todayDate = new Date(2026, 5, 2) // June 2, 2026
+
 // Mappers between DB format (snake_case) and React format (camelCase)
-const mapDbBookingToReact = (db: any): Booking => ({
+const mapDbBookingToReact = (db: DbBooking): Booking => ({
   id: db.id,
   guestName: db.guest_name,
   guestPhone: db.guest_phone || '',
@@ -75,11 +100,21 @@ const mapDbBookingToReact = (db: any): Booking => ({
   },
   totalAmount: Number(db.total_amount) || 0,
   amountPaid: Number(db.amount_paid) || 0,
-  paymentStatus: db.payment_status || 'pendiente',
-  paymentMethod: db.payment_method || 'transferencia',
-  status: db.status || 'confirmado',
-  specialNotes: db.special_notes || ''
+  paymentStatus: (db.payment_status || 'pendiente') as 'completo' | 'parcial' | 'pendiente',
+  paymentMethod: (db.payment_method || 'transferencia') as 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque',
+  status: (db.status || 'confirmado') as 'checkout_hoy' | 'checkin_hoy' | 'ocupado' | 'confirmado' | 'limpieza',
+  specialNotes: db.special_notes || '',
+  locator: db.locator || ''
 })
+
+const calculateNights = (startStr: string, endStr: string) => {
+  if (!startStr || !endStr) return 1
+  const start = new Date(startStr)
+  const end = new Date(endStr)
+  const diffTime = end.getTime() - start.getTime()
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+  return diffDays > 0 ? diffDays : 1
+}
 
 export default function BookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([])
@@ -90,11 +125,13 @@ export default function BookingsPage() {
   
   // Modals
   const [showAddModal, setShowAddModal] = useState(false)
-  
-  // Selected date (anchored to 2026-06-02 as today's date for realistic representation)
-  const todayStr = '2026-06-02'
-  const todayDate = new Date(2026, 5, 2) // June 2, 2026
 
+  // Custom rate states for manual bookings
+  const [useCustomRate, setUseCustomRate] = useState(false)
+  const [discountPercent, setDiscountPercent] = useState(0)
+  const [locatorCode, setLocatorCode] = useState('')
+  const [dbAccommodations, setDbAccommodations] = useState<any[]>([])
+  
   // Form State for creating a new booking
   const [form, setForm] = useState({
     guestName: '',
@@ -109,62 +146,150 @@ export default function BookingsPage() {
     pets: 0,
     totalAmount: 180,
     amountPaid: 90,
-    paymentMethod: 'transferencia' as const,
+    paymentMethod: 'transferencia' as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque',
     specialNotes: ''
   })
 
   // Accommodation lookup helper
   const getAccommodation = (id: number) => accommodationOptions.find(o => o.id === id)
 
-  // Fetch bookings from Supabase
-  const fetchBookings = async () => {
-    setLoading(true)
-    const { data, error } = await supabase
-      .from('bookings')
-      .select('*')
-      .order('created_at', { ascending: false })
-
-    if (error) {
-      console.error('Error fetching bookings from Supabase:', error)
-      setBookings(mockBookings)
-    } else if (data && data.length > 0) {
-      setBookings(data.map(mapDbBookingToReact))
+  const getStandardRate = (accId: number, checkIn: string, checkOut: string, adults: number, children: number) => {
+    const nights = calculateNights(checkIn, checkOut)
+    const d = new Date(checkIn)
+    const isDecember = d.getMonth() === 11
+    
+    const dbAcc = dbAccommodations.find(o => Number(o.id) === accId)
+    let roomPrice = 0
+    if (dbAcc) {
+      const basePrice = isDecember ? Number(dbAcc.december_price) : Number(dbAcc.price)
+      const discount = Number(dbAcc.discount_percent || 0)
+      roomPrice = discount > 0 ? Math.round(basePrice * (1 - discount / 100)) : basePrice
     } else {
-      // Seed the database with mockBookings if completely empty so the hotel looks populated
-      const dbMocks = mockBookings.map(b => ({
-        guest_name: b.guestName,
-        guest_phone: b.guestPhone,
-        guest_email: b.guestEmail,
-        accommodation_id: b.accommodationId,
-        check_in: b.checkIn,
-        check_out: b.checkOut,
-        adults: b.guestsCount.adults,
-        children: b.guestsCount.children,
-        babies: b.guestsCount.babies,
-        pets: b.guestsCount.pets,
-        total_amount: b.totalAmount,
-        amount_paid: b.amountPaid,
-        payment_status: b.paymentStatus,
-        payment_method: b.paymentMethod,
-        status: b.status,
-        special_notes: b.specialNotes || null
-      }))
-      
-      const { data: insertedData, error: insertError } = await supabase.from('bookings').insert(dbMocks).select('*')
-      if (insertError) {
-        console.error('Error seeding mock bookings:', insertError)
-        setBookings(mockBookings)
-      } else if (insertedData) {
-        setBookings(insertedData.map(mapDbBookingToReact))
-      } else {
-        setBookings(mockBookings)
+      // Fallback
+      const acc = accommodationOptions.find(o => o.id === accId)
+      if (!acc) return 0
+      roomPrice = acc.price
+      if (isDecember) {
+        if (accId === 1 || accId === 6 || accId === 7) roomPrice = 158
+        else if (accId === 2 || accId === 4) roomPrice = 337
+        else if (accId === 5) roomPrice = 76
+        else if (accId === 3) roomPrice = 70
       }
     }
-    setLoading(false)
+    
+    const mealsPrice = (adults * 56) + (children * 48)
+    return (roomPrice + mealsPrice) * nights
   }
 
+  // Helper functions to open/close the manual booking modal safely
+  const openAddModal = () => {
+    setUseCustomRate(false)
+    setDiscountPercent(0)
+    
+    // Generate a unique booking locator code (e.g. LC-A4B7D)
+    const newLocator = 'LC-' + Math.random().toString(36).substring(2, 7).toUpperCase()
+    setLocatorCode(newLocator)
+    
+    setForm({
+      guestName: '',
+      guestPhone: '',
+      guestEmail: '',
+      accommodationId: 2,
+      checkIn: '2026-06-02',
+      checkOut: '2026-06-05',
+      adults: 2,
+      children: 0,
+      babies: 0,
+      pets: 0,
+      totalAmount: 180,
+      amountPaid: 90,
+      paymentMethod: 'transferencia',
+      specialNotes: ''
+    })
+    setShowAddModal(true)
+  }
+
+  const closeAddModal = () => {
+    setUseCustomRate(false)
+    setDiscountPercent(0)
+    setLocatorCode('')
+    setShowAddModal(false)
+  }
+
+  // Derive rates on the fly to avoid useEffect sync triggers (React best practices)
+  const standardRate = showAddModal
+    ? getStandardRate(form.accommodationId, form.checkIn, form.checkOut, form.adults, form.children)
+    : 0
+
+  const calculatedTotal = useCustomRate
+    ? (discountPercent > 0 ? Math.round(standardRate * (1 - discountPercent / 100)) : form.totalAmount)
+    : standardRate
+
   useEffect(() => {
+    let active = true
+
+    const fetchBookings = async () => {
+      const { data: ratesData } = await supabase
+        .from('accommodations')
+        .select('*')
+      if (active && ratesData) {
+        setDbAccommodations(ratesData)
+      }
+
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (!active) return
+
+      if (error) {
+        console.error('Error fetching bookings from Supabase:', error)
+        setBookings(mockBookings)
+      } else if (data && data.length > 0) {
+        setBookings(data.map(mapDbBookingToReact))
+      } else {
+        // Seed the database with mockBookings if completely empty so the hotel looks populated
+        const dbMocks = mockBookings.map(b => ({
+          guest_name: b.guestName,
+          guest_phone: b.guestPhone,
+          guest_email: b.guestEmail,
+          accommodation_id: b.accommodationId,
+          check_in: b.checkIn,
+          check_out: b.checkOut,
+          adults: b.guestsCount.adults,
+          children: b.guestsCount.children,
+          babies: b.guestsCount.babies,
+          pets: b.guestsCount.pets,
+          total_amount: b.totalAmount,
+          amount_paid: b.amountPaid,
+          payment_status: b.paymentStatus,
+          payment_method: b.paymentMethod,
+          status: b.status,
+          special_notes: b.specialNotes || null
+        }))
+        
+        const { data: insertedData, error: insertError } = await supabase.from('bookings').insert(dbMocks).select('*')
+        
+        if (!active) return
+
+        if (insertError) {
+          console.error('Error seeding mock bookings:', insertError)
+          setBookings(mockBookings)
+        } else if (insertedData) {
+          setBookings(insertedData.map(mapDbBookingToReact))
+        } else {
+          setBookings(mockBookings)
+        }
+      }
+      setLoading(false)
+    }
+
     fetchBookings()
+
+    return () => {
+      active = false
+    }
   }, [])
 
   // 1. Dynamic states calculation for TODAY's Day View
@@ -216,7 +341,7 @@ export default function BookingsPage() {
         monthLabel: d.toLocaleDateString('es-ES', { month: 'short' })
       }
     })
-  }, [bookings])
+  }, [])
 
   // 3. Filters and Search Results
   const filteredBookings = useMemo(() => {
@@ -224,8 +349,9 @@ export default function BookingsPage() {
       const acc = getAccommodation(b.accommodationId)
       const cabinName = acc ? acc.title.toLowerCase() : ''
       const guestName = b.guestName.toLowerCase()
+      const locator = b.locator ? b.locator.toLowerCase() : ''
       const q = searchQuery.toLowerCase()
-      return guestName.includes(q) || cabinName.includes(q)
+      return guestName.includes(q) || cabinName.includes(q) || locator.includes(q)
     })
   }, [bookings, searchQuery])
 
@@ -330,6 +456,10 @@ export default function BookingsPage() {
   const handleAddBooking = async () => {
     if (!form.guestName.trim()) return
 
+    const finalTotal = useCustomRate 
+      ? (discountPercent > 0 ? Math.round(standardRate * (1 - discountPercent / 100)) : form.totalAmount)
+      : standardRate
+
     const initialStatus = form.checkIn === todayStr ? 'checkin_hoy' : 'confirmado'
     const newBooking = {
       guest_name: form.guestName.trim(),
@@ -342,14 +472,15 @@ export default function BookingsPage() {
       children: Number(form.children),
       babies: Number(form.babies),
       pets: Number(form.pets),
-      total_amount: Number(form.totalAmount),
+      total_amount: finalTotal,
       amount_paid: Number(form.amountPaid),
-      payment_status: Number(form.amountPaid) >= Number(form.totalAmount) 
+      payment_status: Number(form.amountPaid) >= finalTotal 
         ? 'completo' 
         : Number(form.amountPaid) > 0 ? 'parcial' : 'pendiente',
       payment_method: form.paymentMethod,
       status: initialStatus,
-      special_notes: form.specialNotes.trim() || null
+      special_notes: form.specialNotes.trim() || null,
+      locator: locatorCode
     }
 
     const { data, error } = await supabase
@@ -363,23 +494,7 @@ export default function BookingsPage() {
       setBookings(prev => [mapDbBookingToReact(data[0]), ...prev])
     }
 
-    setShowAddModal(false)
-    setForm({
-      guestName: '',
-      guestPhone: '',
-      guestEmail: '',
-      accommodationId: 2,
-      checkIn: '2026-06-02',
-      checkOut: '2026-06-05',
-      adults: 2,
-      children: 0,
-      babies: 0,
-      pets: 0,
-      totalAmount: 180,
-      amountPaid: 90,
-      paymentMethod: 'transferencia',
-      specialNotes: ''
-    })
+    closeAddModal()
   }
 
   // Visual state labels helper
@@ -408,7 +523,7 @@ export default function BookingsPage() {
         </div>
         
         <button
-          onClick={() => setShowAddModal(true)}
+          onClick={() => openAddModal()}
           className="flex items-center justify-center gap-2 px-5 py-3 bg-[#C5A059] hover:bg-[#b8904a] text-white rounded-2xl text-sm font-bold transition-all shadow-md shadow-[#C5A059]/20 self-start md:self-auto active:scale-95"
         >
           <Plus size={18} />
@@ -551,7 +666,14 @@ export default function BookingsPage() {
                     <div className="space-y-4">
                       <div className="flex items-center justify-between border-b border-gray-50 pb-3">
                         <div>
-                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Huésped</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Huésped</p>
+                            {booking.locator && (
+                              <span className="font-mono text-[8px] font-extrabold text-[#C5A059] bg-[#C5A059]/10 px-2 py-0.5 rounded-md tracking-wider">
+                                {booking.locator}
+                              </span>
+                            )}
+                          </div>
                           <h4 className="text-base font-bold text-gray-800 leading-tight mt-0.5">{booking.guestName}</h4>
                         </div>
                         <div className="text-right">
@@ -631,8 +753,8 @@ export default function BookingsPage() {
                     {status === 'disponible' && (
                       <button
                         onClick={() => {
+                          openAddModal()
                           setForm(f => ({ ...f, accommodationId: accommodation.id }))
-                          setShowAddModal(true)
                         }}
                         className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all shadow-sm"
                       >
@@ -746,8 +868,8 @@ export default function BookingsPage() {
                             // Empty cell (available)
                             <button
                               onClick={() => {
+                                openAddModal()
                                 setForm(f => ({ ...f, accommodationId: acc.id, checkIn: day.dateStr }))
-                                setShowAddModal(true)
                               }}
                               className="w-full h-full rounded-2xl border-2 border-dashed border-gray-100 hover:border-[#C5A059]/40 hover:bg-[#C5A059]/5 transition-all flex items-center justify-center text-gray-300 hover:text-[#C5A059] group"
                             >
@@ -833,7 +955,14 @@ export default function BookingsPage() {
                           className="hover:bg-gray-50/50 cursor-pointer transition-colors"
                         >
                           <td className="px-6 py-4">
-                            <p className="text-sm font-bold text-gray-800">{b.guestName}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-bold text-gray-800">{b.guestName}</p>
+                              {b.locator && (
+                                <span className="font-mono text-[8px] font-extrabold text-[#C5A059] bg-[#C5A059]/10 px-2 py-0.5 rounded-md tracking-wider">
+                                  {b.locator}
+                                </span>
+                              )}
+                            </div>
                             <p className="text-xs text-gray-400 mt-0.5">{b.guestPhone}</p>
                           </td>
                           <td className="px-4 py-4">
@@ -887,10 +1016,16 @@ export default function BookingsPage() {
           
           <div className="relative w-full max-w-md h-[90vh] sm:h-screen bg-white rounded-t-3xl sm:rounded-l-3xl sm:rounded-tr-none shadow-2xl p-6 flex flex-col justify-between overflow-y-auto animate-in slide-in-from-bottom sm:slide-in-from-right duration-300">
             <div>
-              {/* Header card details */}
               <div className="flex items-center justify-between pb-4 border-b border-gray-100">
                 <div>
-                  <span className="text-[9px] uppercase tracking-widest text-[#C5A059] font-extrabold block">Ficha de Reserva</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] uppercase tracking-widest text-[#C5A059] font-extrabold block">Ficha de Reserva</span>
+                    {selectedBooking.locator && (
+                      <span className="font-mono text-[9px] font-extrabold text-[#C5A059] bg-[#C5A059]/10 px-2 py-0.5 rounded-md tracking-wider">
+                        {selectedBooking.locator}
+                      </span>
+                    )}
+                  </div>
                   <h2 className="text-xl font-bold font-serif text-gray-800 mt-1">Detalle del Huésped</h2>
                 </div>
                 <button
@@ -1049,13 +1184,13 @@ export default function BookingsPage() {
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
           {/* Overlay click to close */}
-          <div className="absolute inset-0" onClick={() => setShowAddModal(false)} />
+          <div className="absolute inset-0" onClick={() => closeAddModal()} />
           
           <div className="relative bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg p-6 space-y-5 overflow-y-auto max-h-[90vh] z-10 animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between pb-3 border-b border-gray-100">
               <h2 className="text-xl font-bold font-serif text-gray-800">Registrar Nueva Reserva</h2>
               <button
-                onClick={() => setShowAddModal(false)}
+                onClick={() => closeAddModal()}
                 className="p-1.5 hover:bg-gray-100 rounded-xl transition-colors text-gray-500"
               >
                 <X size={18} />
@@ -1063,6 +1198,14 @@ export default function BookingsPage() {
             </div>
 
             <div className="space-y-4">
+              {/* Localizador pre-generado */}
+              <div className="bg-brand-neutral/60 border border-gray-100 rounded-2xl p-3.5 flex justify-between items-center text-xs">
+                <span className="text-gray-500 font-semibold uppercase tracking-wider text-[10px]">Localizador de Reserva</span>
+                <span className="font-mono font-bold text-[#C5A059] tracking-widest bg-[#C5A059]/10 px-3.5 py-1.5 rounded-xl text-sm select-all">
+                  {locatorCode}
+                </span>
+              </div>
+
               {/* Guest details */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="col-span-1 sm:col-span-2">
@@ -1105,11 +1248,9 @@ export default function BookingsPage() {
                     value={form.accommodationId}
                     onChange={e => {
                       const id = Number(e.target.value)
-                      const acc = getAccommodation(id)
                       setForm(f => ({ 
                         ...f, 
-                        accommodationId: id,
-                        totalAmount: acc ? acc.price * 2 : 150 // default estimate 2 nights
+                        accommodationId: id
                       }))
                     }}
                     className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white"
@@ -1183,6 +1324,64 @@ export default function BookingsPage() {
                 </div>
               </div>
 
+              {/* Tarifa y Descuento */}
+              <div className="bg-brand-neutral/40 p-4 rounded-2xl border border-gray-100 space-y-3">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-gray-500 font-medium">Tarifa Estándar calculada:</span>
+                  <span className="font-bold text-gray-800">${standardRate} USD</span>
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="useCustomRate"
+                    checked={useCustomRate}
+                    onChange={e => {
+                      setUseCustomRate(e.target.checked)
+                      if (!e.target.checked) {
+                        setDiscountPercent(0)
+                      }
+                    }}
+                    className="text-[#C5A059] focus:ring-[#C5A059] rounded"
+                  />
+                  <label htmlFor="useCustomRate" className="text-xs font-semibold text-gray-700 cursor-pointer">
+                    Modificar tarifa o aplicar descuento
+                  </label>
+                </div>
+
+                {useCustomRate && (
+                  <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-200/50 animate-fade-in">
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1 text-gray-500">Descuento (%)</label>
+                      <select
+                        value={discountPercent}
+                        onChange={e => setDiscountPercent(Number(e.target.value))}
+                        className="w-full border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs outline-none focus:border-[#C5A059] bg-white text-gray-700"
+                      >
+                        <option value={0}>Sin Descuento</option>
+                        <option value={10}>10% OFF</option>
+                        <option value={15}>15% OFF</option>
+                        <option value={20}>20% OFF</option>
+                        <option value={25}>25% OFF</option>
+                        <option value={50}>50% OFF (Cortesía)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1 text-gray-500">Descuento Manual (%)</label>
+                      <input
+                        type="number"
+                        placeholder="%"
+                        min={0}
+                        max={100}
+                        value={discountPercent || ''}
+                        onChange={e => setDiscountPercent(Math.min(100, Math.max(0, Number(e.target.value))))}
+                        className="w-full border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs outline-none focus:border-[#C5A059] text-gray-700"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Finance details */}
               <div className="grid grid-cols-3 gap-3">
                 <div>
@@ -1190,9 +1389,14 @@ export default function BookingsPage() {
                   <input
                     type="number"
                     min={0}
-                    value={form.totalAmount}
+                    value={calculatedTotal}
                     onChange={e => setForm(f => ({ ...f, totalAmount: Number(e.target.value) }))}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                    readOnly={!useCustomRate}
+                    className={`w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] transition-colors ${
+                      !useCustomRate 
+                        ? 'bg-gray-50 text-gray-500 cursor-not-allowed' 
+                        : 'bg-white text-gray-800'
+                    }`}
                   />
                 </div>
                 <div>
@@ -1209,7 +1413,7 @@ export default function BookingsPage() {
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Método</label>
                   <select
                     value={form.paymentMethod}
-                    onChange={e => setForm(f => ({ ...f, paymentMethod: e.target.value as any }))}
+                    onChange={e => setForm(f => ({ ...f, paymentMethod: e.target.value as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' }))}
                     className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white capitalize"
                   >
                     <option value="transferencia">Transferencia</option>
@@ -1237,7 +1441,7 @@ export default function BookingsPage() {
             <div className="flex gap-3 pt-3 border-t border-gray-100">
               <button
                 type="button"
-                onClick={() => setShowAddModal(false)}
+                onClick={() => closeAddModal()}
                 className="flex-1 py-3 border border-gray-200 text-gray-500 font-bold rounded-2xl text-xs uppercase tracking-wider hover:bg-gray-50"
               >
                 Cancelar

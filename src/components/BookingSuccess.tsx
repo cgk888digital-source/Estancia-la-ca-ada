@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Check, ArrowRight, Home, MessageSquare } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { useHotelSettings } from '../utils/useHotelSettings';
 
 interface BookingData {
   unitName: string;
@@ -32,8 +33,9 @@ interface BookingData {
   remainingAmount?: number;
   depositPercent?: number;
   remainingPolicyText?: string;
-  selectedPayment?: 'zelle' | 'pago_movil';
+  selectedPayment?: 'zelle' | 'pago_movil' | null;
   totalNights?: number;
+  bcvEuroRate?: number | null;
 }
 
 interface BookingSuccessProps {
@@ -43,6 +45,7 @@ interface BookingSuccessProps {
 }
 
 const BookingSuccess: React.FC<BookingSuccessProps> = ({ data, onGoToClub, onBackToHome }) => {
+  const { settings: hotelSettings } = useHotelSettings();
   useEffect(() => {
     // Subtle gold and cream confetti rain
     const duration = 3 * 1000;
@@ -82,8 +85,8 @@ const BookingSuccess: React.FC<BookingSuccessProps> = ({ data, onGoToClub, onBac
 *CI:* ${data.formData.ci}
 *Tlf:* ${data.formData.tlf}
 *Correo:* ${data.formData.correo}
-*Fecha de entrada:* ${data.checkIn}
-*Fecha de salida:* ${data.checkOut} (${data.totalNights || 1} ${data.totalNights === 1 ? 'noche' : 'noches'})
+*Fecha de entrada:* ${data.checkIn} *(Check-in a partir de las ${hotelSettings.checkin_time})*
+*Fecha de salida:* ${data.checkOut} *(Check-out hasta las ${hotelSettings.checkout_time})* (${data.totalNights || 1} ${data.totalNights === 1 ? 'noche' : 'noches'})
 *Tipo de Habitación:* ${data.unitName}
 *Cantidad adultos:* ${data.occupants?.adults || 2}
 *Cantidad de niños (3 a 12 años):* ${data.occupants?.children || 0}
@@ -93,13 +96,16 @@ const BookingSuccess: React.FC<BookingSuccessProps> = ({ data, onGoToClub, onBac
 
 ---
 *Resumen de Pago:*
-*Hospedaje (${data.totalNights || 1} ${data.totalNights === 1 ? 'noche' : 'noches'}):* €${data.pricing?.roomTotal || 0}
-*Alimentación (${data.totalNights || 1} ${data.totalNights === 1 ? 'noche' : 'noches'}):* €${data.pricing?.mealsTotal || 0}
-*Total Estadía:* €${data.totalStayPrice || 0}
-*Monto de Adelanto Requerido (${data.depositPercent || 50}%):* €${data.depositAmount || 0}
-${data.remainingAmount !== undefined && data.remainingAmount > 0 ? `*Monto restante:* €${data.remainingAmount}\n*Política de saldo restante:* ${data.remainingPolicyText}` : '*Monto restante:* €0 (Reserva liquidada al 100%)'}
+*Hospedaje (${data.totalNights || 1} ${data.totalNights === 1 ? 'noche' : 'noches'}):* $${data.pricing?.roomTotal || 0}
+*Alimentación (${data.totalNights || 1} ${data.totalNights === 1 ? 'noche' : 'noches'}):* $${data.pricing?.mealsTotal || 0}
+*Total Estadía:* $${data.totalStayPrice || 0}
+*Monto de Adelanto Requerido (${data.depositPercent || 50}%):* $${data.depositAmount || 0}
+${data.remainingAmount !== undefined && data.remainingAmount > 0 ? `*Monto restante:* $${data.remainingAmount}\n*Política de saldo restante:* ${data.remainingPolicyText}` : '*Monto restante:* $0 (Reserva liquidada al 100%)'}
 
 *Método de Pago Seleccionado:* ${data.selectedPayment === 'zelle' ? 'Zelle' : 'Pago Móvil (Bancamiga)'}
+${data.selectedPayment === 'pago_movil' && data.bcvEuroRate && data.depositAmount ? `*Monto en Bolívares a transferir:* Bs. ${(data.depositAmount * data.bcvEuroRate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+*Tasa Oficial del Euro (BCV):* Bs. ${data.bcvEuroRate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+_(Nota: Los pagos en bolívares se calculan a tasa BCV del euro por políticas de facturación)_` : ''}
 *Código de Reserva:* ${data.bookingCode}
 
 Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
@@ -163,10 +169,16 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
           <div className="space-y-0.5">
             <p className="text-[9px] uppercase tracking-[0.2em] text-brand-primary/40 font-bold">Check-in</p>
             <p className="font-medium text-brand-primary text-xs">{data.checkIn}</p>
+            <p className="text-[10px] text-brand-terracotta font-bold flex items-center gap-0.5">
+              🕑 A partir de las {hotelSettings.checkin_time}
+            </p>
           </div>
           <div className="space-y-0.5">
             <p className="text-[9px] uppercase tracking-[0.2em] text-brand-primary/40 font-bold">Check-out</p>
             <p className="font-medium text-brand-primary text-xs">{data.checkOut}</p>
+            <p className="text-[10px] text-brand-terracotta font-bold flex items-center gap-0.5">
+              🕚 Hasta las {hotelSettings.checkout_time}
+            </p>
           </div>
         </div>
 
@@ -194,27 +206,27 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
           <div className="pt-3 border-t border-brand-primary/5 space-y-2 bg-[#FDFBF7] p-3.5 rounded-2xl border border-brand-primary/5">
             <div className="flex justify-between text-[11px] text-brand-primary/70">
               <span>Hospedaje ({data.totalNights || 1} {data.totalNights === 1 ? 'noche' : 'noches'}):</span>
-              <span className="font-semibold text-brand-primary">€{data.pricing?.roomTotal || 0}</span>
+              <span className="font-semibold text-brand-primary">${data.pricing?.roomTotal || 0}</span>
             </div>
             <div className="flex justify-between text-[11px] text-brand-primary/70">
               <span>Alimentación ({data.totalNights || 1} {data.totalNights === 1 ? 'noche' : 'noches'}):</span>
-              <span className="font-semibold text-brand-primary">€{data.pricing?.mealsTotal || 0}</span>
+              <span className="font-semibold text-brand-primary">${data.pricing?.mealsTotal || 0}</span>
             </div>
             <div className="flex justify-between text-[11.5px] font-semibold text-brand-primary border-t border-brand-primary/5 pt-1.5">
               <span>Total Estadía:</span>
-              <span className="font-bold">€{data.totalStayPrice}</span>
+              <span className="font-bold">${data.totalStayPrice}</span>
             </div>
             
             <div className="flex justify-between text-[11.5px] font-bold text-brand-wood bg-brand-neutral/80 p-2 rounded-xl border border-brand-primary/5">
               <span>Adelanto Requerido ({data.depositPercent || 50}%):</span>
-              <span className="text-brand-terracotta">€{data.depositAmount}</span>
+              <span className="text-brand-terracotta">${data.depositAmount}</span>
             </div>
 
             {data.remainingAmount !== undefined && data.remainingAmount > 0 ? (
               <div className="space-y-1 bg-[#FAF9F6] p-2 rounded-xl border border-brand-primary/5 mt-1">
                 <div className="flex justify-between text-[11px] text-brand-primary/70">
                   <span>Saldo Restante (50%):</span>
-                  <span className="font-bold text-brand-primary">€{data.remainingAmount}</span>
+                  <span className="font-bold text-brand-primary">${data.remainingAmount}</span>
                 </div>
                 {data.remainingPolicyText && (
                   <p className="text-[9px] text-brand-terracotta font-medium leading-tight mt-0.5">
@@ -225,6 +237,24 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
             ) : (
               <div className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-100 p-2 rounded-xl text-center font-bold mt-1">
                 ✅ Reserva pre-pagada al 100%
+              </div>
+            )}
+
+            {/* Desglose Pago Móvil en Bolívares */}
+            {data.selectedPayment === 'pago_movil' && data.bcvEuroRate && data.depositAmount && (
+              <div className="space-y-2 mt-2 pt-2 border-t border-brand-primary/5">
+                <div className="p-2.5 bg-brand-terracotta/5 rounded-xl border border-brand-terracotta/10 space-y-0.5 animate-fade-in">
+                  <p className="text-[8px] uppercase tracking-widest text-brand-terracotta font-bold text-center">Monto a transferir en Pago Móvil</p>
+                  <p className="text-xs font-bold text-brand-wood font-mono text-center">
+                    Bs. {(data.depositAmount * data.bcvEuroRate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                  <p className="text-[8px] text-brand-primary/50 text-center">
+                    Tasa Oficial del Euro (BCV): Bs. {data.bcvEuroRate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div className="p-2.5 bg-[#FAF9F6] rounded-xl text-[8.5px] text-brand-primary/70 leading-normal border border-brand-primary/5 text-justify">
+                  <strong>Nota de Transparencia:</strong> Los pagos recibidos en Bolívares (Bs.) se calculan y procesan utilizando la tasa oficial de cambio del <strong>Euro (EUR)</strong> publicada por el Banco Central de Venezuela (BCV), de acuerdo a nuestras políticas de facturación para mitigar costos de reposición cambiaria.
+                </div>
               </div>
             )}
 

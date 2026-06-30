@@ -3,15 +3,86 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, X, Users, Dog, Calendar as CalendarIcon, Award, Check } from 'lucide-react';
 import { accommodationOptions } from '../data/accommodations';
 import { supabase } from '../lib/supabase';
+import { getBcvEuroRate } from '../utils/exchangeRate';
+import { useHotelSettings } from '../utils/useHotelSettings';
+
+export interface BookingFlowData {
+  unitName: string;
+  checkIn: string;
+  checkOut: string;
+  bookingCode: string;
+  formData: {
+    nombre: string;
+    apellido: string;
+    ci: string;
+    tlf: string;
+    correo: string;
+    referido?: string;
+    sigueCircuito: boolean;
+  };
+  occupants: {
+    adults: number;
+    children: number;
+    babies: number;
+    pets: number;
+  };
+  pricing: {
+    roomTotal: number;
+    mealsTotal: number;
+  };
+  totalStayPrice: number;
+  depositAmount: number;
+  remainingAmount: number;
+  depositPercent: number;
+  remainingPolicyText: string;
+  selectedPayment: 'zelle' | 'pago_movil' | null;
+  totalNights: number;
+  bcvEuroRate?: number | null;
+}
 
 interface BookingFlowProps {
   onClose: () => void;
-  onComplete: (data: any) => void;
+  onComplete: (data: BookingFlowData) => void;
   initialUnitId?: number | null;
 }
 
 const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialUnitId }) => {
   const [step, setStep] = useState(1);
+  const [bcvEuroRate, setBcvEuroRate] = useState<number | null>(null);
+  const [loadingRate, setLoadingRate] = useState(false);
+  const [dbAccommodations, setDbAccommodations] = useState<any[]>([]);
+  const { settings: hotelSettings } = useHotelSettings();
+
+  React.useEffect(() => {
+    let active = true;
+    const fetchDbRates = async () => {
+      const { data, error } = await supabase.from('accommodations').select('*');
+      if (active && !error && data) {
+        setDbAccommodations(data);
+      }
+    };
+    fetchDbRates();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    let active = true;
+    const fetchRate = async () => {
+      setLoadingRate(true);
+      const rate = await getBcvEuroRate();
+      if (active) {
+        setBcvEuroRate(rate);
+        setLoadingRate(false);
+      }
+    };
+    fetchRate();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const [selectedDates, setSelectedDates] = useState<{ start: Date | null, end: Date | null }>({
     start: null,
     end: null
@@ -57,18 +128,26 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
   };
 
   const getRoomPrice = (roomId: number, isDecember: boolean) => {
+    const dbAcc = dbAccommodations.find(d => Number(d.id) === roomId);
+    if (dbAcc) {
+      const basePrice = isDecember ? Number(dbAcc.december_price) : Number(dbAcc.price);
+      const discount = Number(dbAcc.discount_percent || 0);
+      return discount > 0 ? Math.round(basePrice * (1 - discount / 100)) : basePrice;
+    }
+    // Fallback to static defaults
     switch (roomId) {
-      case 1: // Suite La Vega (6p)
-      case 6: // Suite La Vega (5p)
-      case 7: // Suite La Vega (4p)
+      case 1:
+      case 6:
+      case 7:
         return isDecember ? 158 : 137;
-      case 2: // Cabaña La Lomita
+      case 2:
+      case 4:
         return isDecember ? 337 : 297;
-      case 4: // Cabaña Mitibibo
-        return isDecember ? 337 : 297;
-      case 5: // Galería Llano Grande
+      case 5:
+      case 8:
+      case 9:
         return isDecember ? 76 : 64;
-      case 3: // Galería La Manita
+      case 3:
         return isDecember ? 70 : 60;
       default:
         return 0;
@@ -552,9 +631,9 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                             </div>
                           </div>
                           <div className="text-right shrink-0">
-                            <span className="text-2xl font-serif text-brand-terracotta">€{roomPriceDetails.nightlyRate}</span>
+                            <span className="text-2xl font-serif text-brand-terracotta">${roomPriceDetails.nightlyRate}</span>
                             <p className="text-[9px] text-brand-primary/40 uppercase tracking-widest leading-none">/ noche total</p>
-                            <p className="text-[8px] text-brand-primary/30 mt-1 font-mono">Hab: €{roomPriceDetails.roomNightly} | Alim: €{roomPriceDetails.mealsNightly}</p>
+                            <p className="text-[8px] text-brand-primary/30 mt-1 font-mono">Hab: ${roomPriceDetails.roomNightly} | Alim: ${roomPriceDetails.mealsNightly}</p>
                           </div>
                         </div>
 
@@ -738,30 +817,41 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                     {selectedDates.start?.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} a{' '}
                     {selectedDates.end?.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} ({totalNights} {totalNights === 1 ? 'noche' : 'noches'})
                   </p>
+                  <div className="flex items-center gap-4 mt-2 bg-brand-terracotta/5 border border-brand-terracotta/10 rounded-xl px-3 py-2">
+                    <div className="text-center">
+                      <p className="text-[8px] uppercase tracking-widest text-brand-primary/40 font-bold">Check-in</p>
+                      <p className="text-[10px] font-bold text-brand-terracotta">🕑 {hotelSettings.checkin_time}</p>
+                    </div>
+                    <div className="w-px h-6 bg-brand-terracotta/20 mx-1" />
+                    <div className="text-center">
+                      <p className="text-[8px] uppercase tracking-widest text-brand-primary/40 font-bold">Check-out</p>
+                      <p className="text-[10px] font-bold text-brand-terracotta">🕚 {hotelSettings.checkout_time}</p>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="pt-3 border-t border-brand-primary/5 space-y-2.5 text-xs">
                   <div className="flex justify-between text-brand-primary/60">
                     <span>Hospedaje ({totalNights} {totalNights === 1 ? 'noche' : 'noches'}):</span>
-                    <span className="font-semibold font-mono">€{pricing.roomTotal}</span>
+                    <span className="font-semibold font-mono">${pricing.roomTotal}</span>
                   </div>
                   <div className="flex justify-between text-brand-primary/60">
                     <span>Alimentación ({totalNights} {totalNights === 1 ? 'noche' : 'noches'}):</span>
-                    <span className="font-semibold font-mono">€{pricing.mealsTotal}</span>
+                    <span className="font-semibold font-mono">${pricing.mealsTotal}</span>
                   </div>
                   <div className="flex justify-between font-bold text-sm pt-2 border-t border-brand-primary/5">
                     <span className="text-brand-primary">Total Estadía:</span>
-                    <span className="text-brand-wood font-mono">€{totalStayPrice}</span>
+                    <span className="text-brand-wood font-mono">${totalStayPrice}</span>
                   </div>
                   
                   <div className="flex justify-between p-3 bg-brand-neutral/40 rounded-xl font-serif text-brand-wood text-sm mt-2">
                     <span>Adelanto Requerido ({depositPercent}%):</span>
-                    <span className="font-bold text-brand-terracotta font-mono">€{depositAmount}</span>
+                    <span className="font-bold text-brand-terracotta font-mono">${depositAmount}</span>
                   </div>
                   {remainingAmount > 0 && (
                     <div className="flex justify-between text-brand-primary/60 px-3 text-[11px] font-mono">
                       <span>Saldo restante (50%):</span>
-                      <span>€{remainingAmount}</span>
+                      <span>${remainingAmount}</span>
                     </div>
                   )}
                   <p className="text-[10px] text-brand-terracotta text-center font-medium mt-2 leading-relaxed bg-brand-terracotta/5 p-2.5 rounded-xl border border-brand-terracotta/10">
@@ -894,6 +984,32 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                           {copiedField === 'pm_email' ? 'Copiado!' : 'Copiar'}
                         </button>
                       </div>
+
+                      {/* Monto de Conversión y Nota de Transparencia */}
+                      {loadingRate ? (
+                        <div className="text-center py-2 text-brand-primary/40 text-[10px] animate-pulse">Consultando tasa oficial BCV del Euro...</div>
+                      ) : bcvEuroRate ? (
+                        <div className="space-y-3 pt-2">
+                          <div className="p-3.5 bg-brand-terracotta/5 rounded-xl border border-brand-terracotta/10 space-y-1">
+                            <p className="text-[9px] uppercase tracking-widest text-brand-terracotta font-bold">Monto a pagar en Bolívares (Bs.)</p>
+                            <p className="text-base font-bold text-brand-wood font-mono">
+                              Bs. {(depositAmount * bcvEuroRate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                            <p className="text-[9px] text-brand-primary/50 leading-normal">
+                              Calculado sobre un adelanto de <strong>${depositAmount} USD</strong> a la tasa oficial del Euro (BCV): <strong>Bs. {bcvEuroRate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                            </p>
+                          </div>
+                          
+                          <div className="p-3.5 bg-brand-neutral/40 rounded-2xl text-[10px] text-brand-primary/70 leading-relaxed border border-brand-primary/5 flex flex-col gap-1 shadow-sm">
+                            <p className="font-bold text-[10px] uppercase tracking-wide text-brand-wood">Nota de Transparencia:</p>
+                            <p>
+                              Para su total tranquilidad y de acuerdo a nuestras políticas de facturación, los pagos recibidos en Bolívares (Bs.) se calculan tomando como referencia la tasa oficial del <strong>Euro (EUR)</strong> publicada por el Banco Central de Venezuela (BCV), con la finalidad de mitigar el diferencial cambiario y costos de reposición.
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-center py-2 text-brand-primary/40 text-[10px]">Obteniendo tasa referencial...</div>
+                      )}
                     </motion.div>
                   )}
                 </div>
@@ -929,7 +1045,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                 {selectedUnits.length} {selectedUnits.length === 1 ? 'Hospedaje' : 'Hospedajes'}
               </p>
               <p className="text-white text-2xl font-serif">
-                {selectedUnits.length > 0 ? `€${totalStayPrice}` : '--'}
+                {selectedUnits.length > 0 ? `$${totalStayPrice}` : '--'}
               </p>
             </div>
             <button 
@@ -957,7 +1073,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
         >
           <div>
             <p className="text-white/50 text-[10px] uppercase tracking-[0.2em] font-bold">{depositPercent}% para Reservar</p>
-            <p className="text-white text-2xl font-serif">€{depositAmount}</p>
+            <p className="text-white text-2xl font-serif">${depositAmount}</p>
           </div>
           <button 
             disabled={!selectedPayment}
@@ -973,8 +1089,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
 *CI:* ${formData.ci}
 *Tlf:* ${formData.tlf}
 *Correo:* ${formData.correo}
-*Fecha de entrada:* ${selectedDates.start.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
-*Fecha de salida:* ${selectedDates.end.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })} (${totalNights} ${totalNights === 1 ? 'noche' : 'noches'})
+*Fecha de entrada:* ${selectedDates.start.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })} *(Check-in a partir de las ${hotelSettings.checkin_time})*
+*Fecha de salida:* ${selectedDates.end.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })} *(Check-out hasta las ${hotelSettings.checkout_time})* (${totalNights} ${totalNights === 1 ? 'noche' : 'noches'})
 *Hospedajes:* ${selectedData.map(d => d.title).join(' + ')}
 *Cantidad adultos:* ${occupants.adults}
 *Cantidad de niños (3 a 12 años):* ${occupants.children}
@@ -984,13 +1100,16 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
 
 ---
 *Resumen de Pago:*
-*Hospedaje (${totalNights} ${totalNights === 1 ? 'noche' : 'noches'}):* €${pricing.roomTotal}
-*Alimentación (${totalNights} ${totalNights === 1 ? 'noche' : 'noches'}):* €${pricing.mealsTotal}
-*Total Estadía:* €${totalStayPrice}
-*Monto de Adelanto Requerido (${depositPercent}%):* €${depositAmount}
-${remainingAmount > 0 ? `*Monto restante (50%):* €${remainingAmount}\n*Política de saldo restante:* ${remainingPolicyText}` : '*Monto restante:* €0 (Reserva liquidada al 100%)'}
+*Hospedaje (${totalNights} ${totalNights === 1 ? 'noche' : 'noches'}):* $${pricing.roomTotal}
+*Alimentación (${totalNights} ${totalNights === 1 ? 'noche' : 'noches'}):* $${pricing.mealsTotal}
+*Total Estadía:* $${totalStayPrice}
+*Monto de Adelanto Requerido (${depositPercent}%):* $${depositAmount}
+${remainingAmount > 0 ? `*Monto restante (50%):* $${remainingAmount}\n*Política de saldo restante:* ${remainingPolicyText}` : '*Monto restante:* $0 (Reserva liquidada al 100%)'}
 
 *Método de Pago Seleccionado:* ${selectedPayment === 'zelle' ? 'Zelle' : 'Pago Móvil (Bancamiga)'}
+${selectedPayment === 'pago_movil' && bcvEuroRate ? `*Monto en Bolívares a transferir:* Bs. ${(depositAmount * bcvEuroRate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+*Tasa Oficial del Euro (BCV):* Bs. ${bcvEuroRate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+_(Nota: Los pagos en bolívares se calculan a tasa BCV del euro por políticas de facturación)_` : ''}
 *Código de Reserva:* ${bookingCode}
 
 Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
@@ -1048,9 +1167,10 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
                     total_amount: roomTotal,
                     amount_paid: roomDeposit,
                     payment_status: depositPercent === 100 ? 'completo' : 'parcial',
-                    payment_method: 'transferencia',
+                    payment_method: selectedPayment || 'transferencia',
                     status: initialStatus,
-                    special_notes: `${notes}${N > 1 ? `. Código de grupo: ${bookingCode}` : ''}`
+                    special_notes: `${notes}${N > 1 ? `. Código de grupo: ${bookingCode}` : ''}`,
+                    locator: bookingCode
                   };
                 });
 
@@ -1074,7 +1194,8 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
                   depositPercent: depositPercent,
                   remainingPolicyText: remainingPolicyText,
                   selectedPayment: selectedPayment,
-                  totalNights: totalNights
+                  totalNights: totalNights,
+                  bcvEuroRate: bcvEuroRate
                 });
               }
             }}

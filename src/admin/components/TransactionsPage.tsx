@@ -11,9 +11,9 @@ interface Props {
 type DatePeriod = 'hoy' | 'semana' | 'mes' | 'año' | 'personalizado' | 'todo'
 
 const fmt = (n: number) =>
-  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
+  new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
 
-const incomeCategories: TransactionCategory[] = ['alojamiento', 'restaurante', 'excursiones', 'bar_cava', 'otros_ingresos']
+const incomeCategories: TransactionCategory[] = ['alojamiento', 'restaurante', 'bebidas', 'almuerzos', 'pasapalos', 'excursiones', 'bar_cava', 'otros_ingresos']
 const expenseCategories: TransactionCategory[] = ['empleados', 'alimentos', 'mantenimiento', 'servicios', 'comisiones', 'otros_egresos']
 const paymentMethods: PaymentMethod[] = ['efectivo', 'transferencia', 'tarjeta', 'cheque']
 
@@ -26,7 +26,18 @@ const periodLabels: Record<DatePeriod, string> = {
   todo: 'Todo',
 }
 
-const mapDbTransactionToReact = (db: any): Transaction => ({
+interface DbTransaction {
+  id: string
+  date: string
+  type: string
+  category: string
+  description: string
+  amount: number | string
+  payment_method: string
+  related_to?: string | null
+}
+
+const mapDbTransactionToReact = (db: DbTransaction): Transaction => ({
   id: db.id,
   date: db.date,
   type: db.type as TransactionType,
@@ -85,48 +96,57 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
     relatedTo: '',
   })
 
-  const fetchTransactions = async () => {
-    setLoading(true)
-    const { data, error } = await supabase
-      .from('transactions')
-      .select('*')
-      .order('date', { ascending: false })
-
-    if (error) {
-      console.error('Error fetching transactions:', error)
-      setTransactions(mockTransactions)
-    } else if (data && data.length > 0) {
-      setTransactions(data.map(mapDbTransactionToReact))
-    } else {
-      // Seed table with mockTransactions
-      const dbMocks = mockTransactions.map(t => ({
-        date: t.date,
-        type: t.type,
-        category: t.category,
-        description: t.description,
-        amount: t.amount,
-        payment_method: t.paymentMethod,
-        related_to: t.relatedTo || null
-      }))
-      const { data: inserted, error: insErr } = await supabase
-        .from('transactions')
-        .insert(dbMocks)
-        .select('*')
-      
-      if (insErr) {
-        console.error('Error seeding transactions:', insErr)
-        setTransactions(mockTransactions)
-      } else if (inserted) {
-        setTransactions(inserted.map(mapDbTransactionToReact))
-      } else {
-        setTransactions(mockTransactions)
-      }
-    }
-    setLoading(false)
-  }
-
   useEffect(() => {
+    let active = true
+
+    const fetchTransactions = async () => {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('date', { ascending: false })
+
+      if (!active) return
+
+      if (error) {
+        console.error('Error fetching transactions:', error)
+        setTransactions(mockTransactions)
+      } else if (data && data.length > 0) {
+        setTransactions(data.map(mapDbTransactionToReact))
+      } else {
+        // Seed table with mockTransactions
+        const dbMocks = mockTransactions.map(t => ({
+          date: t.date,
+          type: t.type,
+          category: t.category,
+          description: t.description,
+          amount: t.amount,
+          payment_method: t.paymentMethod,
+          related_to: t.relatedTo || null
+        }))
+        const { data: inserted, error: insErr } = await supabase
+          .from('transactions')
+          .insert(dbMocks)
+          .select('*')
+        
+        if (!active) return
+
+        if (insErr) {
+          console.error('Error seeding transactions:', insErr)
+          setTransactions(mockTransactions)
+        } else if (inserted) {
+          setTransactions(inserted.map(mapDbTransactionToReact))
+        } else {
+          setTransactions(mockTransactions)
+        }
+      }
+      setLoading(false)
+    }
+
     fetchTransactions()
+
+    return () => {
+      active = false
+    }
   }, [])
 
   const filtered = useMemo(() => {
@@ -461,7 +481,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Monto (ARS)</label>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Monto ($)</label>
                   <input
                     type="number"
                     placeholder="0"

@@ -9,39 +9,57 @@ import type { Transaction, TransactionType, TransactionCategory, PaymentMethod }
 import { supabase } from '../../lib/supabase'
 
 const fmt = (n: number) =>
-  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
+  new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
+
+interface DbTransaction {
+  id: string
+  type: string
+  category: string
+  description: string
+  amount: number | string
+  date: string
+  payment_method: string
+  related_to?: string | null
+}
 
 const ReportsPage: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedMonth, setSelectedMonth] = useState('2026-05')
 
-  const fetchTransactions = async () => {
-    setLoading(true)
-    const { data, error } = await supabase
-      .from('transactions')
-      .select('*')
-      .order('date', { ascending: false })
-
-    if (error) {
-      console.error('Error fetching transactions:', error)
-    } else if (data) {
-      setTransactions(data.map((db: any) => ({
-        id: db.id,
-        date: db.date,
-        type: db.type as TransactionType,
-        category: db.category as TransactionCategory,
-        description: db.description,
-        amount: Number(db.amount) || 0,
-        paymentMethod: db.payment_method as PaymentMethod,
-        relatedTo: db.related_to || ''
-      })))
-    }
-    setLoading(false)
-  }
-
   useEffect(() => {
+    let active = true
+
+    const fetchTransactions = async () => {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('date', { ascending: false })
+
+      if (!active) return
+
+      if (error) {
+        console.error('Error fetching transactions:', error)
+      } else if (data) {
+        setTransactions(data.map((db: DbTransaction) => ({
+          id: db.id,
+          date: db.date,
+          type: db.type as TransactionType,
+          category: db.category as TransactionCategory,
+          description: db.description,
+          amount: Number(db.amount) || 0,
+          paymentMethod: db.payment_method as PaymentMethod,
+          relatedTo: db.related_to || ''
+        })))
+      }
+      setLoading(false)
+    }
+
     fetchTransactions()
+
+    return () => {
+      active = false
+    }
   }, [])
 
   const txList = transactions.length > 0 ? transactions : mockTransactions

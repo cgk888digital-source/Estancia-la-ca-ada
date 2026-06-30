@@ -10,6 +10,7 @@ import EmployeesPage from './admin/components/EmployeesPage.tsx'
 import ReportsPage from './admin/components/ReportsPage.tsx'
 import MenuPage from './admin/components/MenuPage.tsx'
 import BookingsPage from './admin/components/BookingsPage.tsx'
+import RatesPage from './admin/components/RatesPage.tsx'
 import { registerSW } from 'virtual:pwa-register'
 
 registerSW({ immediate: true })
@@ -27,6 +28,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="empleados" element={<EmployeesPage />} />
           <Route path="reportes" element={<ReportsPage />} />
           <Route path="menu" element={<MenuPage />} />
+          <Route path="tarifas" element={<RatesPage />} />
         </Route>
         {/* Guest mobile app */}
         <Route path="/*" element={<App />} />
