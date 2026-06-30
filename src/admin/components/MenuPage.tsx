@@ -290,7 +290,7 @@ export default function MenuPage() {
                     value={form.description ?? ''}
                     onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                     placeholder="Ej: Con vegetales salteados y limón (opcional)"
-                    rows={2}
+                    rows={5}
                     className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#C5A059] resize-none"
                   />
                 </div>

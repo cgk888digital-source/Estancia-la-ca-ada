@@ -1,26 +1,47 @@
 import React, { useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ArrowDownCircle, ArrowUpCircle,
-  Users, BarChart3, Menu, X, LogOut, UtensilsCrossed, Calendar, DollarSign
+  Users, BarChart3, Menu, X, LogOut, UtensilsCrossed, Calendar, DollarSign, ClipboardList
 } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
+import LoginPage from './LoginPage'
 
 const navItems = [
-  { to: '/admin', label: 'Dashboard', icon: <LayoutDashboard size={20} />, end: true },
-  { to: '/admin/reservas', label: 'Planner Reservas', icon: <Calendar size={20} /> },
-  { to: '/admin/ingresos', label: 'Ingresos', icon: <ArrowDownCircle size={20} /> },
-  { to: '/admin/egresos', label: 'Egresos', icon: <ArrowUpCircle size={20} /> },
-  { to: '/admin/empleados', label: 'Empleados', icon: <Users size={20} /> },
-  { to: '/admin/reportes', label: 'Reportes', icon: <BarChart3 size={20} /> },
-  { to: '/admin/menu', label: 'Menú Semanal', icon: <UtensilsCrossed size={20} /> },
-  { to: '/admin/tarifas', label: 'Tarifas y Descuentos', icon: <DollarSign size={20} /> },
+  { to: '/admin', label: 'Dashboard', icon: <LayoutDashboard size={20} />, end: true, roles: ['admin'] },
+  { to: '/admin/reservas', label: 'Planner Reservas', icon: <Calendar size={20} />, roles: ['admin', 'gerente'] },
+  { to: '/admin/ingresos', label: 'Ingresos', icon: <ArrowDownCircle size={20} />, roles: ['admin', 'gerente'] },
+  { to: '/admin/egresos', label: 'Egresos', icon: <ArrowUpCircle size={20} />, roles: ['admin', 'gerente'] },
+  { to: '/admin/empleados', label: 'Empleados', icon: <Users size={20} />, roles: ['admin', 'gerente'] },
+  { to: '/admin/reportes', label: 'Reportes', icon: <BarChart3 size={20} />, roles: ['admin'] },
+  { to: '/admin/menu', label: 'Menú Semanal', icon: <UtensilsCrossed size={20} />, roles: ['admin', 'gerente'] },
+  { to: '/admin/comandas', label: 'Comandas', icon: <ClipboardList size={20} />, roles: ['admin', 'gerente', 'empleado'] },
+  { to: '/admin/tarifas', label: 'Tarifas y Descuentos', icon: <DollarSign size={20} />, roles: ['admin'] },
 ]
 
 const AdminLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const { role, logout } = useAuth()
+  const navigate = useNavigate()
+  const location = useLocation()
+
+  if (!role) {
+    return <LoginPage />
+  }
+
+  // Filtrar los ítems del menú permitidos para el rol actual
+  const allowedNavItems = navItems.filter(item => item.roles.includes(role))
+
+  // Bloqueo de rutas en caso de que el rol cambie pero siga en URL no permitida
+  const currentItem = navItems.find(i => i.to === location.pathname || (i.to === '/admin' && location.pathname === '/admin'))
+  if (currentItem && !currentItem.roles.includes(role)) {
+    // Si intenta acceder a algo que no puede, redirigirlo a lo primero que sí puede
+    navigate(allowedNavItems[0].to, { replace: true })
+    return null
+  }
 
   return (
-    <div className="flex h-screen bg-gray-100 font-sans overflow-hidden">
+    <div className="flex h-screen bg-gray-100 font-sans overflow-hidden print:h-auto print:overflow-visible">
       {/* Sidebar overlay mobile */}
       {sidebarOpen && (
         <div
@@ -31,7 +52,7 @@ const AdminLayout: React.FC = () => {
 
       {/* Sidebar */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-30 flex flex-col w-64 bg-[#3D2B1F] text-white transition-transform duration-300
+        className={`fixed lg:static inset-y-0 left-0 z-30 flex flex-col w-64 bg-[#3D2B1F] text-white transition-transform duration-300 print:hidden
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
       >
         {/* Logo */}
@@ -55,7 +76,7 @@ const AdminLayout: React.FC = () => {
 
         {/* Nav */}
         <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto">
-          {navItems.map((item) => (
+          {allowedNavItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -75,21 +96,30 @@ const AdminLayout: React.FC = () => {
         </nav>
 
         {/* Footer */}
-        <div className="px-3 pb-6 border-t border-white/10 pt-4">
+        <div className="px-3 pb-6 border-t border-white/10 pt-4 flex flex-col gap-2">
+          <button
+            onClick={() => {
+              logout()
+              navigate('/admin')
+            }}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-white/40 hover:text-red-400 hover:bg-red-400/10 transition-all text-left"
+          >
+            <LogOut size={20} />
+            Cerrar Sesión
+          </button>
           <a
             href="/"
             className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-white/40 hover:text-white hover:bg-white/5 transition-all"
           >
-            <LogOut size={20} />
             Ver App Huésped
           </a>
         </div>
       </aside>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden print:overflow-visible">
         {/* Topbar */}
-        <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-4 shrink-0">
+        <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-4 shrink-0 print:hidden">
           <button
             onClick={() => setSidebarOpen(true)}
             className="lg:hidden p-2 rounded-lg hover:bg-gray-100 text-gray-600"
@@ -106,7 +136,7 @@ const AdminLayout: React.FC = () => {
         </header>
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto bg-[#F9F9F9] p-4 md:p-6 lg:p-8 print:overflow-visible print:p-0 print:bg-white">
           <Outlet />
         </main>
       </div>

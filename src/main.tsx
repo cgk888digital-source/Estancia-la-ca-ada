@@ -11,28 +11,34 @@ import ReportsPage from './admin/components/ReportsPage.tsx'
 import MenuPage from './admin/components/MenuPage.tsx'
 import BookingsPage from './admin/components/BookingsPage.tsx'
 import RatesPage from './admin/components/RatesPage.tsx'
+import ComandasPage from './admin/components/ComandasPage.tsx'
 import { registerSW } from 'virtual:pwa-register'
+
+import { AuthProvider } from './admin/context/AuthContext.tsx'
 
 registerSW({ immediate: true })
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <Routes>
-        {/* Admin panel */}
-        <Route path="/admin" element={<AdminLayout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="reservas" element={<BookingsPage />} />
-          <Route path="ingresos" element={<TransactionsPage typeFilter="ingreso" />} />
-          <Route path="egresos" element={<TransactionsPage typeFilter="egreso" />} />
-          <Route path="empleados" element={<EmployeesPage />} />
-          <Route path="reportes" element={<ReportsPage />} />
-          <Route path="menu" element={<MenuPage />} />
-          <Route path="tarifas" element={<RatesPage />} />
-        </Route>
-        {/* Guest mobile app */}
-        <Route path="/*" element={<App />} />
-      </Routes>
+      <AuthProvider>
+        <Routes>
+          {/* Admin panel */}
+          <Route path="/admin" element={<AdminLayout />}>
+            <Route index element={<Dashboard />} />
+            <Route path="reservas" element={<BookingsPage />} />
+            <Route path="ingresos" element={<TransactionsPage typeFilter="ingreso" />} />
+            <Route path="egresos" element={<TransactionsPage typeFilter="egreso" />} />
+            <Route path="empleados" element={<EmployeesPage />} />
+            <Route path="reportes" element={<ReportsPage />} />
+            <Route path="menu" element={<MenuPage />} />
+            <Route path="comandas" element={<ComandasPage />} />
+            <Route path="tarifas" element={<RatesPage />} />
+          </Route>
+          {/* Guest mobile app */}
+          <Route path="/*" element={<App />} />
+        </Routes>
+      </AuthProvider>
     </BrowserRouter>
   </StrictMode>,
 )

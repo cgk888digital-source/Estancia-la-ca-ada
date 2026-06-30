@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react'
-import { Plus, Check, X, UserCheck, UserX, DollarSign, Loader2, Users, Clock, Calendar } from 'lucide-react'
+import { Plus, Check, X, UserCheck, UserX, DollarSign, Loader2, Users, Clock, Calendar, Receipt } from 'lucide-react'
 import { mockEmployees } from '../data/mockData'
 import type { Employee } from '../types'
 import { supabase } from '../../lib/supabase'
+import { getBcvUsdRate } from '../../utils/exchangeRate'
+import ReceiptModal from './ReceiptModal'
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
@@ -32,12 +34,13 @@ const mapDbEmployeeToReact = (db: DbEmployee): Employee => ({
   lastPayment: db.last_payment || '',
   pendingPayment: db.pending_payment,
   employeeType: (db.employee_type || 'fijo') as 'fijo' | 'eventual',
-  paymentFrequency: (db.payment_frequency || 'mensual') as 'mensual' | 'semanal' | 'por_dias',
+  paymentFrequency: (db.payment_frequency || 'quincenal') as 'quincenal' | 'mensual' | 'semanal' | 'por_dias',
   dailyRate: Number(db.daily_rate) || 0,
   contractedDays: Number(db.contracted_days) || 0,
 })
 
 const FREQ_LABELS: Record<string, string> = {
+  quincenal: 'Quincenal',
   mensual: 'Mensual',
   semanal: 'Semanal',
   por_dias: 'Por Días',
@@ -138,6 +141,11 @@ const EmployeesPage: React.FC = () => {
   const [payEventualTarget, setPayEventualTarget] = useState<Employee | null>(null)
   const [payingEventual, setPayingEventual] = useState(false)
   const [activeTab, setActiveTab] = useState<'fijos' | 'eventuales'>('fijos')
+  const [receiptData, setReceiptData] = useState<{emp: Employee, amount: number, period: string, isHistory?: boolean, bcvRate?: number} | null>(null)
+  const [bcvRate, setBcvRate] = useState<number>(36.50)
+  
+  const [tipsBalance, setTipsBalance] = useState<Record<string, number>>({})
+  const [payingTips, setPayingTips] = useState<string | null>(null)
 
   const [form, setForm] = useState({
     name: '',
@@ -145,7 +153,7 @@ const EmployeesPage: React.FC = () => {
     hireDate: '',
     employeeType: 'fijo' as 'fijo' | 'eventual',
     salary: '',
-    paymentFrequency: 'mensual' as 'mensual' | 'semanal' | 'por_dias',
+    paymentFrequency: 'quincenal' as 'quincenal' | 'mensual' | 'semanal' | 'por_dias',
     dailyRate: '',
     contractedDays: '',
   })
@@ -153,6 +161,9 @@ const EmployeesPage: React.FC = () => {
   useEffect(() => {
     let active = true
     const fetchEmployees = async () => {
+      const rate = await getBcvUsdRate()
+      if (active) setBcvRate(rate)
+
       const { data, error } = await supabase
         .from('employees')
         .select('*')
@@ -194,6 +205,28 @@ const EmployeesPage: React.FC = () => {
       setLoading(false)
     }
     fetchEmployees()
+    
+    const fetchTips = async () => {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('type, amount, related_to')
+        .eq('category', 'propinas')
+        .not('related_to', 'is', null)
+        
+      if (!active || error || !data) return
+      
+      const balances: Record<string, number> = {}
+      data.forEach(tx => {
+        if (!tx.related_to) return
+        if (!balances[tx.related_to]) balances[tx.related_to] = 0
+        const amt = Number(tx.amount) || 0
+        if (tx.type === 'ingreso') balances[tx.related_to] += amt
+        else if (tx.type === 'egreso') balances[tx.related_to] -= amt
+      })
+      setTipsBalance(balances)
+    }
+    fetchTips()
+    
     return () => { active = false }
   }, [])
 
@@ -204,6 +237,30 @@ const EmployeesPage: React.FC = () => {
   const totalFijosPayroll = activeFijos.reduce((s, e) => s + e.salary, 0)
   const pendingFijos = activeFijos.filter(e => e.pendingPayment)
   const pendingFijosTotal = pendingFijos.reduce((s, e) => s + e.salary, 0)
+  
+  const handlePayTips = async (emp: Employee) => {
+    const balance = tipsBalance[emp.name] || 0
+    if (balance <= 0) return
+    setPayingTips(emp.id)
+    
+    const today = new Date().toISOString().split('T')[0]
+    
+    const { error } = await supabase.from('transactions').insert([{
+      date: today,
+      type: 'egreso',
+      category: 'propinas',
+      description: `Pago de propinas acumuladas — ${emp.name} (Tasa BCV: ${bcvRate} Bs/$)`,
+      amount: balance,
+      payment_method: 'transferencia',
+      related_to: emp.name,
+    }])
+    
+    if (!error) {
+      setTipsBalance(prev => ({ ...prev, [emp.name]: 0 }))
+      setReceiptData({ emp, amount: balance, period: 'Propinas Semanales' })
+    }
+    setPayingTips(null)
+  }
 
   // ── Pay fixed employee ────────────────────────────────────────────────────
   const handlePay = async (id: string) => {
@@ -223,7 +280,7 @@ const EmployeesPage: React.FC = () => {
         date: today,
         type: 'egreso',
         category: 'empleados',
-        description: `Pago nómina fija — ${emp.name}`,
+        description: `Pago nómina fija — ${emp.name} (Tasa BCV: ${bcvRate} Bs/$)`,
         amount: emp.salary,
         payment_method: 'transferencia',
         related_to: emp.name,
@@ -232,6 +289,9 @@ const EmployeesPage: React.FC = () => {
 
     setEmployees(prev => prev.map(e => e.id === id ? { ...e, pendingPayment: false, lastPayment: today } : e))
     setPaidId(null)
+    if (emp) {
+      setReceiptData({ emp, amount: emp.salary, period: 'Quincena' })
+    }
   }
 
   const handlePayAll = async () => {
@@ -252,7 +312,7 @@ const EmployeesPage: React.FC = () => {
       date: today,
       type: 'egreso',
       category: 'empleados',
-      description: `Pago nómina fija — ${emp.name}`,
+      description: `Pago nómina fija — ${emp.name} (Tasa BCV: ${bcvRate} Bs/$)`,
       amount: emp.salary,
       payment_method: 'transferencia',
       related_to: emp.name,
@@ -285,7 +345,7 @@ const EmployeesPage: React.FC = () => {
       date: today,
       type: 'egreso',
       category: 'empleados',
-      description: `Pago eventual — ${emp.name} (${freqLabel})`,
+      description: `Pago eventual — ${emp.name} (${freqLabel} - Tasa BCV: ${bcvRate} Bs/$)`,
       amount,
       payment_method: 'transferencia',
       related_to: emp.name,
@@ -294,6 +354,41 @@ const EmployeesPage: React.FC = () => {
     setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, lastPayment: today, pendingPayment: false } : e))
     setPayingEventual(false)
     setPayEventualTarget(null)
+    setReceiptData({ emp, amount, period: freqLabel })
+  }
+
+  const handleViewLastReceipt = async (emp: Employee) => {
+    if (!emp.lastPayment) return
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('category', 'empleados')
+      .eq('related_to', emp.name)
+      .eq('date', emp.lastPayment)
+      .order('created_at', { ascending: false })
+      .limit(1)
+
+    if (error || !data || data.length === 0) {
+      alert('No se encontró el comprobante de este pago.')
+      return
+    }
+
+    const tx = data[0]
+    const matchRate = tx.description.match(/Tasa BCV: ([\d.]+) Bs\/\$/)
+    const rate = matchRate ? Number(matchRate[1]) : bcvRate
+    
+    let period = 'Quincena'
+    if (emp.employeeType === 'eventual') {
+      const matchPeriod = tx.description.match(/\((.*?) - Tasa BCV/)
+      if (matchPeriod) {
+        period = matchPeriod[1]
+      } else {
+        const fallback = tx.description.match(/\((.*?)\)/)
+        if (fallback) period = fallback[1]
+      }
+    }
+
+    setReceiptData({ emp, amount: tx.amount, period, isHistory: true, bcvRate: rate })
   }
 
   // ── Save new employee ─────────────────────────────────────────────────────
@@ -312,7 +407,7 @@ const EmployeesPage: React.FC = () => {
       last_payment: null,
       pending_payment: isFijo,
       employee_type: form.employeeType,
-      payment_frequency: isFijo ? 'mensual' : form.paymentFrequency,
+      payment_frequency: isFijo ? 'quincenal' : form.paymentFrequency,
       daily_rate: isFijo ? 0 : Number(form.dailyRate),
       contracted_days: isFijo ? 0 : Number(form.contractedDays) || 0,
     }
@@ -327,7 +422,7 @@ const EmployeesPage: React.FC = () => {
     setTimeout(() => {
       setSaved(false)
       setShowModal(false)
-      setForm({ name: '', role: '', hireDate: '', employeeType: 'fijo', salary: '', paymentFrequency: 'mensual', dailyRate: '', contractedDays: '' })
+      setForm({ name: '', role: '', hireDate: '', employeeType: 'fijo', salary: '', paymentFrequency: 'quincenal', dailyRate: '', contractedDays: '' })
     }, 1200)
   }
 
@@ -366,7 +461,7 @@ const EmployeesPage: React.FC = () => {
         <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1 flex items-center gap-1"><Users size={11} /> Fijos Activos</p>
           <p className="text-2xl font-bold text-gray-900">{activeFijos.length}</p>
-          <p className="text-xs text-gray-400 mt-1">Nómina: {fmt(totalFijosPayroll)}/mes</p>
+          <p className="text-xs text-gray-400 mt-1">Nómina: {fmt(totalFijosPayroll)}/quincena</p>
         </div>
         <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1 flex items-center gap-1"><Clock size={11} /> Eventuales</p>
@@ -424,7 +519,7 @@ const EmployeesPage: React.FC = () => {
                   <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4 hidden sm:table-cell">Cargo</th>
                   <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4 hidden lg:table-cell">Último Pago</th>
                   <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4">Estado</th>
-                  <th className="text-right text-xs font-bold text-gray-400 uppercase tracking-widest px-6 py-4">Sueldo/mes</th>
+                  <th className="text-right text-xs font-bold text-gray-400 uppercase tracking-widest px-6 py-4">Sueldo / Propinas</th>
                   <th className="px-4 py-4" />
                 </tr>
               </thead>
@@ -446,9 +541,20 @@ const EmployeesPage: React.FC = () => {
                     </td>
                     <td className="px-4 py-4 hidden sm:table-cell"><span className="text-sm text-gray-600">{emp.role}</span></td>
                     <td className="px-4 py-4 hidden lg:table-cell">
-                      <span className="text-sm text-gray-500">
-                        {emp.lastPayment ? new Date(emp.lastPayment).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' }) : '—'}
-                      </span>
+                      {emp.lastPayment ? (
+                        <button
+                          onClick={() => handleViewLastReceipt(emp)}
+                          className="group flex items-center gap-1.5 px-2 py-1 -ml-2 rounded-lg hover:bg-gray-100 transition-colors"
+                          title="Ver recibo de pago"
+                        >
+                          <Receipt size={14} className="text-gray-400 group-hover:text-[#C5A059]" />
+                          <span className="text-sm text-gray-500 group-hover:text-gray-900 font-medium">
+                            {new Date(emp.lastPayment).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })}
+                          </span>
+                        </button>
+                      ) : (
+                        <span className="text-sm text-gray-500">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-4">
                       {emp.status === 'inactivo' ? (
@@ -459,17 +565,38 @@ const EmployeesPage: React.FC = () => {
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold"><UserCheck size={12} /> Pagado</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 text-right"><span className="text-sm font-bold text-gray-900">{fmt(emp.salary)}</span></td>
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex flex-col items-end">
+                        <span className="text-sm font-bold text-gray-900">{fmt(emp.salary)}</span>
+                        {(tipsBalance[emp.name] > 0) && (
+                          <span className="text-xs font-bold text-emerald-600 mt-0.5 bg-emerald-50 px-2 py-0.5 rounded-md">
+                            + {fmt(tipsBalance[emp.name])} propinas
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-4 text-right">
-                      {emp.status === 'activo' && emp.pendingPayment && (
-                        <button
-                          onClick={() => handlePay(emp.id)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all
-                            ${paidId === emp.id ? 'bg-emerald-500 text-white' : 'bg-violet-100 text-violet-700 hover:bg-violet-600 hover:text-white'}`}
-                        >
-                          {paidId === emp.id ? <Check size={14} /> : 'Pagar'}
-                        </button>
-                      )}
+                      <div className="flex justify-end gap-2">
+                        {emp.status === 'activo' && emp.pendingPayment && (
+                          <button
+                            onClick={() => handlePay(emp.id)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all
+                              ${paidId === emp.id ? 'bg-emerald-500 text-white' : 'bg-violet-100 text-violet-700 hover:bg-violet-600 hover:text-white'}`}
+                          >
+                            {paidId === emp.id ? <Check size={14} /> : 'Pagar Nómina'}
+                          </button>
+                        )}
+                        {(tipsBalance[emp.name] > 0) && (
+                          <button
+                            onClick={() => handlePayTips(emp)}
+                            disabled={payingTips === emp.id}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1
+                              ${payingTips === emp.id ? 'bg-emerald-500 text-white' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-600 hover:text-white'}`}
+                          >
+                            {payingTips === emp.id ? <Check size={14} /> : 'Pagar Propinas'}
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -490,7 +617,7 @@ const EmployeesPage: React.FC = () => {
                   <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4 hidden sm:table-cell">Cargo</th>
                   <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4">Modalidad</th>
                   <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4 hidden md:table-cell">Días Contrato</th>
-                  <th className="text-right text-xs font-bold text-gray-400 uppercase tracking-widest px-6 py-4">Tarifa/Día</th>
+                  <th className="text-right text-xs font-bold text-gray-400 uppercase tracking-widest px-6 py-4">Tarifa/Día / Propinas</th>
                   <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4 hidden lg:table-cell">Último Pago</th>
                   <th className="px-4 py-4" />
                 </tr>
@@ -526,9 +653,20 @@ const EmployeesPage: React.FC = () => {
                     </td>
                     <td className="px-6 py-4 text-right"><span className="text-sm font-bold text-gray-900">{fmt(emp.dailyRate)}</span></td>
                     <td className="px-4 py-4 hidden lg:table-cell">
-                      <span className="text-sm text-gray-500">
-                        {emp.lastPayment ? new Date(emp.lastPayment).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' }) : '—'}
-                      </span>
+                      {emp.lastPayment ? (
+                        <button
+                          onClick={() => handleViewLastReceipt(emp)}
+                          className="group flex items-center gap-1.5 px-2 py-1 -ml-2 rounded-lg hover:bg-gray-100 transition-colors"
+                          title="Ver recibo de pago"
+                        >
+                          <Receipt size={14} className="text-gray-400 group-hover:text-[#C5A059]" />
+                          <span className="text-sm text-gray-500 group-hover:text-gray-900 font-medium">
+                            {new Date(emp.lastPayment).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })}
+                          </span>
+                        </button>
+                      ) : (
+                        <span className="text-sm text-gray-500">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-4 text-right">
                       {emp.status === 'activo' && (
@@ -555,6 +693,18 @@ const EmployeesPage: React.FC = () => {
           onConfirm={handlePayEventual}
           onClose={() => setPayEventualTarget(null)}
           paying={payingEventual}
+        />
+      )}
+
+      {/* ── Receipt Modal ── */}
+      {receiptData && (
+        <ReceiptModal
+          emp={receiptData.emp}
+          amountUsd={receiptData.amount}
+          period={receiptData.period}
+          bcvRate={receiptData.bcvRate || bcvRate}
+          isHistory={receiptData.isHistory}
+          onClose={() => setReceiptData(null)}
         />
       )}
 
@@ -601,7 +751,7 @@ const EmployeesPage: React.FC = () => {
               {form.employeeType === 'fijo' && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Sueldo Mensual ($)</label>
+                    <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Sueldo Quincenal ($)</label>
                     <input type="number" placeholder="0" value={form.salary}
                       onChange={e => setForm(f => ({ ...f, salary: e.target.value }))}
                       className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]" />

@@ -321,7 +321,7 @@ const RestaurantMenu: React.FC<{ onBack: () => void; onOpenCava: () => void }> =
                       )}
                     </div>
                     {dish.description && (
-                      <p className="text-brand-primary/55 text-[11px] leading-relaxed">{dish.description}</p>
+                      <p className="text-brand-primary/55 text-[11px] leading-relaxed whitespace-pre-line">{dish.description}</p>
                     )}
                     {dish.tag && (
                       <span className="mt-2 self-start text-[9px] uppercase tracking-widest border border-brand-olive/30 text-brand-olive px-2 py-0.5 rounded-full font-bold">

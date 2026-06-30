@@ -81,7 +81,7 @@ const Dashboard: React.FC = () => {
           lastPayment: db.last_payment || '',
           pendingPayment: db.pending_payment,
           employeeType: (db.employee_type || 'fijo') as 'fijo' | 'eventual',
-          paymentFrequency: (db.payment_frequency || 'mensual') as 'mensual' | 'semanal' | 'por_dias',
+          paymentFrequency: (db.payment_frequency || 'quincenal') as 'quincenal' | 'mensual' | 'semanal' | 'por_dias',
           dailyRate: Number(db.daily_rate) || 0,
           contractedDays: Number(db.contracted_days) || 0,
         })))

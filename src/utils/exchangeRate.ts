@@ -34,3 +34,19 @@ export async function getBcvEuroRate(): Promise<number> {
     return DEFAULT_FALLBACK_RATE;
   }
 }
+export async function getBcvUsdRate(): Promise<number> {
+  try {
+    const response = await fetch('https://ve.dolarapi.com/v1/dolares/oficial');
+    if (!response.ok) {
+      throw new Error(`Error en respuesta de API: ${response.status}`);
+    }
+    const data: DolarApiResponse = await response.json();
+    if (data && typeof data.promedio === 'number' && data.promedio > 0) {
+      return data.promedio;
+    }
+    throw new Error('Datos de tasa de cambio no válidos en la respuesta');
+  } catch (err) {
+    console.error('Error consultando la tasa del dólar en DolarApi, usando tasa de respaldo:', err);
+    return 36.50; // Tasa de respaldo aproximada
+  }
+}

@@ -116,43 +116,43 @@ export const weeklyMenu: MenuSection[] = [
     items: [
       {
         name: 'Día 1: Trucha Salmonada en Salsa Thai',
-        description: 'Abrebocas sorpresa de cortesía · Entrada: Crema de calabacín · Principal: Trucha Salmonada bañada en una reducción de salsa estilo Thai, acompañada de puré de papas rústico y vegetales salteados · Postre: Turrón de chocolate casero.',
+        description: '1. Abreboca: Sorpresa de cortesía\n2. Entrada: Crema de calabacín\n3. Plato principal: Trucha Salmonada bañada en una reducción de salsa estilo Thai, acompañada de puré de papas rústico y vegetales salteados\n4. Postre, café o té: Turrón de chocolate casero.',
         tag: 'Día 1',
         image: 'platos/trucha-verduras.png'
       },
       {
         name: 'Día 2: Lomito en Salsa Bearnesa',
-        description: 'Abrebocas sorpresa de cortesía · Entrada: Sopa tradicional de cebolla · Principal: Lomito de res premium cocido al término en salsa Bearnesa, acompañado de papas fritas crujientes y mezclum de lechugas frescas con queso de cabra y vinagreta de miel y mostaza · Postre: Pie de limón.',
+        description: '1. Abreboca: Sorpresa de cortesía\n2. Entrada: Sopa tradicional de cebolla\n3. Plato principal: Lomito de res premium cocido al término en salsa Bearnesa, acompañado de papas fritas crujientes y mezclum de lechugas frescas con queso de cabra y vinagreta de miel y mostaza\n4. Postre, café o té: Pie de limón.',
         tag: 'Día 2',
         image: 'platos/carne-papas.png'
       },
       {
         name: 'Día 3: Pollo al Curry con Acompañantes',
-        description: 'Abrebocas sorpresa de cortesía · Entrada: Crema de apio andino · Principal: Pollo al curry aromático servido con sus guarniciones tradicionales (maní crujiente, mango verde o piña y pasitas), arroz blanco y plátano horneado · Postre: Marquesa de chocolate.',
+        description: '1. Abreboca: Sorpresa de cortesía\n2. Entrada: Crema de apio andino\n3. Plato principal: Pollo al curry aromático servido con sus guarniciones tradicionales (maní crujiente, mango verde o piña y pasitas), arroz blanco y plátano horneado\n4. Postre, café o té: Marquesa de chocolate.',
         tag: 'Día 3',
         image: 'platos/bocado-1.png'
       },
       {
         name: 'Día 4: Noche Mexicana (Buffet Libre)',
-        description: 'Abrebocas sorpresa de cortesía · Principal: Tacos Mexicanos servidos tipo buffet con tortillas de maíz y trigo preparadas a mano en casa, rellenos de pollo y carne molida sazonada, acompañados de pico de gallo, guacamole y frijoles (¡pueden repetir cuantas veces deseen! 😃) · Postre: Tres leches.',
+        description: '1. Abreboca: Sorpresa de cortesía\n2. Entrada: Nachos y salsas mexicanas\n3. Plato principal: Tacos Mexicanos servidos tipo buffet con tortillas de maíz y trigo preparadas a mano en casa, rellenos de pollo y carne molida sazonada, acompañados de pico de gallo, guacamole y frijoles\n4. Postre, café o té: Tres leches.',
         tag: 'Día 4',
         image: 'platos/ceviche.png'
       },
       {
         name: 'Día 5: Asado Negro Tradicional',
-        description: 'Abrebocas sorpresa de cortesía · Entrada: Crema especial del día · Principal: Delicioso Asado Negro caramelizado al estilo tradicional venezolano, acompañado de pasta al pesto o mantequilla y torta de plátanos horneada · Postre: Crumble de piña.',
+        description: '1. Abreboca: Sorpresa de cortesía\n2. Entrada: Crema especial del día\n3. Plato principal: Delicioso Asado Negro caramelizado al estilo tradicional venezolano, acompañado de pasta al pesto o mantequilla y torta de plátanos horneada\n4. Postre, café o té: Crumble de piña.',
         tag: 'Día 5',
         image: 'platos/milanesa.png'
       },
       {
         name: 'Día 6: Parrilla de la Estancia (All You Can Eat)',
-        description: 'Abrebocas sorpresa de cortesía · Principal: Gran Parrilla libre que incluye lomito premium asado a la brasa al gusto, chorizos, morcillas artesanales, tostones crujientes de plátano, yuca hervida, ensalada de pico de gallo fresca, natilla y picante de la casa · Postre: Quesillo tradicional.',
+        description: '1. Abreboca: Sorpresa de cortesía\n2. Entrada: Estación de ensaladas y guarniciones\n3. Plato principal: Gran Parrilla libre que incluye lomito premium asado a la brasa al gusto, chorizos, morcillas artesanales, tostones crujientes de plátano, yuca hervida, ensalada de pico de gallo fresca, natilla y picante de la casa\n4. Postre, café o té: Quesillo tradicional.',
         tag: 'Día 6',
         image: 'platos/ensalada.png'
       },
       {
         name: 'Día 7: Trucha al Ajillo o Champiñones',
-        description: 'Abrebocas sorpresa de cortesía · Entrada: Crema sedosa de auyama · Principal: Trucha fresca del páramo preparada al ajillo o bañada en salsa cremosa de champiñones, acompañada de papitas salteadas al romero y vegetales frescos · Postre: Pie de parchita.',
+        description: '1. Abreboca: Sorpresa de cortesía\n2. Entrada: Crema sedosa de auyama\n3. Plato principal: Trucha fresca del páramo preparada al ajillo o bañada en salsa cremosa de champiñones, acompañada de papitas salteadas al romero y vegetales frescos\n4. Postre, café o té: Pie de parchita.',
         tag: 'Día 7',
         image: 'platos/trucha-verduras.png'
       }

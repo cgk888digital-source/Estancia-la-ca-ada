@@ -1,4 +1,4 @@
-import type { Transaction, Employee, MonthlyData } from '../types'
+import type { Transaction, Employee, MonthlyData, TransactionCategory } from '../types'
 
 export const mockTransactions: Transaction[] = [
   // INGRESOS - Mayo 2026
@@ -36,14 +36,14 @@ export const mockTransactions: Transaction[] = [
 ]
 
 export const mockEmployees: Employee[] = [
-  { id: 'e001', name: 'Carlos Méndez', role: 'Chef Principal', salary: 120000, status: 'activo', hireDate: '2022-03-01', lastPayment: '2026-04-01', pendingPayment: true, employeeType: 'fijo', paymentFrequency: 'mensual', dailyRate: 0, contractedDays: 0 },
-  { id: 'e002', name: 'Ana Flores', role: 'Jefa de Recepción', salary: 95000, status: 'activo', hireDate: '2021-06-15', lastPayment: '2026-04-01', pendingPayment: true, employeeType: 'fijo', paymentFrequency: 'mensual', dailyRate: 0, contractedDays: 0 },
-  { id: 'e003', name: 'Roberto Sosa', role: 'Mozo / Sommelier', salary: 78000, status: 'activo', hireDate: '2023-01-10', lastPayment: '2026-04-01', pendingPayment: true, employeeType: 'fijo', paymentFrequency: 'mensual', dailyRate: 0, contractedDays: 0 },
-  { id: 'e004', name: 'María Gutiérrez', role: 'Mucama / Limpieza', salary: 65000, status: 'activo', hireDate: '2022-09-01', lastPayment: '2026-04-01', pendingPayment: true, employeeType: 'fijo', paymentFrequency: 'mensual', dailyRate: 0, contractedDays: 0 },
-  { id: 'e005', name: 'Diego Peralta', role: 'Guía de Excursiones', salary: 72000, status: 'activo', hireDate: '2023-05-20', lastPayment: '2026-04-01', pendingPayment: true, employeeType: 'fijo', paymentFrequency: 'mensual', dailyRate: 0, contractedDays: 0 },
-  { id: 'e006', name: 'Lucía Romero', role: 'Asistente de Cocina', salary: 58000, status: 'activo', hireDate: '2024-02-01', lastPayment: '2026-04-01', pendingPayment: true, employeeType: 'fijo', paymentFrequency: 'mensual', dailyRate: 0, contractedDays: 0 },
-  { id: 'e007', name: 'Jorge Acuña', role: 'Mantenimiento', salary: 68000, status: 'activo', hireDate: '2021-11-15', lastPayment: '2026-04-01', pendingPayment: false, employeeType: 'fijo', paymentFrequency: 'mensual', dailyRate: 0, contractedDays: 0 },
-  { id: 'e008', name: 'Valeria Torres', role: 'Terapeuta / Spa', salary: 75000, status: 'inactivo', hireDate: '2023-08-01', lastPayment: '2026-03-01', pendingPayment: false, employeeType: 'fijo', paymentFrequency: 'mensual', dailyRate: 0, contractedDays: 0 },
+  { id: 'e001', name: 'Carlos Méndez', role: 'Chef Principal', salary: 120000, status: 'activo', hireDate: '2022-03-01', lastPayment: '2026-04-01', pendingPayment: true, employeeType: 'fijo', paymentFrequency: 'quincenal', dailyRate: 0, contractedDays: 0 },
+  { id: 'e002', name: 'Ana Flores', role: 'Jefa de Recepción', salary: 95000, status: 'activo', hireDate: '2021-06-15', lastPayment: '2026-04-01', pendingPayment: true, employeeType: 'fijo', paymentFrequency: 'quincenal', dailyRate: 0, contractedDays: 0 },
+  { id: 'e003', name: 'Roberto Sosa', role: 'Mozo / Sommelier', salary: 78000, status: 'activo', hireDate: '2023-01-10', lastPayment: '2026-04-01', pendingPayment: true, employeeType: 'fijo', paymentFrequency: 'quincenal', dailyRate: 0, contractedDays: 0 },
+  { id: 'e004', name: 'María Gutiérrez', role: 'Mucama / Limpieza', salary: 65000, status: 'activo', hireDate: '2022-09-01', lastPayment: '2026-04-01', pendingPayment: true, employeeType: 'fijo', paymentFrequency: 'quincenal', dailyRate: 0, contractedDays: 0 },
+  { id: 'e005', name: 'Diego Peralta', role: 'Guía de Excursiones', salary: 72000, status: 'activo', hireDate: '2023-05-20', lastPayment: '2026-04-01', pendingPayment: true, employeeType: 'fijo', paymentFrequency: 'quincenal', dailyRate: 0, contractedDays: 0 },
+  { id: 'e006', name: 'Lucía Romero', role: 'Asistente de Cocina', salary: 58000, status: 'activo', hireDate: '2024-02-01', lastPayment: '2026-04-01', pendingPayment: true, employeeType: 'fijo', paymentFrequency: 'quincenal', dailyRate: 0, contractedDays: 0 },
+  { id: 'e007', name: 'Jorge Acuña', role: 'Mantenimiento', salary: 68000, status: 'activo', hireDate: '2021-11-15', lastPayment: '2026-04-01', pendingPayment: false, employeeType: 'fijo', paymentFrequency: 'quincenal', dailyRate: 0, contractedDays: 0 },
+  { id: 'e008', name: 'Valeria Torres', role: 'Terapeuta / Spa', salary: 75000, status: 'inactivo', hireDate: '2023-08-01', lastPayment: '2026-03-01', pendingPayment: false, employeeType: 'fijo', paymentFrequency: 'quincenal', dailyRate: 0, contractedDays: 0 },
 ]
 
 export const mockMonthlyData: MonthlyData[] = [
@@ -56,7 +56,8 @@ export const mockMonthlyData: MonthlyData[] = [
   { month: 'May', ingresos: 581380, egresos: 342900 },
 ]
 
-export const categoryLabels: Record<string, string> = {
+export const categoryLabels: Record<TransactionCategory, string> = {
+  // Ingresos
   alojamiento: 'Alojamiento',
   restaurante: 'Restaurante',
   bebidas: 'Bebidas',
@@ -65,15 +66,18 @@ export const categoryLabels: Record<string, string> = {
   excursiones: 'Excursiones',
   bar_cava: 'Bar / Cava',
   otros_ingresos: 'Otros Ingresos',
+  propinas: 'Propinas',
+
+  // Egresos
   empleados: 'Empleados',
-  alimentos: 'Alimentos y Bebidas',
+  alimentos: 'Alimentos',
   mantenimiento: 'Mantenimiento',
   servicios: 'Servicios',
   comisiones: 'Comisiones',
   otros_egresos: 'Otros Egresos',
 }
 
-export const categoryColors: Record<string, string> = {
+export const categoryColors: Record<TransactionCategory, string> = {
   alojamiento: '#C5A059',
   restaurante: '#A65D47',
   bebidas: '#0EA5E9',
@@ -82,6 +86,7 @@ export const categoryColors: Record<string, string> = {
   excursiones: '#5D6346',
   bar_cava: '#3D2B1F',
   otros_ingresos: '#8B9475',
+  propinas: '#10B981',
   empleados: '#EF4444',
   alimentos: '#F97316',
   mantenimiento: '#EAB308',

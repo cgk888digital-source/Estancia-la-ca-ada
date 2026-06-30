@@ -1,8 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react'
-import { Plus, Search, X, Check, CalendarDays, ChevronDown, Loader2 } from 'lucide-react'
+import { Plus, Search, X, Check, CalendarDays, ChevronDown, Loader2, Receipt } from 'lucide-react'
 import { mockTransactions, categoryLabels, categoryColors } from '../data/mockData'
-import type { Transaction, TransactionType, TransactionCategory, PaymentMethod } from '../types'
+import type { Transaction, TransactionType, TransactionCategory, PaymentMethod, Employee } from '../types'
 import { supabase } from '../../lib/supabase'
+import ReceiptModal from './ReceiptModal'
+import { useAuth } from '../context/AuthContext'
 
 interface Props {
   typeFilter?: TransactionType
@@ -77,6 +79,7 @@ function getDateRange(period: DatePeriod, customFrom: string, customTo: string):
 const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
+  const [viewReceipt, setViewReceipt] = useState<{emp: Employee, amountUsd: number, period: string, bcvRate: number} | null>(null)
   const [search, setSearch] = useState('')
   const [categoryF, setCategoryF] = useState<TransactionCategory | 'todas'>('todas')
   const [period, setPeriod] = useState<DatePeriod>('mes')
@@ -85,6 +88,8 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   const [showModal, setShowModal] = useState(false)
   const [saved, setSaved] = useState(false)
   const [showCategoryMenu, setShowCategoryMenu] = useState(false)
+  
+  const { role } = useAuth()
 
   const [form, setForm] = useState<Omit<Transaction, 'id'>>({
     date: new Date().toISOString().split('T')[0],
@@ -228,6 +233,46 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
 
   const periods: DatePeriod[] = ['hoy', 'semana', 'mes', 'año', 'personalizado', 'todo']
 
+  const handleViewReceipt = (tx: Transaction) => {
+    const isEventual = tx.description.toLowerCase().includes('eventual')
+    const matchRate = tx.description.match(/Tasa BCV: ([\d.]+) Bs\/\$/)
+    const bcvRate = matchRate ? Number(matchRate[1]) : 36.50
+    
+    let period = 'Quincena'
+    if (isEventual) {
+      const matchPeriod = tx.description.match(/\((.*?) - Tasa BCV/)
+      if (matchPeriod) {
+        period = matchPeriod[1]
+      } else {
+        // Fallback for older transactions
+        const fallback = tx.description.match(/\((.*?)\)/)
+        if (fallback) period = fallback[1]
+      }
+    }
+
+    const emp = {
+      id: '',
+      name: tx.relatedTo || 'Empleado',
+      role: isEventual ? 'Personal Eventual' : 'Personal Fijo',
+      employeeType: isEventual ? 'eventual' : 'fijo',
+      salary: 0,
+      status: 'activo',
+      hireDate: '',
+      lastPayment: tx.date,
+      pendingPayment: false,
+      paymentFrequency: 'quincenal',
+      dailyRate: 0,
+      contractedDays: 0,
+    } as Employee
+
+    setViewReceipt({
+      emp,
+      amountUsd: tx.amount,
+      period,
+      bcvRate
+    })
+  }
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -355,8 +400,8 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
         </div>
       </div>
 
-      {/* Summary bar (only when no typeFilter) */}
-      {!typeFilter && filtered.length > 0 && (
+      {/* Summary bar (only when no typeFilter and not gerente) */}
+      {!typeFilter && filtered.length > 0 && role !== 'gerente' && (
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-emerald-50 rounded-2xl px-4 py-3 border border-emerald-100">
             <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-0.5">Ingresos</p>
@@ -423,7 +468,16 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                     <td className="px-4 py-4 hidden lg:table-cell">
                       <span className="text-xs text-gray-500 capitalize">{tx.paymentMethod}</span>
                     </td>
-                    <td className="px-6 py-4 text-right">
+                    <td className="px-6 py-4 text-right flex items-center justify-end gap-3">
+                      {tx.category === 'empleados' && (
+                        <button
+                          onClick={() => handleViewReceipt(tx)}
+                          className="text-gray-400 hover:text-[#C5A059] transition-colors p-1"
+                          title="Ver recibo de pago"
+                        >
+                          <Receipt size={16} />
+                        </button>
+                      )}
                       <span className={`text-sm font-bold ${tx.type === 'ingreso' ? 'text-emerald-600' : 'text-red-500'}`}>
                         {tx.type === 'ingreso' ? '+' : '-'}{fmt(tx.amount)}
                       </span>
@@ -556,6 +610,18 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Visor de Recibo */}
+      {viewReceipt && (
+        <ReceiptModal
+          emp={viewReceipt.emp}
+          amountUsd={viewReceipt.amountUsd}
+          period={viewReceipt.period}
+          bcvRate={viewReceipt.bcvRate}
+          isHistory={true}
+          onClose={() => setViewReceipt(null)}
+        />
       )}
     </div>
   )

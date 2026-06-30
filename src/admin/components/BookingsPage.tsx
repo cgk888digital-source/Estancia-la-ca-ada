@@ -1,12 +1,13 @@
 import { useState, useMemo, useEffect } from 'react'
 import {
   Calendar, Users, Check, LogIn, LogOut, Trash2, Search, Plus, X, Phone, Mail,
-  Info, DollarSign, Baby, Sparkles, RefreshCw
+  Info, DollarSign, Baby, Sparkles, RefreshCw, Printer
 } from 'lucide-react'
 import { accommodationOptions } from '../../data/accommodations'
 import { mockBookings } from '../data/mockBookings'
 import { supabase } from '../../lib/supabase'
 import type { Booking } from '../types'
+import PrintableReservationsReport from './PrintableReservationsReport'
 
 // Helper to format currency
 const fmt = (n: number) =>
@@ -114,6 +115,12 @@ const calculateNights = (startStr: string, endStr: string) => {
   const diffTime = end.getTime() - start.getTime()
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
   return diffDays > 0 ? diffDays : 1
+}
+
+const getPaymentColorClasses = (paymentStatus: string) => {
+  if (paymentStatus === 'completo') return { bg: 'bg-emerald-500/10 border-emerald-300 text-emerald-900', bullet: 'bg-emerald-500', text: 'text-emerald-600', badge: 'bg-emerald-100 border-emerald-300 text-emerald-800' }
+  if (paymentStatus === 'parcial') return { bg: 'bg-blue-500/10 border-blue-300 text-blue-900', bullet: 'bg-blue-500', text: 'text-blue-600', badge: 'bg-blue-100 border-blue-300 text-blue-800' }
+  return { bg: 'bg-orange-500/10 border-orange-300 text-orange-900', bullet: 'bg-orange-500', text: 'text-orange-600', badge: 'bg-orange-100 border-orange-300 text-orange-800' }
 }
 
 export default function BookingsPage() {
@@ -497,9 +504,6 @@ export default function BookingsPage() {
     closeAddModal()
   }
 
-  // Visual state labels helper
-  const getBulletColor = (status: keyof typeof statusConfig) => statusConfig[status]?.bullet || 'bg-gray-400'
-
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[500px] gap-3">
@@ -510,8 +514,9 @@ export default function BookingsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* 1. Header with dynamic greetings */}
+    <>
+      <div className="space-y-6 print:hidden">
+        {/* 1. Header with dynamic greetings */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold font-serif text-gray-900 flex items-center gap-2.5">
@@ -521,14 +526,24 @@ export default function BookingsPage() {
             Supervisa la ocupación del hotel de la manera más sencilla e intuitiva. Hoy es 2 de Junio, 2026.
           </p>
         </div>
-        
-        <button
-          onClick={() => openAddModal()}
-          className="flex items-center justify-center gap-2 px-5 py-3 bg-[#C5A059] hover:bg-[#b8904a] text-white rounded-2xl text-sm font-bold transition-all shadow-md shadow-[#C5A059]/20 self-start md:self-auto active:scale-95"
-        >
-          <Plus size={18} />
-          Registrar Nueva Reserva
-        </button>
+        <div className="flex items-center gap-3 self-start md:self-auto print:hidden">
+          <button
+            onClick={() => window.print()}
+            className="flex items-center justify-center gap-2 px-5 py-3 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-2xl text-sm font-bold transition-all shadow-sm active:scale-95"
+          >
+            <Printer size={18} />
+            <span className="hidden sm:inline">Generar Reporte PDF</span>
+            <span className="sm:hidden">PDF</span>
+          </button>
+          <button
+            onClick={() => openAddModal()}
+            className="flex items-center justify-center gap-2 px-5 py-3 bg-[#C5A059] hover:bg-[#b8904a] text-white rounded-2xl text-sm font-bold transition-all shadow-md shadow-[#C5A059]/20 active:scale-95"
+          >
+            <Plus size={18} />
+            <span className="hidden sm:inline">Registrar Nueva Reserva</span>
+            <span className="sm:hidden">Nueva</span>
+          </button>
+        </div>
       </div>
 
       {/* 2. Interactive KPI Cards (Infant-level ease of reading) */}
@@ -629,6 +644,14 @@ export default function BookingsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {cabinStatesToday.map(({ accommodation, booking, status }) => {
             const conf = statusConfig[status]
+            let badgeBg = conf.bg
+            
+            if (['checkin_hoy', 'checkout_hoy', 'disponible', 'limpieza'].includes(status)) {
+              badgeBg = 'bg-white border-gray-200 text-gray-800 shadow-sm'
+            } else if (booking) {
+              badgeBg = getPaymentColorClasses(booking.paymentStatus).badge
+            }
+
             return (
               <div
                 key={accommodation.id}
@@ -644,7 +667,7 @@ export default function BookingsPage() {
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
                   
                   {/* Status badge in corner */}
-                  <div className={`absolute top-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[9px] font-extrabold uppercase tracking-widest ${conf.bg}`}>
+                  <div className={`absolute top-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[9px] font-extrabold uppercase tracking-widest ${badgeBg}`}>
                     {conf.icon}
                     {conf.label}
                   </div>
@@ -717,7 +740,7 @@ export default function BookingsPage() {
                     {status === 'checkin_hoy' && booking && (
                       <button
                         onClick={() => handleCheckIn(booking.id)}
-                        className="w-full flex items-center justify-center gap-1.5 py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm shadow-amber-500/10"
+                        className="w-full flex items-center justify-center gap-1.5 py-3 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
                       >
                         <LogIn size={14} /> Registrar Entrada
                       </button>
@@ -726,7 +749,7 @@ export default function BookingsPage() {
                     {status === 'checkout_hoy' && booking && (
                       <button
                         onClick={() => handleCheckOut(booking.id)}
-                        className="w-full flex items-center justify-center gap-1.5 py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm shadow-orange-500/10"
+                        className="w-full flex items-center justify-center gap-1.5 py-3 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
                       >
                         <LogOut size={14} /> Registrar Salida
                       </button>
@@ -735,7 +758,11 @@ export default function BookingsPage() {
                     {status === 'ocupado' && booking && (
                       <button
                         onClick={() => setSelectedBooking(booking)}
-                        className="w-full py-3 bg-gray-50 hover:bg-gray-100 text-gray-600 border border-gray-100 font-bold rounded-xl text-xs uppercase tracking-wider transition-all"
+                        className={`w-full py-3 font-bold rounded-xl text-xs uppercase tracking-wider transition-all border ${
+                          booking.paymentStatus === 'completo' ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200' :
+                          booking.paymentStatus === 'parcial' ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200' :
+                          'bg-orange-50 hover:bg-orange-100 text-orange-700 border-orange-200'
+                        }`}
                       >
                         Ver Detalles
                       </button>
@@ -744,7 +771,7 @@ export default function BookingsPage() {
                     {status === 'limpieza' && (
                       <button
                         onClick={() => handleMarkClean(accommodation.id)}
-                        className="w-full flex items-center justify-center gap-1.5 py-3 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm shadow-rose-500/10"
+                        className="w-full flex items-center justify-center gap-1.5 py-3 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
                       >
                         <RefreshCw size={14} /> Marcar como Limpia
                       </button>
@@ -756,7 +783,7 @@ export default function BookingsPage() {
                           openAddModal()
                           setForm(f => ({ ...f, accommodationId: accommodation.id }))
                         }}
-                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all shadow-sm"
+                        className="w-full py-3 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
                       >
                         Hospedar Ahora
                       </button>
@@ -833,16 +860,10 @@ export default function BookingsPage() {
                           {currentBooking ? (
                             <button
                               onClick={() => setSelectedBooking(currentBooking)}
-                              className={`w-full h-full rounded-2xl p-2 text-left flex flex-col justify-between border transition-all hover:brightness-95 active:scale-98 ${
-                                currentBooking.status === 'ocupado'
-                                  ? 'bg-sky-500/10 border-sky-300 text-sky-900'
-                                  : currentBooking.status === 'checkin_hoy'
-                                    ? 'bg-amber-500/10 border-amber-300 text-amber-900'
-                                    : 'bg-indigo-500/10 border-indigo-300 text-indigo-900'
-                              }`}
+                              className={`w-full h-full rounded-2xl p-2 text-left flex flex-col justify-between border transition-all hover:brightness-95 active:scale-98 ${getPaymentColorClasses(currentBooking.paymentStatus).bg}`}
                             >
                               <div className="flex items-center gap-1">
-                                <span className={`w-1.5 h-1.5 rounded-full ${getBulletColor(currentBooking.status)} shrink-0`} />
+                                <span className={`w-1.5 h-1.5 rounded-full ${getPaymentColorClasses(currentBooking.paymentStatus).bullet} shrink-0`} />
                                 <span className="text-[10px] font-extrabold truncate max-w-full block leading-none">
                                   {currentBooking.guestName.split(' ')[0]}
                                 </span>
@@ -854,15 +875,15 @@ export default function BookingsPage() {
                           ) : checkOutBooking ? (
                             <button
                               onClick={() => setSelectedBooking(checkOutBooking)}
-                              className="w-full h-full rounded-2xl p-2 text-left flex flex-col justify-between border bg-orange-500/10 border-orange-300 text-orange-900 transition-all hover:brightness-95"
+                              className={`w-full h-full rounded-2xl p-2 text-left flex flex-col justify-between border transition-all hover:brightness-95 ${getPaymentColorClasses(checkOutBooking.paymentStatus).bg}`}
                             >
                               <div className="flex items-center gap-1">
-                                <span className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0" />
+                                <span className={`w-1.5 h-1.5 rounded-full ${getPaymentColorClasses(checkOutBooking.paymentStatus).bullet} shrink-0`} />
                                 <span className="text-[10px] font-extrabold truncate block leading-none">
                                   Sale: {checkOutBooking.guestName.split(' ')[0]}
                                 </span>
                               </div>
-                              <span className="text-[8px] font-bold text-orange-400">Checkout Hoy</span>
+                              <span className={`text-[8px] font-bold ${getPaymentColorClasses(checkOutBooking.paymentStatus).text}`}>Checkout Hoy</span>
                             </button>
                           ) : (
                             // Empty cell (available)
@@ -1459,5 +1480,11 @@ export default function BookingsPage() {
         </div>
       )}
     </div>
+
+    <PrintableReservationsReport 
+      bookings={filteredBookings} 
+      dateText={activeTab === 'dia' ? 'Hoy, 2 de Junio, 2026' : activeTab === 'semana' ? 'Semana del 2 de Junio, 2026' : 'Mes de Junio, 2026'}
+    />
+    </>
   )
 }

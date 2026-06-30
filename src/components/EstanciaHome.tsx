@@ -294,7 +294,7 @@ const EstanciaHome: React.FC<{
 
             <button
               onClick={() => onNavigate('cabins')}
-              className="w-full py-4 bg-brand-primary hover:bg-brand-terracotta text-white font-bold rounded-2xl flex items-center justify-center gap-2 active:scale-[0.98] transition-all text-[10px] uppercase tracking-wider shadow-lg shadow-black/10"
+              className="w-full py-4 bg-brand-accent hover:bg-brand-terracotta text-white font-bold rounded-2xl flex items-center justify-center gap-2 active:scale-[0.98] transition-all text-[10px] uppercase tracking-wider shadow-lg shadow-black/10"
             >
               <span>Explorar Todas las Cabañas</span>
               <ChevronRight size={14} />
@@ -780,7 +780,7 @@ const EstanciaHome: React.FC<{
 
             <button
               onClick={() => window.open("https://maps.google.com/?q=Estancia+La+Cañada,+Escagüey,+Mérida,+Venezuela", "_blank")}
-              className="w-full bg-brand-primary text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 active:scale-98 transition-all hover:bg-brand-terracotta text-xs tracking-wider uppercase shadow-md shadow-brand-primary/10 cursor-pointer"
+              className="w-full bg-brand-accent text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 active:scale-98 transition-all hover:bg-brand-terracotta text-xs tracking-wider uppercase shadow-md shadow-brand-primary/10 cursor-pointer"
             >
               <Compass size={16} />
               Cómo Llegar (Google Maps)
