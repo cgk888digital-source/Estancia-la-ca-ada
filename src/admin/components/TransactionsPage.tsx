@@ -81,15 +81,16 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   const [loading, setLoading] = useState(true)
   const [viewReceipt, setViewReceipt] = useState<{emp: Employee, amountUsd: number, period: string, bcvRate: number} | null>(null)
   const [search, setSearch] = useState('')
+  const { role } = useAuth()
+
   const [categoryF, setCategoryF] = useState<TransactionCategory | 'todas'>('todas')
-  const [period, setPeriod] = useState<DatePeriod>('mes')
+  const [period, setPeriod] = useState<DatePeriod>(role === 'gerente' ? 'hoy' : 'mes')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [saved, setSaved] = useState(false)
   const [showCategoryMenu, setShowCategoryMenu] = useState(false)
   
-  const { role } = useAuth()
 
   const [form, setForm] = useState<Omit<Transaction, 'id'>>({
     date: new Date().toISOString().split('T')[0],
@@ -231,7 +232,9 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   const btnColor = typeFilter === 'egreso' ? 'bg-red-500 hover:bg-red-600' : 'bg-[#C5A059] hover:bg-[#b8943f]'
   const totalColor = typeFilter === 'ingreso' ? 'text-emerald-600' : typeFilter === 'egreso' ? 'text-red-500' : total >= 0 ? 'text-emerald-600' : 'text-red-500'
 
-  const periods: DatePeriod[] = ['hoy', 'semana', 'mes', 'año', 'personalizado', 'todo']
+  const periods: DatePeriod[] = role === 'gerente' 
+    ? ['hoy'] 
+    : ['hoy', 'semana', 'mes', 'año', 'personalizado', 'todo']
 
   const handleViewReceipt = (tx: Transaction) => {
     const isEventual = tx.description.toLowerCase().includes('eventual')

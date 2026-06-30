@@ -1,40 +1,71 @@
-import React, { createContext, useContext, useState } from 'react'
+import React, { createContext, useContext, useState, useEffect } from 'react'
+import { supabase } from '../../lib/supabase'
 
 export type Role = 'admin' | 'gerente' | 'empleado'
 
 interface AuthContextType {
   role: Role | null
-  login: (pin: string) => boolean
-  logout: () => void
+  login: (pin: string) => Promise<boolean>
+  logout: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-// Configuración de PINs rápidos
-const PINS: Record<string, Role> = {
-  '1234': 'admin',
-  '5555': 'gerente',
-  '9999': 'empleado'
+// Configuración de PINs rápidos -> Mapeado a usuarios reales
+const PINS: Record<string, { email: string; role: Role }> = {
+  '1234': { email: 'admin@estancialacanada.com', role: 'admin' },
+  '5555': { email: 'gerente@estancialacanada.com', role: 'gerente' }
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [role, setRole] = useState<Role | null>(() => {
-    // Restaurar sesión de localStorage al cargar
     const saved = localStorage.getItem('adminRole')
     return (saved as Role) || null
   })
 
-  const login = (pin: string) => {
-    const foundRole = PINS[pin]
-    if (foundRole) {
-      setRole(foundRole)
-      localStorage.setItem('adminRole', foundRole)
-      return true
+  useEffect(() => {
+    // Escuchar cambios de sesión reales de Supabase
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session) {
+        // En una app más robusta, obtendríamos el rol desde la base de datos (user_roles).
+        // Por eficiencia, lo mantenemos sincronizado con el localStorage que guardamos en login.
+        const saved = localStorage.getItem('adminRole')
+        if (saved) {
+          setRole(saved as Role)
+        }
+      } else {
+        setRole(null)
+        localStorage.removeItem('adminRole')
+      }
+    })
+
+    return () => {
+      authListener.subscription.unsubscribe()
+    }
+  }, [])
+
+  const login = async (pin: string): Promise<boolean> => {
+    const account = PINS[pin]
+    if (account) {
+      // Iniciar sesión en Supabase ocultamente
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: account.email,
+        password: `password${pin}`
+      })
+
+      if (!error && data.session) {
+        setRole(account.role)
+        localStorage.setItem('adminRole', account.role)
+        return true
+      } else {
+        console.error('Error de autenticación:', error?.message)
+      }
     }
     return false
   }
 
-  const logout = () => {
+  const logout = async () => {
+    await supabase.auth.signOut()
     setRole(null)
     localStorage.removeItem('adminRole')
   }

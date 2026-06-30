@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 const LoginPage: React.FC = () => {
   const [pin, setPin] = useState('')
   const [error, setError] = useState(false)
+  const [loading, setLoading] = useState(false)
   const { login } = useAuth()
 
   const handleKeyPress = (num: string) => {
@@ -20,14 +21,16 @@ const LoginPage: React.FC = () => {
     setError(false)
   }
 
-  const handleSubmit = (e?: React.FormEvent) => {
+  const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault()
     if (pin.length === 4) {
-      const success = login(pin)
+      setLoading(true)
+      const success = await login(pin)
       if (!success) {
         setError(true)
         setPin('')
       }
+      setLoading(false)
     }
   }
 
@@ -51,15 +54,23 @@ const LoginPage: React.FC = () => {
         <form onSubmit={handleSubmit}>
           {/* PIN Display */}
           <div className="flex justify-center gap-3 mb-8">
-            {[0, 1, 2, 3].map(i => (
-              <div
-                key={i}
-                className={`w-4 h-4 rounded-full transition-all ${
-                  error ? 'bg-red-400' :
-                  i < pin.length ? 'bg-[#C5A059]' : 'bg-gray-200'
-                }`}
-              />
-            ))}
+            {loading ? (
+              <div className="animate-pulse flex gap-3">
+                {[0, 1, 2, 3].map(i => (
+                  <div key={i} className="w-4 h-4 rounded-full bg-[#C5A059]" />
+                ))}
+              </div>
+            ) : (
+              [0, 1, 2, 3].map(i => (
+                <div
+                  key={i}
+                  className={`w-4 h-4 rounded-full transition-all ${
+                    error ? 'bg-red-400' :
+                    i < pin.length ? 'bg-[#C5A059]' : 'bg-gray-200'
+                  }`}
+                />
+              ))
+            )}
           </div>
 
           <AnimatePresence>

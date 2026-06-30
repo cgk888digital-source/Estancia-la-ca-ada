@@ -7,6 +7,7 @@ import { Loader2, X, Utensils, Users, Home } from 'lucide-react'
 import { mockTransactions, mockMonthlyData, categoryLabels, categoryColors } from '../data/mockData'
 import type { Transaction, TransactionType, TransactionCategory, PaymentMethod, Booking } from '../types'
 import { supabase } from '../../lib/supabase'
+import { useAuth } from '../context/AuthContext'
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
@@ -23,12 +24,14 @@ interface DbTransaction {
 }
 
 const ReportsPage: React.FC = () => {
+  const { role } = useAuth()
+  
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [bookings, setBookings] = useState<Booking[]>([])
   const [loading, setLoading] = useState(true)
 
   // Filtering State
-  const [filterType, setFilterType] = useState<'dia' | 'semana' | 'mes' | 'año'>('mes')
+  const [filterType, setFilterType] = useState<'dia' | 'semana' | 'mes' | 'año'>(role === 'gerente' ? 'dia' : 'mes')
   const [filterDate, setFilterDate] = useState<string>(new Date().toISOString().substring(0, 10))
 
   // Modal State
@@ -208,16 +211,22 @@ const ReportsPage: React.FC = () => {
           <select
             value={filterType}
             onChange={e => setFilterType(e.target.value as any)}
-            className="text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 outline-none font-bold text-gray-700 focus:border-[#C5A059] transition-colors"
+            disabled={role === 'gerente'}
+            className="text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 outline-none font-bold text-gray-700 focus:border-[#C5A059] transition-colors disabled:opacity-50"
           >
             <option value="dia">Por Día</option>
-            <option value="semana">Por Semana</option>
-            <option value="mes">Por Mes</option>
-            <option value="año">Por Año</option>
+            {role !== 'gerente' && (
+              <>
+                <option value="semana">Por Semana</option>
+                <option value="mes">Por Mes</option>
+                <option value="año">Por Año</option>
+              </>
+            )}
           </select>
           <input
             type={filterType === 'mes' ? 'month' : 'date'}
             value={filterType === 'mes' ? filterDate.substring(0, 7) : filterDate}
+            disabled={role === 'gerente'}
             onChange={e => {
               if (filterType === 'mes') {
                 setFilterDate(e.target.value + '-01')
@@ -225,7 +234,7 @@ const ReportsPage: React.FC = () => {
                 setFilterDate(e.target.value)
               }
             }}
-            className="text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 outline-none font-medium text-gray-700 focus:border-[#C5A059] transition-colors"
+            className="text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 outline-none font-medium text-gray-700 focus:border-[#C5A059] transition-colors disabled:opacity-50"
           />
         </div>
       </div>
