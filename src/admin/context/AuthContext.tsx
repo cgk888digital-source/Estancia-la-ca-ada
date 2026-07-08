@@ -12,10 +12,12 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 // Configuración de PINs rápidos -> Mapeado a usuarios reales
+/*
 const PINS: Record<string, { email: string; role: Role }> = {
   '1234': { email: 'admin@estancialacanada.com', role: 'admin' },
   '5555': { email: 'gerente@estancialacanada.com', role: 'gerente' }
 }
+*/
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [role, setRole] = useState<Role | null>(() => {
@@ -44,7 +46,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [])
 
-  const login = async (pin: string): Promise<boolean> => {
+  const login = async (_pin: string): Promise<boolean> => {
     // Bypassing real authentication temporarily
     setRole('admin')
     localStorage.setItem('adminRole', 'admin')
