@@ -5,7 +5,7 @@ import {
   Users, BarChart3, Menu, X, LogOut, UtensilsCrossed, Calendar, DollarSign, ClipboardList
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
-import LoginPage from './LoginPage'
+// import LoginPage from './LoginPage'
 
 const navItems = [
   { to: '/admin', label: 'Dashboard', icon: <LayoutDashboard size={20} />, end: true, roles: ['admin'] },
