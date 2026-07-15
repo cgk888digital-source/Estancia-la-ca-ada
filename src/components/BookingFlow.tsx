@@ -35,7 +35,7 @@ export interface BookingFlowData {
   remainingAmount: number;
   depositPercent: number;
   remainingPolicyText: string;
-  selectedPayment: 'zelle' | 'pago_movil' | null;
+  selectedPayment: 'zelle' | 'pago_movil' | 'transferencia' | null;
   totalNights: number;
   bcvEuroRate?: number | null;
 }
@@ -103,7 +103,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
     referido: '',
     sigueCircuito: false
   });
-  const [selectedPayment, setSelectedPayment] = useState<'zelle' | 'pago_movil' | null>(null);
+  const [selectedPayment, setSelectedPayment] = useState<'zelle' | 'pago_movil' | 'transferencia' | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   const getSeason = (date: Date): 'low' | 'high' | 'dec' => {
@@ -265,7 +265,6 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
     : 1;
 
   const isDecember = selectedDates.start ? getSeason(selectedDates.start) === 'dec' : false;
-  const isHighSeason = selectedDates.start ? getSeason(selectedDates.start) !== 'low' : false;
 
   const getRoomMaxCapacity = (roomId: number): number => {
     switch (roomId) {
@@ -310,24 +309,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
   const totalStayPrice = pricing.totalStayPrice;
 
   // Lógica dinámica de depósito
-  const today = new Date();
-  const checkInDate = selectedDates.start || today;
-  const daysUntilArrival = Math.ceil((checkInDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-  const isConTiempo = daysUntilArrival > 15;
-
-  let depositPercent = 100;
-  let remainingPolicyText = '';
-
-  if (isConTiempo) {
-    depositPercent = 50;
-    if (isHighSeason) {
-      remainingPolicyText = 'El 50% restante se debe abonar 1 mes antes de la llegada (Temporada Alta).';
-    } else {
-      remainingPolicyText = 'El 50% restante se debe abonar 1 semana antes de la llegada (Temporada Baja).';
-    }
-  } else {
-    remainingPolicyText = 'Reserva a corto plazo (menos de 15 días): pago del 100% requerido para formalizar.';
-  }
+  const depositPercent = 50;
+  const remainingPolicyText = 'El 50% restante se debe abonar 2 semanas antes de la llegada a la Estancia.';
 
   const depositAmount = totalStayPrice * (depositPercent / 100);
   const remainingAmount = totalStayPrice - depositAmount;
@@ -1013,6 +996,89 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                     </motion.div>
                   )}
                 </div>
+
+                <div
+                  onClick={() => setSelectedPayment('transferencia')}
+                  className={`p-6 rounded-[2rem] border-2 cursor-pointer transition-all bg-white flex flex-col gap-2
+                    ${selectedPayment === 'transferencia' ? 'border-brand-terracotta shadow-lg' : 'border-transparent shadow-md'}
+                  `}
+                >
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center font-bold text-blue-700">TB</div>
+                      <span className="font-serif font-semibold text-brand-wood text-xs">Transferencia Bancaria</span>
+                    </div>
+                    <input
+                      type="radio"
+                      checked={selectedPayment === 'transferencia'}
+                      onChange={() => setSelectedPayment('transferencia')}
+                      className="text-brand-terracotta focus:ring-brand-terracotta"
+                    />
+                  </div>
+                  {selectedPayment === 'transferencia' && (
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="pt-4 border-t border-brand-primary/5 space-y-3 text-xs">
+                      <div className="flex justify-between items-center p-2.5 bg-brand-neutral/40 rounded-xl">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-brand-primary/40">Banco</p>
+                          <p className="font-medium text-brand-primary">Bancamiga (0172)</p>
+                        </div>
+                      </div>
+                      <div className="flex justify-between items-center p-2.5 bg-brand-neutral/40 rounded-xl">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-brand-primary/40">Cédula</p>
+                          <p className="font-medium font-mono text-brand-primary">10345954</p>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyToClipboard('10345954', 'tb_ci'); }}
+                          className="px-3 py-1.5 bg-brand-terracotta text-white rounded-lg font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all shrink-0"
+                        >
+                          {copiedField === 'tb_ci' ? 'Copiado!' : 'Copiar'}
+                        </button>
+                      </div>
+                      <div className="flex justify-between items-center p-2.5 bg-brand-neutral/40 rounded-xl">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-brand-primary/40">Número de Cuenta</p>
+                          <p className="font-medium font-mono text-brand-primary text-[10px]">01720110701108762467</p>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyToClipboard('01720110701108762467', 'tb_acc'); }}
+                          className="px-3 py-1.5 bg-brand-terracotta text-white rounded-lg font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all shrink-0"
+                        >
+                          {copiedField === 'tb_acc' ? 'Copiado!' : 'Copiar'}
+                        </button>
+                      </div>
+                      <div className="flex justify-between items-center p-2.5 bg-brand-neutral/40 rounded-xl">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-brand-primary/40">Titular y Correo</p>
+                          <p className="font-medium text-brand-primary">María Araujo (Escagueyelc@gmail.com)</p>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyToClipboard('Escagueyelc@gmail.com', 'tb_email'); }}
+                          className="px-3 py-1.5 bg-brand-terracotta text-white rounded-lg font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all shrink-0"
+                        >
+                          {copiedField === 'tb_email' ? 'Copiado!' : 'Copiar'}
+                        </button>
+                      </div>
+
+                      {/* Monto de Conversión y Nota de Transparencia */}
+                      {loadingRate ? (
+                        <div className="text-center py-2 text-brand-primary/40 text-[10px] animate-pulse">Consultando tasa oficial BCV del Euro...</div>
+                      ) : bcvEuroRate ? (
+                        <div className="space-y-3 pt-2">
+                          <div className="p-3.5 bg-brand-terracotta/5 rounded-xl border border-brand-terracotta/10 space-y-1">
+                            <p className="text-[9px] uppercase tracking-widest text-brand-terracotta font-bold">Monto a pagar en Bolívares (Bs.)</p>
+                            <p className="text-base font-bold text-brand-wood font-mono">
+                              Bs. {(depositAmount * bcvEuroRate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                            <p className="text-[9px] text-brand-primary/50 leading-normal">
+                              Calculado sobre un adelanto de <strong>${depositAmount} USD</strong> a la tasa oficial del Euro (BCV): <strong>Bs. {bcvEuroRate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                            </p>
+                          </div>
+                        </div>
+                      ) : null}
+                    </motion.div>
+                  )}
+                </div>
               </div>
             </motion.div>
           )}
@@ -1106,7 +1172,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
 *Monto de Adelanto Requerido (${depositPercent}%):* $${depositAmount}
 ${remainingAmount > 0 ? `*Monto restante (50%):* $${remainingAmount}\n*Política de saldo restante:* ${remainingPolicyText}` : '*Monto restante:* $0 (Reserva liquidada al 100%)'}
 
-*Método de Pago Seleccionado:* ${selectedPayment === 'zelle' ? 'Zelle' : 'Pago Móvil (Bancamiga)'}
+*Método de Pago Seleccionado:* ${selectedPayment === 'zelle' ? 'Zelle' : selectedPayment === 'pago_movil' ? 'Pago Móvil (Bancamiga)' : 'Transferencia Bancaria'}
 ${selectedPayment === 'pago_movil' && bcvEuroRate ? `*Monto en Bolívares a transferir:* Bs. ${(depositAmount * bcvEuroRate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 *Tasa Oficial del Euro (BCV):* Bs. ${bcvEuroRate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 _(Nota: Los pagos en bolívares se calculan a tasa BCV del euro por políticas de facturación)_` : ''}
@@ -1166,7 +1232,7 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
                     pets: allocatedPets,
                     total_amount: roomTotal,
                     amount_paid: roomDeposit,
-                    payment_status: depositPercent === 100 ? 'completo' : 'parcial',
+                    payment_status: 'parcial',
                     payment_method: selectedPayment || 'transferencia',
                     status: initialStatus,
                     special_notes: `${notes}${N > 1 ? `. Código de grupo: ${bookingCode}` : ''}`,

@@ -9,6 +9,29 @@ import type { Transaction, TransactionType, TransactionCategory, PaymentMethod, 
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
+function getServerDateRange(filterType: string, filterDate: string): { from: string; to: string } {
+  const d = new Date(filterDate)
+  switch (filterType) {
+    case 'dia':
+      return { from: filterDate, to: filterDate }
+    case 'semana': {
+      const day = d.getDay()
+      const diff = d.getDate() - day + (day === 0 ? -6 : 1)
+      const start = new Date(d)
+      start.setDate(diff)
+      const end = new Date(start)
+      end.setDate(start.getDate() + 6)
+      return { from: start.toISOString().substring(0, 10), to: end.toISOString().substring(0, 10) }
+    }
+    case 'mes':
+      return { from: `${filterDate.substring(0, 7)}-01`, to: `${filterDate.substring(0, 7)}-31` }
+    case 'año':
+      return { from: `${filterDate.substring(0, 4)}-01-01`, to: `${filterDate.substring(0, 4)}-12-31` }
+    default:
+      return { from: '2020-01-01', to: '2099-12-31' }
+  }
+}
+
 const fmt = (n: number) =>
   new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
 
@@ -43,9 +66,17 @@ const ReportsPage: React.FC = () => {
     let active = true
 
     const fetchData = async () => {
+      const { from: dateFrom, to: dateTo } = getServerDateRange(filterType, filterDate)
       const [txRes, bRes] = await Promise.all([
-        supabase.from('transactions').select('*').order('date', { ascending: false }),
-        supabase.from('bookings').select('*')
+        supabase.from('transactions')
+          .select('id, date, type, category, description, amount, payment_method, related_to')
+          .gte('date', dateFrom)
+          .lte('date', dateTo)
+          .order('date', { ascending: false }),
+        supabase.from('bookings')
+          .select('accommodation_id, check_in, check_out, total_amount, amount_paid, payment_status, guests_count, guest_name')
+          .gte('check_in', dateFrom)
+          .lte('check_in', dateTo)
       ])
 
       if (!active) return
@@ -82,7 +113,7 @@ const ReportsPage: React.FC = () => {
 
     fetchData()
     return () => { active = false }
-  }, [])
+  }, [filterType, filterDate])
 
   const txList = transactions.length > 0 ? transactions : mockTransactions
 
@@ -124,8 +155,14 @@ const ReportsPage: React.FC = () => {
 
   // Specific Reports Data
   const fbCategories = ['restaurante', 'bebidas', 'almuerzos', 'alimentos']
-  const fbIngresos = filteredTx.filter(t => t.type === 'ingreso' && fbCategories.includes(t.category)).reduce((s, t) => s + t.amount, 0)
-  const nominaEgresos = filteredTx.filter(t => t.category === 'empleados').reduce((s, t) => s + t.amount, 0)
+  const fbIngresos = useMemo(() => filteredTx.filter(t => t.type === 'ingreso' && fbCategories.includes(t.category)).reduce((s, t) => s + t.amount, 0), [filteredTx])
+  const nominaEgresos = useMemo(() => filteredTx.filter(t => t.category === 'empleados').reduce((s, t) => s + t.amount, 0), [filteredTx])
+
+  // Pre-computed counts for JSX
+  const ingresosCount = useMemo(() => filteredTx.filter(t => t.type === 'ingreso').length, [filteredTx])
+  const egresosCount = useMemo(() => filteredTx.filter(t => t.type === 'egreso').length, [filteredTx])
+  const fbCount = useMemo(() => filteredTx.filter(t => t.type === 'ingreso' && fbCategories.includes(t.category)).length, [filteredTx])
+  const nominaCount = useMemo(() => filteredTx.filter(t => t.category === 'empleados').length, [filteredTx])
 
   // Cabins Report Data
   const cabinReport = useMemo(() => {
@@ -247,7 +284,7 @@ const ReportsPage: React.FC = () => {
         >
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Total Ingresos</p>
           <p className="text-2xl font-bold text-emerald-600">{fmt(ingresos)}</p>
-          <p className="text-xs text-gray-400 mt-1 group-hover:text-emerald-600 transition-colors">Click para ver {filteredTx.filter(t => t.type === 'ingreso').length} transacciones</p>
+          <p className="text-xs text-gray-400 mt-1 group-hover:text-emerald-600 transition-colors">Click para ver {ingresosCount} transacciones</p>
         </button>
 
         <button 
@@ -256,7 +293,7 @@ const ReportsPage: React.FC = () => {
         >
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Total Egresos</p>
           <p className="text-2xl font-bold text-red-500">{fmt(egresos)}</p>
-          <p className="text-xs text-gray-400 mt-1 group-hover:text-red-500 transition-colors">Click para ver {filteredTx.filter(t => t.type === 'egreso').length} transacciones</p>
+          <p className="text-xs text-gray-400 mt-1 group-hover:text-red-500 transition-colors">Click para ver {egresosCount} transacciones</p>
         </button>
 
         <button 
@@ -285,7 +322,7 @@ const ReportsPage: React.FC = () => {
               onClick={() => openModal('Ingresos Alimentos y Bebidas', filteredTx.filter(t => t.type === 'ingreso' && fbCategories.includes(t.category)))}
               className="text-[10px] font-bold text-orange-500 uppercase tracking-wider hover:underline mt-0.5 block"
             >
-              Ver Detalle ({filteredTx.filter(t => t.type === 'ingreso' && fbCategories.includes(t.category)).length})
+              Ver Detalle ({fbCount})
             </button>
           </div>
         </div>
@@ -302,7 +339,7 @@ const ReportsPage: React.FC = () => {
               onClick={() => openModal('Egresos de Nómina', filteredTx.filter(t => t.category === 'empleados'))}
               className="text-[10px] font-bold text-blue-500 uppercase tracking-wider hover:underline mt-0.5 block"
             >
-              Ver Detalle ({filteredTx.filter(t => t.category === 'empleados').length})
+              Ver Detalle ({nominaCount})
             </button>
           </div>
         </div>

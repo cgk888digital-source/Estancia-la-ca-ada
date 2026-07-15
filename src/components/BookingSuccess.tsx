@@ -33,7 +33,7 @@ interface BookingData {
   remainingAmount?: number;
   depositPercent?: number;
   remainingPolicyText?: string;
-  selectedPayment?: 'zelle' | 'pago_movil' | null;
+  selectedPayment?: 'zelle' | 'pago_movil' | 'transferencia' | null;
   totalNights?: number;
   bcvEuroRate?: number | null;
 }
@@ -102,11 +102,22 @@ const BookingSuccess: React.FC<BookingSuccessProps> = ({ data, onGoToClub, onBac
 *Monto de Adelanto Requerido (${data.depositPercent || 50}%):* $${data.depositAmount || 0}
 ${data.remainingAmount !== undefined && data.remainingAmount > 0 ? `*Monto restante:* $${data.remainingAmount}\n*Política de saldo restante:* ${data.remainingPolicyText}` : '*Monto restante:* $0 (Reserva liquidada al 100%)'}
 
-*Método de Pago Seleccionado:* ${data.selectedPayment === 'zelle' ? 'Zelle' : 'Pago Móvil (Bancamiga)'}
-${data.selectedPayment === 'pago_movil' && data.bcvEuroRate && data.depositAmount ? `*Monto en Bolívares a transferir:* Bs. ${(data.depositAmount * data.bcvEuroRate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+*Método de Pago Seleccionado:* ${data.selectedPayment === 'zelle' ? 'Zelle' : data.selectedPayment === 'pago_movil' ? 'Pago Móvil (Bancamiga)' : 'Transferencia Bancaria'}
+${(data.selectedPayment === 'pago_movil' || data.selectedPayment === 'transferencia') && data.bcvEuroRate && data.depositAmount ? `*Monto en Bolívares a transferir:* Bs. ${(data.depositAmount * data.bcvEuroRate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 *Tasa Oficial del Euro (BCV):* Bs. ${data.bcvEuroRate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 _(Nota: Los pagos en bolívares se calculan a tasa BCV del euro por políticas de facturación)_` : ''}
 *Código de Reserva:* ${data.bookingCode}
+
+Si desean formalizar la reservación deben transferir 50% por adelantado y el 50% restante 2 semanas antes de la llegada a la Estancia. 
+
+*Pago a través de Zelle:* mariasusana01@hotmail.com 
+Maria Araujo 
+
+*Pago móvil / Transferencia:* Bancamiga 
+04141294308 CI 10345954
+01720110701108762467
+Escagueyelc@gmail.com 
+María Araujo
 
 Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
 
@@ -240,11 +251,11 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
               </div>
             )}
 
-            {/* Desglose Pago Móvil en Bolívares */}
-            {data.selectedPayment === 'pago_movil' && data.bcvEuroRate && data.depositAmount && (
+            {/* Desglose Pago Móvil / Transferencia en Bolívares */}
+            {(data.selectedPayment === 'pago_movil' || data.selectedPayment === 'transferencia') && data.bcvEuroRate && data.depositAmount && (
               <div className="space-y-2 mt-2 pt-2 border-t border-brand-primary/5">
                 <div className="p-2.5 bg-brand-terracotta/5 rounded-xl border border-brand-terracotta/10 space-y-0.5 animate-fade-in">
-                  <p className="text-[8px] uppercase tracking-widest text-brand-terracotta font-bold text-center">Monto a transferir en Pago Móvil</p>
+                  <p className="text-[8px] uppercase tracking-widest text-brand-terracotta font-bold text-center">Monto a transferir en {data.selectedPayment === 'pago_movil' ? 'Pago Móvil' : 'Transferencia'}</p>
                   <p className="text-xs font-bold text-brand-wood font-mono text-center">
                     Bs. {(data.depositAmount * data.bcvEuroRate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
@@ -259,7 +270,7 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
             )}
 
             <p className="text-[9px] text-brand-primary/50 text-center italic leading-tight pt-1">
-              Método seleccionado: <span className="font-bold uppercase text-brand-wood">{data.selectedPayment === 'zelle' ? 'Zelle' : 'Pago Móvil'}</span>
+              Método seleccionado: <span className="font-bold uppercase text-brand-wood">{data.selectedPayment === 'zelle' ? 'Zelle' : data.selectedPayment === 'pago_movil' ? 'Pago Móvil' : 'Transferencia Bancaria'}</span>
             </p>
           </div>
         )}
@@ -271,6 +282,32 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
           </div>
           <div className="w-10 h-10 bg-brand-neutral rounded-xl flex items-center justify-center text-brand-terracotta border border-brand-terracotta/10">
             <Check size={16} />
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Payment Instructions Note */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.8 }}
+        className="w-full bg-[#FAF9F6] border border-[#C5A059]/30 p-5 rounded-[2rem] mb-8 space-y-4 shadow-sm"
+      >
+        <p className="text-xs text-brand-primary leading-relaxed font-medium">
+          <span className="font-bold text-brand-wood">⚠️ Importante:</span> Si desean formalizar la reservación deben transferir 50% por adelantado y el 50% restante 2 semanas antes de la llegada a la Estancia.
+        </p>
+        <div className="bg-white p-4 rounded-2xl border border-brand-primary/10 text-[11px] text-brand-primary/80 space-y-4 font-mono shadow-sm">
+          <div>
+            <p className="font-bold text-brand-wood font-sans text-[10px] uppercase tracking-widest mb-1">Pago a través de Zelle:</p>
+            <p>mariasusana01@hotmail.com</p>
+            <p>Maria Araujo</p>
+          </div>
+          <div className="pt-2 border-t border-brand-primary/5">
+            <p className="font-bold text-brand-wood font-sans text-[10px] uppercase tracking-widest mb-1">Pago móvil / Transferencia:</p>
+            <p>Bancamiga (0172)</p>
+            <p>04141294308 | CI 10345954</p>
+            <p>01720110701108762467</p>
+            <p>Escagueyelc@gmail.com | María Araujo</p>
           </div>
         </div>
       </motion.div>

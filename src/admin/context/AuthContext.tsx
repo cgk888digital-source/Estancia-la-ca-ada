@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 
 export type Role = 'admin' | 'gerente' | 'empleado'
@@ -46,21 +46,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [])
 
-  const login = async (_pin: string): Promise<boolean> => {
+  const login = useCallback(async (_pin: string): Promise<boolean> => {
     // Bypassing real authentication temporarily
     setRole('admin')
     localStorage.setItem('adminRole', 'admin')
     return true
-  }
+  }, [])
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     await supabase.auth.signOut()
     setRole(null)
     localStorage.removeItem('adminRole')
-  }
+  }, [])
+
+  const value = useMemo(() => ({ role, login, logout }), [role, login, logout])
 
   return (
-    <AuthContext.Provider value={{ role, login, logout }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   )

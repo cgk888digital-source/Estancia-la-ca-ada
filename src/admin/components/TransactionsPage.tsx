@@ -15,7 +15,7 @@ type DatePeriod = 'hoy' | 'semana' | 'mes' | 'año' | 'personalizado' | 'todo'
 const fmt = (n: number) =>
   new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
 
-const incomeCategories: TransactionCategory[] = ['alojamiento', 'restaurante', 'bebidas', 'almuerzos', 'pasapalos', 'excursiones', 'bar_cava', 'otros_ingresos']
+const incomeCategories: TransactionCategory[] = ['alojamiento', 'restaurante', 'bebidas', 'almuerzos', 'pasapalos', 'excursiones', 'bar_cava', 'otros_ingresos', 'propinas']
 const expenseCategories: TransactionCategory[] = ['empleados', 'alimentos', 'mantenimiento', 'servicios', 'comisiones', 'otros_egresos']
 const paymentMethods: PaymentMethod[] = ['efectivo', 'transferencia', 'tarjeta', 'cheque']
 
@@ -76,6 +76,8 @@ function getDateRange(period: DatePeriod, customFrom: string, customTo: string):
   }
 }
 
+const PAGE_SIZE = 25
+
 const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
@@ -90,7 +92,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   const [showModal, setShowModal] = useState(false)
   const [saved, setSaved] = useState(false)
   const [showCategoryMenu, setShowCategoryMenu] = useState(false)
-  
+  const [page, setPage] = useState(1)
 
   const [form, setForm] = useState<Omit<Transaction, 'id'>>({
     date: new Date().toISOString().split('T')[0],
@@ -106,10 +108,29 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
     let active = true
 
     const fetchTransactions = async () => {
-      const { data, error } = await supabase
+      setLoading(true)
+
+      // Calcular rango de fechas para filtro server-side
+      const { from: dateFrom, to: dateTo } = getDateRange(period, customFrom, customTo)
+      
+      let query = supabase
         .from('transactions')
-        .select('*')
+        .select('id, date, type, category, description, amount, payment_method, related_to')
         .order('date', { ascending: false })
+      
+      // Aplicar filtros de fecha server-side (solo si hay rango definido)
+      if (dateFrom) {
+        query = query.gte('date', dateFrom.toISOString().substring(0, 10))
+      }
+      if (dateTo) {
+        const toDate = new Date(dateTo)
+        toDate.setDate(toDate.getDate() + 1)
+        query = query.lt('date', toDate.toISOString().substring(0, 10))
+      }
+      
+      query = query.limit(500)
+
+      const { data, error } = await query
 
       if (!active) return
 
@@ -119,31 +140,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       } else if (data && data.length > 0) {
         setTransactions(data.map(mapDbTransactionToReact))
       } else {
-        // Seed table with mockTransactions
-        const dbMocks = mockTransactions.map(t => ({
-          date: t.date,
-          type: t.type,
-          category: t.category,
-          description: t.description,
-          amount: t.amount,
-          payment_method: t.paymentMethod,
-          related_to: t.relatedTo || null
-        }))
-        const { data: inserted, error: insErr } = await supabase
-          .from('transactions')
-          .insert(dbMocks)
-          .select('*')
-        
-        if (!active) return
-
-        if (insErr) {
-          console.error('Error seeding transactions:', insErr)
-          setTransactions(mockTransactions)
-        } else if (inserted) {
-          setTransactions(inserted.map(mapDbTransactionToReact))
-        } else {
-          setTransactions(mockTransactions)
-        }
+        setTransactions([])
       }
       setLoading(false)
     }
@@ -153,11 +150,10 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
     return () => {
       active = false
     }
-  }, [])
+  }, [period, customFrom, customTo])
 
+  // Filtrado client-side solo para tipo, búsqueda y categoría (las fechas ya vienen filtradas del server)
   const filtered = useMemo(() => {
-    const { from, to } = getDateRange(period, customFrom, customTo)
-
     return transactions.filter(t => {
       const matchType = typeFilter ? t.type === typeFilter : true
       const matchSearch =
@@ -165,21 +161,25 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
         (t.relatedTo ?? '').toLowerCase().includes(search.toLowerCase())
       const matchCat = categoryF === 'todas' || t.category === categoryF
 
-      let matchDate = true
-      if (from || to) {
-        const txDate = new Date(t.date)
-        const txDay = new Date(txDate.getFullYear(), txDate.getMonth(), txDate.getDate())
-        if (from && txDay < from) matchDate = false
-        if (to && txDay > to) matchDate = false
-      }
-
-      return matchType && matchSearch && matchCat && matchDate
+      return matchType && matchSearch && matchCat
     })
-  }, [transactions, typeFilter, search, categoryF, period, customFrom, customTo])
+  }, [transactions, typeFilter, search, categoryF])
 
-  const totalIngresos = filtered.filter(t => t.type === 'ingreso').reduce((s, t) => s + t.amount, 0)
-  const totalEgresos = filtered.filter(t => t.type === 'egreso').reduce((s, t) => s + t.amount, 0)
+  // Reset page when filters change
+  useEffect(() => { setPage(1) }, [filtered])
+
+  const { totalIngresos, totalEgresos } = useMemo(() => ({
+    totalIngresos: filtered.filter(t => t.type === 'ingreso').reduce((s, t) => s + t.amount, 0),
+    totalEgresos: filtered.filter(t => t.type === 'egreso').reduce((s, t) => s + t.amount, 0),
+  }), [filtered])
+
   const total = typeFilter === 'ingreso' ? totalIngresos : typeFilter === 'egreso' ? totalEgresos : totalIngresos - totalEgresos
+
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const paginatedItems = useMemo(() => 
+    filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  , [filtered, page])
 
   const handleSave = async () => {
     if (!form.description || form.amount <= 0) return
@@ -451,7 +451,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                   </td>
                 </tr>
               ) : (
-                filtered.map(tx => (
+                paginatedItems.map(tx => (
                   <tr key={tx.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 text-sm text-gray-500 whitespace-nowrap">
                       {new Date(tx.date).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: '2-digit' })}
@@ -490,6 +490,31 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
               )}
             </tbody>
           </table>
+          
+          {totalPages > 1 && (
+            <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between bg-gray-50/50">
+              <span className="text-sm text-gray-500">
+                Página <span className="font-bold text-gray-900">{page}</span> de <span className="font-bold text-gray-900">{totalPages}</span>
+                <span className="ml-2 text-xs text-gray-400">({filtered.length} registros)</span>
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="px-3 py-1.5 text-sm font-medium border border-gray-200 rounded-lg hover:bg-white disabled:opacity-50 transition-colors"
+                >
+                  Anterior
+                </button>
+                <button
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="px-3 py-1.5 text-sm font-medium border border-gray-200 rounded-lg hover:bg-white disabled:opacity-50 transition-colors"
+                >
+                  Siguiente
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -588,10 +613,12 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Proveedor / Relacionado (opcional)</label>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">
+                  Proveedor / Relacionado (opcional)
+                </label>
                 <input
                   type="text"
-                  placeholder="Nombre del proveedor, empleado, cliente..."
+                  placeholder={form.category === 'propinas' ? 'Ej. Mesa 4, Cliente Pérez (opcional)' : 'Nombre del proveedor, empleado, cliente...'}
                   value={form.relatedTo}
                   onChange={e => setForm(f => ({ ...f, relatedTo: e.target.value }))}
                   className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059] transition-colors"

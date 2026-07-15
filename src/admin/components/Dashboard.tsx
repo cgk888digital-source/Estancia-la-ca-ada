@@ -46,9 +46,18 @@ const Dashboard: React.FC = () => {
     let active = true
 
     const fetchData = async () => {
+      // Solo los últimos 7 meses para las gráficas del dashboard
+      const sevenMonthsAgo = new Date()
+      sevenMonthsAgo.setMonth(sevenMonthsAgo.getMonth() - 7)
+      const dateFrom = sevenMonthsAgo.toISOString().substring(0, 10)
+
       const [txRes, empRes] = await Promise.all([
-        supabase.from('transactions').select('*').order('date', { ascending: false }),
-        supabase.from('employees').select('*')
+        supabase.from('transactions')
+          .select('id, date, type, category, description, amount, payment_method, related_to')
+          .gte('date', dateFrom)
+          .order('date', { ascending: false }),
+        supabase.from('employees')
+          .select('id, name, role, salary, status, pending_payment, employee_type, payment_frequency, daily_rate, contracted_days, hire_date, last_payment')
       ])
 
       if (!active) return
@@ -99,11 +108,26 @@ const Dashboard: React.FC = () => {
   const txList = transactions.length > 0 ? transactions : mockTransactions
   const empList = employees.length > 0 ? employees : mockEmployees
 
-  const mayTx = txList.filter(t => t.date.startsWith('2026-05'))
-  const totalIngresos = mayTx.filter(t => t.type === 'ingreso').reduce((s, t) => s + t.amount, 0)
-  const totalEgresos = mayTx.filter(t => t.type === 'egreso').reduce((s, t) => s + t.amount, 0)
-  const balance = totalIngresos - totalEgresos
-  const pendingPayroll = empList.filter(e => e.pendingPayment && e.status === 'activo').reduce((s, e) => s + e.salary, 0)
+  // Mes actual dinámico para KPIs
+  const currentMonthPrefix = useMemo(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  }, [])
+
+  const { mayTx, totalIngresos, totalEgresos, balance } = useMemo(() => {
+    const mayTx = txList.filter(t => t.date.startsWith(currentMonthPrefix))
+    const totalIngresos = mayTx.filter(t => t.type === 'ingreso').reduce((s, t) => s + t.amount, 0)
+    const totalEgresos = mayTx.filter(t => t.type === 'egreso').reduce((s, t) => s + t.amount, 0)
+    return { mayTx, totalIngresos, totalEgresos, balance: totalIngresos - totalEgresos }
+  }, [txList, currentMonthPrefix])
+
+  const pendingPayroll = useMemo(() =>
+    empList.filter(e => e.pendingPayment && e.status === 'activo').reduce((s, e) => s + e.salary, 0)
+  , [empList])
+
+  const pendingCount = useMemo(() =>
+    empList.filter(e => e.pendingPayment && e.status === 'activo').length
+  , [empList])
 
   // Dynamic monthly data calculation merging mock history with live DB updates
   const monthlyData = useMemo(() => {
@@ -134,8 +158,8 @@ const Dashboard: React.FC = () => {
     })
   }, [txList])
 
-  // Pie data — income breakdown
-  const incomePie = mayTx
+  // Pie data — income breakdown (memoized)
+  const incomePie = useMemo(() => mayTx
     .filter(t => t.type === 'ingreso')
     .reduce((acc, t) => {
       const existing = acc.find(a => a.name === categoryLabels[t.category])
@@ -143,8 +167,11 @@ const Dashboard: React.FC = () => {
       else acc.push({ name: categoryLabels[t.category], value: t.amount, color: categoryColors[t.category] })
       return acc
     }, [] as { name: string; value: number; color: string }[])
+  , [mayTx])
 
-  const recent = [...txList].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6)
+  const recent = useMemo(() =>
+    [...txList].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6)
+  , [txList])
 
   const kpis = [
     {
@@ -180,7 +207,7 @@ const Dashboard: React.FC = () => {
       icon: <Users size={20} />,
       color: 'text-violet-600',
       bg: 'bg-violet-50',
-      trend: `${empList.filter(e => e.pendingPayment && e.status === 'activo').length} empleados`,
+      trend: `${pendingCount} empleados`,
       trendUp: false,
     },
   ]

@@ -1,14 +1,16 @@
-import { useState } from 'react'
-import EstanciaHome from './components/EstanciaHome'
-import RestaurantMenu from './components/RestaurantMenu'
-import WineCellar from './components/WineCellar'
-import Excursions from './components/Excursions'
-import BookingFlow, { type BookingFlowData } from './components/BookingFlow'
-import ClubEstancia from './components/ClubEstancia'
-import BookingSuccess from './components/BookingSuccess'
-import CabinsGallery from './components/CabinsGallery'
+import { useState, lazy, Suspense } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Home, Utensils, Calendar, Award, ChevronLeft, Bed } from 'lucide-react'
+import type { BookingFlowData } from './components/BookingFlow'
+
+const EstanciaHome = lazy(() => import('./components/EstanciaHome'))
+const RestaurantMenu = lazy(() => import('./components/RestaurantMenu'))
+const WineCellar = lazy(() => import('./components/WineCellar'))
+const Excursions = lazy(() => import('./components/Excursions'))
+const BookingFlow = lazy(() => import('./components/BookingFlow'))
+const ClubEstancia = lazy(() => import('./components/ClubEstancia'))
+const BookingSuccess = lazy(() => import('./components/BookingSuccess'))
+const CabinsGallery = lazy(() => import('./components/CabinsGallery'))
 
 type Screen = 'home' | 'restaurant' | 'excursions' | 'club' | 'cava' | 'success' | 'cabins'
 
@@ -79,47 +81,49 @@ function App() {
               exit="exit"
               className="absolute inset-0 overflow-y-auto custom-scrollbar"
             >
-              {currentScreen === 'home' && (
-                <EstanciaHome 
-                  onOpenMenu={() => navigateTo('restaurant')} 
-                  onOpenExcursions={() => navigateTo('excursions')}
-                  onOpenBooking={() => {
-                    setBookingInitialUnitId(null);
-                    setIsBookingOpen(true);
-                  }}
-                  onNavigate={(s) => navigateTo(s)}
-                />
-              )}
-              {currentScreen === 'cabins' && (
-                <CabinsGallery 
-                  onBookCabin={(cabinId) => {
-                    setBookingInitialUnitId(cabinId);
-                    setIsBookingOpen(true);
-                  }}
-                />
-              )}
-              {currentScreen === 'restaurant' && (
-                <RestaurantMenu 
-                  onBack={() => navigateTo('home')} 
-                  onOpenCava={() => setCurrentScreen('cava')}
-                />
-              )}
-              {currentScreen === 'cava' && (
-                <WineCellar onBack={() => setCurrentScreen('restaurant')} />
-              )}
-              {currentScreen === 'excursions' && (
-                <Excursions onBack={() => navigateTo('home')} />
-              )}
-              {currentScreen === 'club' && (
-                <ClubEstancia />
-              )}
-              {currentScreen === 'success' && bookingData && (
-                <BookingSuccess 
-                  data={bookingData}
-                  onGoToClub={() => navigateTo('club')}
-                  onBackToHome={() => navigateTo('home')}
-                />
-              )}
+              <Suspense fallback={<div className="flex h-full w-full items-center justify-center text-[#C5A059]">Cargando...</div>}>
+                {currentScreen === 'home' && (
+                  <EstanciaHome 
+                    onOpenMenu={() => navigateTo('restaurant')} 
+                    onOpenExcursions={() => navigateTo('excursions')}
+                    onOpenBooking={() => {
+                      setBookingInitialUnitId(null);
+                      setIsBookingOpen(true);
+                    }}
+                    onNavigate={(s) => navigateTo(s)}
+                  />
+                )}
+                {currentScreen === 'cabins' && (
+                  <CabinsGallery 
+                    onBookCabin={(cabinId) => {
+                      setBookingInitialUnitId(cabinId);
+                      setIsBookingOpen(true);
+                    }}
+                  />
+                )}
+                {currentScreen === 'restaurant' && (
+                  <RestaurantMenu 
+                    onBack={() => navigateTo('home')} 
+                    onOpenCava={() => setCurrentScreen('cava')}
+                  />
+                )}
+                {currentScreen === 'cava' && (
+                  <WineCellar onBack={() => setCurrentScreen('restaurant')} />
+                )}
+                {currentScreen === 'excursions' && (
+                  <Excursions onBack={() => navigateTo('home')} />
+                )}
+                {currentScreen === 'club' && (
+                  <ClubEstancia />
+                )}
+                {currentScreen === 'success' && bookingData && (
+                  <BookingSuccess 
+                    data={bookingData}
+                    onGoToClub={() => navigateTo('club')}
+                    onBackToHome={() => navigateTo('home')}
+                  />
+                )}
+              </Suspense>
             </motion.div>
           </AnimatePresence>
         </div>
@@ -164,19 +168,21 @@ function App() {
         {/* Booking Flow Modal */}
         <AnimatePresence>
           {isBookingOpen && (
-            <BookingFlow 
-              onClose={() => {
-                setIsBookingOpen(false);
-                setBookingInitialUnitId(null);
-              }} 
-              initialUnitId={bookingInitialUnitId}
-              onComplete={(data) => {
-                setBookingData(data);
-                setIsBookingOpen(false);
-                setBookingInitialUnitId(null);
-                navigateTo('success');
-              }}
-            />
+            <Suspense fallback={<div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/50 backdrop-blur-sm text-[#C5A059]">Cargando...</div>}>
+              <BookingFlow 
+                onClose={() => {
+                  setIsBookingOpen(false);
+                  setBookingInitialUnitId(null);
+                }} 
+                initialUnitId={bookingInitialUnitId}
+                onComplete={(data) => {
+                  setBookingData(data);
+                  setIsBookingOpen(false);
+                  setBookingInitialUnitId(null);
+                  navigateTo('success');
+                }}
+              />
+            </Suspense>
           )}
         </AnimatePresence>
       </div>

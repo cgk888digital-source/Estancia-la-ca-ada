@@ -80,9 +80,9 @@ interface DbBooking {
   locator?: string | null
 }
 
-// Selected date (anchored to 2026-06-02 as today's date for realistic representation)
-const todayStr = '2026-06-02'
-const todayDate = new Date(2026, 5, 2) // June 2, 2026
+// Selected date (dynamic, always reflects the real current day)
+const todayDate = new Date()
+const todayStr = todayDate.toISOString().substring(0, 10)
 
 // Mappers between DB format (snake_case) and React format (camelCase)
 const mapDbBookingToReact = (db: DbBooking): Booking => ({
@@ -126,6 +126,8 @@ const getPaymentColorClasses = (paymentStatus: string) => {
 export default function BookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([])
   const [loading, setLoading] = useState(true)
+  const [monthPage, setMonthPage] = useState(1)
+  const PAGE_SIZE = 20
   const [activeTab, setActiveTab] = useState<'dia' | 'semana' | 'mes'>('dia')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
@@ -156,6 +158,10 @@ export default function BookingsPage() {
     paymentMethod: 'transferencia' as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque',
     specialNotes: ''
   })
+
+  // Autocomplete state
+  const [guestSuggestions, setGuestSuggestions] = useState<{name: string, phone: string, email: string}[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
 
   // Accommodation lookup helper
   const getAccommodation = (id: number) => accommodationOptions.find(o => o.id === id)
@@ -213,6 +219,7 @@ export default function BookingsPage() {
       paymentMethod: 'transferencia',
       specialNotes: ''
     })
+    setShowSuggestions(false)
     setShowAddModal(true)
   }
 
@@ -232,21 +239,60 @@ export default function BookingsPage() {
     ? (discountPercent > 0 ? Math.round(standardRate * (1 - discountPercent / 100)) : form.totalAmount)
     : standardRate
 
+  // Autocomplete effect
+  useEffect(() => {
+    if (form.guestName.length < 3 || !showSuggestions) {
+      setGuestSuggestions([])
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from('bookings')
+        .select('guest_name, guest_phone, guest_email')
+        .ilike('guest_name', `%${form.guestName}%`)
+        .limit(10)
+      
+      if (data) {
+        const unique = new Map()
+        data.forEach(d => {
+          if (!unique.has(d.guest_name)) {
+            unique.set(d.guest_name, { name: d.guest_name, phone: d.guest_phone, email: d.guest_email })
+          }
+        })
+        setGuestSuggestions(Array.from(unique.values()))
+      }
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [form.guestName, showSuggestions])
+
   useEffect(() => {
     let active = true
 
     const fetchBookings = async () => {
-      const { data: ratesData } = await supabase
-        .from('accommodations')
-        .select('*')
-      if (active && ratesData) {
-        setDbAccommodations(ratesData)
+      // Build a 30-day-ago cutoff so we only fetch current & recent bookings
+      const thirtyDaysAgo = new Date()
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+      const cutoffDate = thirtyDaysAgo.toISOString().substring(0, 10)
+
+      // Run both queries in parallel for faster loading
+      const [accommodationsResult, bookingsResult] = await Promise.all([
+        supabase
+          .from('accommodations')
+          .select('id, name, price, december_price, discount_percent, capacity, type'),
+        supabase
+          .from('bookings')
+          .select('*')
+          .gte('check_out', cutoffDate)
+          .order('created_at', { ascending: false })
+      ])
+
+      if (active && accommodationsResult.data) {
+        setDbAccommodations(accommodationsResult.data)
       }
 
-      const { data, error } = await supabase
-        .from('bookings')
-        .select('*')
-        .order('created_at', { ascending: false })
+      const { data, error } = bookingsResult
 
       if (!active) return
 
@@ -256,38 +302,7 @@ export default function BookingsPage() {
       } else if (data && data.length > 0) {
         setBookings(data.map(mapDbBookingToReact))
       } else {
-        // Seed the database with mockBookings if completely empty so the hotel looks populated
-        const dbMocks = mockBookings.map(b => ({
-          guest_name: b.guestName,
-          guest_phone: b.guestPhone,
-          guest_email: b.guestEmail,
-          accommodation_id: b.accommodationId,
-          check_in: b.checkIn,
-          check_out: b.checkOut,
-          adults: b.guestsCount.adults,
-          children: b.guestsCount.children,
-          babies: b.guestsCount.babies,
-          pets: b.guestsCount.pets,
-          total_amount: b.totalAmount,
-          amount_paid: b.amountPaid,
-          payment_status: b.paymentStatus,
-          payment_method: b.paymentMethod,
-          status: b.status,
-          special_notes: b.specialNotes || null
-        }))
-        
-        const { data: insertedData, error: insertError } = await supabase.from('bookings').insert(dbMocks).select('*')
-        
-        if (!active) return
-
-        if (insertError) {
-          console.error('Error seeding mock bookings:', insertError)
-          setBookings(mockBookings)
-        } else if (insertedData) {
-          setBookings(insertedData.map(mapDbBookingToReact))
-        } else {
-          setBookings(mockBookings)
-        }
+        setBookings([])
       }
       setLoading(false)
     }
@@ -352,6 +367,8 @@ export default function BookingsPage() {
 
   // 3. Filters and Search Results
   const filteredBookings = useMemo(() => {
+    // Reset pagination when filters change (handled via dependency)
+    setMonthPage(1)
     return bookings.filter(b => {
       const acc = getAccommodation(b.accommodationId)
       const cabinName = acc ? acc.title.toLowerCase() : ''
@@ -361,6 +378,11 @@ export default function BookingsPage() {
       return guestName.includes(q) || cabinName.includes(q) || locator.includes(q)
     })
   }, [bookings, searchQuery])
+
+  // Memoized monthly revenue total (avoids inline reduce on every render)
+  const totalMonthlyRevenue = useMemo(() => {
+    return bookings.reduce((s, b) => s + b.totalAmount, 0)
+  }, [bookings])
 
   // Key stats today
   const stats = useMemo(() => {
@@ -927,7 +949,7 @@ export default function BookingsPage() {
 
             <div className="flex flex-col justify-center border-t md:border-t-0 md:border-l border-gray-100 pt-4 md:pt-0 md:pl-6">
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Ingresos del Mes</span>
-              <p className="text-2xl font-bold text-emerald-600 mt-1">{fmt(bookings.reduce((s, b) => s + b.totalAmount, 0))}</p>
+              <p className="text-2xl font-bold text-emerald-600 mt-1">{fmt(totalMonthlyRevenue)}</p>
               <p className="text-xs text-gray-400 mt-0.5">Pagos totales estimados</p>
             </div>
 
@@ -942,7 +964,7 @@ export default function BookingsPage() {
           <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <h3 className="text-sm font-bold text-gray-700 uppercase tracking-widest">Lista Detallada de Reservas</h3>
-              <span className="text-xs text-gray-400 font-medium">Mostrando {filteredBookings.length} reservas</span>
+              <span className="text-xs text-gray-400 font-medium">Mostrando {Math.min(monthPage * PAGE_SIZE, filteredBookings.length)} de {filteredBookings.length} reservas</span>
             </div>
 
             <div className="overflow-x-auto">
@@ -966,7 +988,7 @@ export default function BookingsPage() {
                       </td>
                     </tr>
                   ) : (
-                    filteredBookings.map(b => {
+                    filteredBookings.slice((monthPage - 1) * PAGE_SIZE, monthPage * PAGE_SIZE).map(b => {
                       const acc = getAccommodation(b.accommodationId)
                       const conf = statusConfig[b.status]
                       return (
@@ -1025,6 +1047,29 @@ export default function BookingsPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination Controls */}
+            {filteredBookings.length > PAGE_SIZE && (
+              <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between">
+                <button
+                  onClick={() => setMonthPage(p => Math.max(1, p - 1))}
+                  disabled={monthPage === 1}
+                  className="px-4 py-2 border border-gray-200 rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95"
+                >
+                  ← Anterior
+                </button>
+                <span className="text-xs font-semibold text-gray-500">
+                  Página {monthPage} de {Math.ceil(filteredBookings.length / PAGE_SIZE)}
+                </span>
+                <button
+                  onClick={() => setMonthPage(p => Math.min(Math.ceil(filteredBookings.length / PAGE_SIZE), p + 1))}
+                  disabled={monthPage >= Math.ceil(filteredBookings.length / PAGE_SIZE)}
+                  className="px-4 py-2 border border-gray-200 rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95"
+                >
+                  Siguiente →
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1229,15 +1274,42 @@ export default function BookingsPage() {
 
               {/* Guest details */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="col-span-1 sm:col-span-2">
+                <div className="col-span-1 sm:col-span-2 relative">
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Nombre Completo del Huésped</label>
                   <input
                     type="text"
                     placeholder="Ej. Familia Rodríguez o Sra. Ana Peralta"
                     value={form.guestName}
-                    onChange={e => setForm(f => ({ ...f, guestName: e.target.value }))}
+                    onFocus={() => setShowSuggestions(true)}
+                    onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                    onChange={e => {
+                      setForm(f => ({ ...f, guestName: e.target.value }))
+                      setShowSuggestions(true)
+                    }}
                     className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
                   />
+                  {/* Autocomplete Dropdown */}
+                  {showSuggestions && guestSuggestions.length > 0 && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-100 rounded-xl shadow-xl overflow-hidden max-h-48 custom-scrollbar">
+                      {guestSuggestions.map((g, i) => (
+                        <div 
+                          key={i}
+                          onClick={() => {
+                            setForm(f => ({ ...f, guestName: g.name, guestPhone: g.phone || f.guestPhone, guestEmail: g.email || f.guestEmail }))
+                            setShowSuggestions(false)
+                          }}
+                          className="px-4 py-2 hover:bg-[#C5A059]/10 cursor-pointer flex flex-col gap-0.5 border-b border-gray-50 last:border-0"
+                        >
+                          <span className="text-xs font-bold text-gray-800">{g.name}</span>
+                          {(g.phone || g.email) && (
+                            <span className="text-[10px] text-gray-400">
+                              {g.phone} {g.phone && g.email && '•'} {g.email}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Teléfono</label>

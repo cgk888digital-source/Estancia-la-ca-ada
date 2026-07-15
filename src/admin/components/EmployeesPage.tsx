@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Plus, Check, X, UserCheck, UserX, DollarSign, Loader2, Users, Clock, Calendar, Receipt } from 'lucide-react'
 import { mockEmployees } from '../data/mockData'
 import type { Employee } from '../types'
 import { supabase } from '../../lib/supabase'
-import { getBcvUsdRate } from '../../utils/exchangeRate'
+import { getBcvEuroRate } from '../../utils/exchangeRate'
 import ReceiptModal from './ReceiptModal'
 
 const fmt = (n: number) =>
@@ -144,8 +144,8 @@ const EmployeesPage: React.FC = () => {
   const [receiptData, setReceiptData] = useState<{emp: Employee, amount: number, period: string, isHistory?: boolean, bcvRate?: number} | null>(null)
   const [bcvRate, setBcvRate] = useState<number>(36.50)
   
-  const [tipsBalance, setTipsBalance] = useState<Record<string, number>>({})
-  const [payingTips, setPayingTips] = useState<string | null>(null)
+  const [globalTipsBalance, setGlobalTipsBalance] = useState<number>(0)
+  const [distributingTips, setDistributingTips] = useState(false)
 
   const [form, setForm] = useState({
     name: '',
@@ -161,7 +161,7 @@ const EmployeesPage: React.FC = () => {
   useEffect(() => {
     let active = true
     const fetchEmployees = async () => {
-      const rate = await getBcvUsdRate()
+      const rate = await getBcvEuroRate()
       if (active) setBcvRate(rate)
 
       const { data, error } = await supabase
@@ -177,30 +177,7 @@ const EmployeesPage: React.FC = () => {
       } else if (data && data.length > 0) {
         setEmployees(data.map(mapDbEmployeeToReact))
       } else {
-        const dbMocks = mockEmployees.map(e => ({
-          name: e.name,
-          role: e.role,
-          salary: e.salary,
-          status: e.status,
-          hire_date: e.hireDate,
-          last_payment: e.lastPayment || null,
-          pending_payment: e.pendingPayment,
-          employee_type: 'fijo',
-          payment_frequency: 'mensual',
-          daily_rate: 0,
-          contracted_days: 0,
-        }))
-        const { data: inserted, error: insErr } = await supabase
-          .from('employees')
-          .insert(dbMocks)
-          .select('*')
-
-        if (!active) return
-        if (insErr) {
-          setEmployees(mockEmployees.map(e => ({ ...e, employeeType: 'fijo', paymentFrequency: 'mensual', dailyRate: 0, contractedDays: 0 })))
-        } else if (inserted) {
-          setEmployees(inserted.map(mapDbEmployeeToReact))
-        }
+        setEmployees([])
       }
       setLoading(false)
     }
@@ -209,57 +186,74 @@ const EmployeesPage: React.FC = () => {
     const fetchTips = async () => {
       const { data, error } = await supabase
         .from('transactions')
-        .select('type, amount, related_to')
+        .select('type, amount')
         .eq('category', 'propinas')
-        .not('related_to', 'is', null)
         
       if (!active || error || !data) return
       
-      const balances: Record<string, number> = {}
+      let total = 0
       data.forEach(tx => {
-        if (!tx.related_to) return
-        if (!balances[tx.related_to]) balances[tx.related_to] = 0
         const amt = Number(tx.amount) || 0
-        if (tx.type === 'ingreso') balances[tx.related_to] += amt
-        else if (tx.type === 'egreso') balances[tx.related_to] -= amt
+        if (tx.type === 'ingreso') total += amt
+        else if (tx.type === 'egreso') total -= amt
       })
-      setTipsBalance(balances)
+      setGlobalTipsBalance(total)
     }
     fetchTips()
     
     return () => { active = false }
   }, [])
 
-  const fijos = employees.filter(e => e.employeeType === 'fijo')
-  const eventuales = employees.filter(e => e.employeeType === 'eventual')
-  const activeFijos = fijos.filter(e => e.status === 'activo')
-  const activeEventuales = eventuales.filter(e => e.status === 'activo')
-  const totalFijosPayroll = activeFijos.reduce((s, e) => s + e.salary, 0)
-  const pendingFijos = activeFijos.filter(e => e.pendingPayment)
-  const pendingFijosTotal = pendingFijos.reduce((s, e) => s + e.salary, 0)
+  const {
+    fijos, eventuales, activeFijos, activeEventuales,
+    totalFijosPayroll, pendingFijos, pendingFijosTotal
+  } = useMemo(() => {
+    const fijos = employees.filter(e => e.employeeType === 'fijo')
+    const eventuales = employees.filter(e => e.employeeType === 'eventual')
+    const activeFijos = fijos.filter(e => e.status === 'activo')
+    const activeEventuales = eventuales.filter(e => e.status === 'activo')
+    const totalFijosPayroll = activeFijos.reduce((s, e) => s + e.salary, 0)
+    const pendingFijos = activeFijos.filter(e => e.pendingPayment)
+    const pendingFijosTotal = pendingFijos.reduce((s, e) => s + e.salary, 0)
+    return { fijos, eventuales, activeFijos, activeEventuales, totalFijosPayroll, pendingFijos, pendingFijosTotal }
+  }, [employees])
   
-  const handlePayTips = async (emp: Employee) => {
-    const balance = tipsBalance[emp.name] || 0
-    if (balance <= 0) return
-    setPayingTips(emp.id)
+  const handleDistributeTips = async () => {
+    if (globalTipsBalance <= 0) return
+    const activeEmployees = employees.filter(e => e.status === 'activo')
+    if (activeEmployees.length === 0) {
+      alert("No hay empleados activos para repartir.")
+      return
+    }
+
+    const confirm = window.confirm(`¿Estás seguro de que deseas repartir $${globalTipsBalance} entre ${activeEmployees.length} empleados activos?`)
+    if (!confirm) return
+
+    setDistributingTips(true)
     
+    const amountPerEmployee = Number((globalTipsBalance / activeEmployees.length).toFixed(2))
     const today = new Date().toISOString().split('T')[0]
     
-    const { error } = await supabase.from('transactions').insert([{
+    const transactionsToInsert = activeEmployees.map(emp => ({
       date: today,
       type: 'egreso',
       category: 'propinas',
-      description: `Pago de propinas acumuladas — ${emp.name} (Tasa BCV: ${bcvRate} Bs/$)`,
-      amount: balance,
+      description: `Reparto Fondo de Propinas — ${emp.name} (Tasa BCV: ${bcvRate} Bs/€)`,
+      amount: amountPerEmployee,
       payment_method: 'transferencia',
       related_to: emp.name,
-    }])
+    }))
+
+    const { error } = await supabase.from('transactions').insert(transactionsToInsert)
     
     if (!error) {
-      setTipsBalance(prev => ({ ...prev, [emp.name]: 0 }))
-      setReceiptData({ emp, amount: balance, period: 'Propinas Semanales' })
+      setGlobalTipsBalance(prev => prev - (amountPerEmployee * activeEmployees.length))
+      alert(`Se han repartido $${amountPerEmployee} a cada empleado activo.`)
+    } else {
+      console.error(error)
+      alert("Hubo un error al registrar la repartición.")
     }
-    setPayingTips(null)
+    setDistributingTips(false)
   }
 
   // ── Pay fixed employee ────────────────────────────────────────────────────
@@ -280,7 +274,7 @@ const EmployeesPage: React.FC = () => {
         date: today,
         type: 'egreso',
         category: 'empleados',
-        description: `Pago nómina fija — ${emp.name} (Tasa BCV: ${bcvRate} Bs/$)`,
+        description: `Pago nómina fija — ${emp.name} (Tasa BCV: ${bcvRate} Bs/€)`,
         amount: emp.salary,
         payment_method: 'transferencia',
         related_to: emp.name,
@@ -312,7 +306,7 @@ const EmployeesPage: React.FC = () => {
       date: today,
       type: 'egreso',
       category: 'empleados',
-      description: `Pago nómina fija — ${emp.name} (Tasa BCV: ${bcvRate} Bs/$)`,
+      description: `Pago nómina fija — ${emp.name} (Tasa BCV: ${bcvRate} Bs/€)`,
       amount: emp.salary,
       payment_method: 'transferencia',
       related_to: emp.name,
@@ -345,7 +339,7 @@ const EmployeesPage: React.FC = () => {
       date: today,
       type: 'egreso',
       category: 'empleados',
-      description: `Pago eventual — ${emp.name} (${freqLabel} - Tasa BCV: ${bcvRate} Bs/$)`,
+      description: `Pago eventual — ${emp.name} (${freqLabel} - Tasa BCV: ${bcvRate} Bs/€)`,
       amount,
       payment_method: 'transferencia',
       related_to: emp.name,
@@ -457,7 +451,7 @@ const EmployeesPage: React.FC = () => {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1 flex items-center gap-1"><Users size={11} /> Fijos Activos</p>
           <p className="text-2xl font-bold text-gray-900">{activeFijos.length}</p>
@@ -483,6 +477,21 @@ const EmployeesPage: React.FC = () => {
           >
             <DollarSign size={15} />
             Pagar Todo
+          </button>
+        </div>
+        <div className="bg-emerald-50 rounded-2xl p-5 border border-emerald-100 shadow-sm flex flex-col justify-between">
+          <div>
+            <p className="text-xs font-bold text-emerald-600 uppercase tracking-widest mb-1">Fondo de Propinas</p>
+            <p className="text-2xl font-bold text-emerald-700">{fmt(globalTipsBalance)}</p>
+          </div>
+          <button
+            onClick={handleDistributeTips}
+            disabled={globalTipsBalance <= 0 || distributingTips}
+            className={`mt-2 flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold transition-all w-full justify-center
+              ${globalTipsBalance > 0 && !distributingTips ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm' : 'bg-emerald-200/50 text-emerald-500 cursor-not-allowed'}`}
+          >
+            {distributingTips ? <Loader2 size={14} className="animate-spin" /> : <DollarSign size={14} />}
+            Repartir a Todos
           </button>
         </div>
       </div>
@@ -568,11 +577,6 @@ const EmployeesPage: React.FC = () => {
                     <td className="px-6 py-4 text-right">
                       <div className="flex flex-col items-end">
                         <span className="text-sm font-bold text-gray-900">{fmt(emp.salary)}</span>
-                        {(tipsBalance[emp.name] > 0) && (
-                          <span className="text-xs font-bold text-emerald-600 mt-0.5 bg-emerald-50 px-2 py-0.5 rounded-md">
-                            + {fmt(tipsBalance[emp.name])} propinas
-                          </span>
-                        )}
                       </div>
                     </td>
                     <td className="px-4 py-4 text-right">
@@ -584,16 +588,6 @@ const EmployeesPage: React.FC = () => {
                               ${paidId === emp.id ? 'bg-emerald-500 text-white' : 'bg-violet-100 text-violet-700 hover:bg-violet-600 hover:text-white'}`}
                           >
                             {paidId === emp.id ? <Check size={14} /> : 'Pagar Nómina'}
-                          </button>
-                        )}
-                        {(tipsBalance[emp.name] > 0) && (
-                          <button
-                            onClick={() => handlePayTips(emp)}
-                            disabled={payingTips === emp.id}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1
-                              ${payingTips === emp.id ? 'bg-emerald-500 text-white' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-600 hover:text-white'}`}
-                          >
-                            {payingTips === emp.id ? <Check size={14} /> : 'Pagar Propinas'}
                           </button>
                         )}
                       </div>

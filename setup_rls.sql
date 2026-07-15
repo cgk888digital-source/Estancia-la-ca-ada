@@ -10,11 +10,11 @@ VALUES
   ('cf581087-edc5-48e4-88b5-d1a059329b7c', 'gerente')
 ON CONFLICT (id) DO UPDATE SET role = EXCLUDED.role;
 
--- We need a function to easily get the role of the current user inside RLS policies
 CREATE OR REPLACE FUNCTION public.get_current_role()
 RETURNS text
 LANGUAGE sql
 SECURITY DEFINER
+STABLE
 AS $$
   SELECT role FROM public.user_roles WHERE id = auth.uid();
 $$;
@@ -132,3 +132,9 @@ CREATE POLICY "Public can read weekly_menu" ON public.weekly_menu
 -- What about bookings? The frontend doesn't show bookings to visitors. Admin only. So anon doesn't need bookings.
 -- BUT wait, the frontend has an "Explorar Todas las Cabañas" button that might create a booking or show availability?
 -- The EstanciaHome.tsx shows cabins, but we mock them right now or read from accommodations.
+
+-- Performance Indexes
+CREATE INDEX IF NOT EXISTS idx_transactions_date ON public.transactions(date);
+CREATE INDEX IF NOT EXISTS idx_bookings_check_out ON public.bookings(check_out);
+CREATE INDEX IF NOT EXISTS idx_bookings_check_in ON public.bookings(check_in);
+CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON public.transactions(created_at);
