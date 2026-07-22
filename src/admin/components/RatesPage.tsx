@@ -30,11 +30,7 @@ export default function RatesPage() {
   const [successTimes, setSuccessTimes] = useState(false)
   const [errorTimes, setErrorTimes] = useState('')
 
-  useEffect(() => {
-    fetchAll()
-  }, [])
-
-  const fetchAll = async () => {
+  async function fetchAll() {
     setLoading(true)
     setErrorMsg('')
 
@@ -68,6 +64,11 @@ export default function RatesPage() {
     setLoading(false)
   }
 
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchAll()
+  }, [])
+
   const handleInputChange = (id: number, field: keyof DbAccommodation, value: number) => {
     setRates(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r))
   }
@@ -97,7 +98,7 @@ export default function RatesPage() {
 
       setSuccess(true)
       setTimeout(() => setSuccess(false), 3000)
-    } catch (e: any) {
+    } catch {
       setErrorMsg('Error al guardar los cambios en el servidor.')
     } finally {
       setSaving(false)
@@ -127,7 +128,7 @@ export default function RatesPage() {
 
       setSuccessTimes(true)
       setTimeout(() => setSuccessTimes(false), 3000)
-    } catch (e: any) {
+    } catch {
       setErrorTimes('Error al guardar los horarios.')
     } finally {
       setSavingTimes(false)

@@ -80,9 +80,38 @@ interface DbBooking {
   locator?: string | null
 }
 
-// Selected date (dynamic, always reflects the real current day)
+interface DbAccommodation {
+  id: number | string
+  price: number | string
+  december_price: number | string
+  discount_percent?: number | string | null
+}
+
+interface GuestSuggestion {
+  name: string
+  phone: string
+  email: string
+}
+
+const formatLocalDate = (date: Date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const addDays = (date: Date, days: number) => {
+  const nextDate = new Date(date)
+  nextDate.setDate(nextDate.getDate() + days)
+  return nextDate
+}
+
 const todayDate = new Date()
-const todayStr = todayDate.toISOString().substring(0, 10)
+const todayStr = formatLocalDate(todayDate)
+const defaultCheckOutStr = formatLocalDate(addDays(todayDate, 3))
+const todayLongLabel = todayDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })
+const currentMonthLabel = todayDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
+const currentMonthTitle = currentMonthLabel.charAt(0).toUpperCase() + currentMonthLabel.slice(1)
 
 // Mappers between DB format (snake_case) and React format (camelCase)
 const mapDbBookingToReact = (db: DbBooking): Booking => ({
@@ -139,7 +168,7 @@ export default function BookingsPage() {
   const [useCustomRate, setUseCustomRate] = useState(false)
   const [discountPercent, setDiscountPercent] = useState(0)
   const [locatorCode, setLocatorCode] = useState('')
-  const [dbAccommodations, setDbAccommodations] = useState<any[]>([])
+  const [dbAccommodations, setDbAccommodations] = useState<DbAccommodation[]>([])
   
   // Form State for creating a new booking
   const [form, setForm] = useState({
@@ -147,8 +176,8 @@ export default function BookingsPage() {
     guestPhone: '',
     guestEmail: '',
     accommodationId: 2,
-    checkIn: '2026-06-02',
-    checkOut: '2026-06-05',
+    checkIn: todayStr,
+    checkOut: defaultCheckOutStr,
     adults: 2,
     children: 0,
     babies: 0,
@@ -160,8 +189,9 @@ export default function BookingsPage() {
   })
 
   // Autocomplete state
-  const [guestSuggestions, setGuestSuggestions] = useState<{name: string, phone: string, email: string}[]>([])
+  const [guestSuggestions, setGuestSuggestions] = useState<GuestSuggestion[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
+  const shouldShowGuestSuggestions = form.guestName.length >= 3 && showSuggestions
 
   // Accommodation lookup helper
   const getAccommodation = (id: number) => accommodationOptions.find(o => o.id === id)
@@ -172,7 +202,7 @@ export default function BookingsPage() {
     const isDecember = d.getMonth() === 11
     
     const dbAcc = dbAccommodations.find(o => Number(o.id) === accId)
-    let roomPrice = 0
+    let roomPrice: number
     if (dbAcc) {
       const basePrice = isDecember ? Number(dbAcc.december_price) : Number(dbAcc.price)
       const discount = Number(dbAcc.discount_percent || 0)
@@ -208,8 +238,8 @@ export default function BookingsPage() {
       guestPhone: '',
       guestEmail: '',
       accommodationId: 2,
-      checkIn: '2026-06-02',
-      checkOut: '2026-06-05',
+      checkIn: todayStr,
+      checkOut: defaultCheckOutStr,
       adults: 2,
       children: 0,
       babies: 0,
@@ -241,10 +271,7 @@ export default function BookingsPage() {
 
   // Autocomplete effect
   useEffect(() => {
-    if (form.guestName.length < 3 || !showSuggestions) {
-      setGuestSuggestions([])
-      return
-    }
+    if (!shouldShowGuestSuggestions) return
 
     const timer = setTimeout(async () => {
       const { data } = await supabase
@@ -254,7 +281,7 @@ export default function BookingsPage() {
         .limit(10)
       
       if (data) {
-        const unique = new Map()
+        const unique = new Map<string, GuestSuggestion>()
         data.forEach(d => {
           if (!unique.has(d.guest_name)) {
             unique.set(d.guest_name, { name: d.guest_name, phone: d.guest_phone, email: d.guest_email })
@@ -265,7 +292,7 @@ export default function BookingsPage() {
     }, 300)
 
     return () => clearTimeout(timer)
-  }, [form.guestName, showSuggestions])
+  }, [form.guestName, shouldShowGuestSuggestions])
 
   useEffect(() => {
     let active = true
@@ -367,8 +394,6 @@ export default function BookingsPage() {
 
   // 3. Filters and Search Results
   const filteredBookings = useMemo(() => {
-    // Reset pagination when filters change (handled via dependency)
-    setMonthPage(1)
     return bookings.filter(b => {
       const acc = getAccommodation(b.accommodationId)
       const cabinName = acc ? acc.title.toLowerCase() : ''
@@ -378,6 +403,12 @@ export default function BookingsPage() {
       return guestName.includes(q) || cabinName.includes(q) || locator.includes(q)
     })
   }, [bookings, searchQuery])
+
+  const reportDateText = activeTab === 'dia'
+    ? `Hoy, ${todayLongLabel}`
+    : activeTab === 'semana'
+      ? `Semana del ${todayLongLabel}`
+      : `Mes de ${currentMonthTitle}`
 
   // Memoized monthly revenue total (avoids inline reduce on every render)
   const totalMonthlyRevenue = useMemo(() => {
@@ -545,7 +576,7 @@ export default function BookingsPage() {
             Planner de Reservas <Sparkles className="text-[#C5A059] fill-[#C5A059]/10" size={24} />
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            Supervisa la ocupación del hotel de la manera más sencilla e intuitiva. Hoy es 2 de Junio, 2026.
+            Supervisa la ocupación del hotel de la manera más sencilla e intuitiva. Hoy es {todayLongLabel}.
           </p>
         </div>
         <div className="flex items-center gap-3 self-start md:self-auto print:hidden">
@@ -629,7 +660,10 @@ export default function BookingsPage() {
           {(['dia', 'semana', 'mes'] as const).map(tab => (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => {
+                setActiveTab(tab)
+                setMonthPage(1)
+              }}
               className={`flex-1 sm:flex-initial px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all active:scale-95 ${
                 activeTab === tab
                   ? 'bg-[#3D2B1F] text-white shadow-sm'
@@ -648,11 +682,20 @@ export default function BookingsPage() {
             type="text"
             placeholder="Buscar por huésped o cabaña..."
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+            onChange={e => {
+              setSearchQuery(e.target.value)
+              setMonthPage(1)
+            }}
             className="w-full text-xs outline-none bg-transparent text-gray-700 placeholder-gray-400 font-medium"
           />
           {searchQuery && (
-            <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-gray-600">
+            <button
+              onClick={() => {
+                setSearchQuery('')
+                setMonthPage(1)
+              }}
+              className="text-gray-400 hover:text-gray-600"
+            >
               <X size={14} />
             </button>
           )}
@@ -937,7 +980,7 @@ export default function BookingsPage() {
           <div className="bg-white rounded-[2.5rem] p-6 shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-4 gap-6">
             <div className="text-center md:text-left">
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Periodo</span>
-              <h3 className="text-2xl font-bold font-serif text-gray-800 mt-1">Junio 2026</h3>
+              <h3 className="text-2xl font-bold font-serif text-gray-800 mt-1">{currentMonthTitle}</h3>
               <p className="text-xs text-gray-400 mt-0.5">Estadísticas estimadas</p>
             </div>
             
@@ -1289,7 +1332,7 @@ export default function BookingsPage() {
                     className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
                   />
                   {/* Autocomplete Dropdown */}
-                  {showSuggestions && guestSuggestions.length > 0 && (
+                  {shouldShowGuestSuggestions && guestSuggestions.length > 0 && (
                     <div className="absolute z-10 w-full mt-1 bg-white border border-gray-100 rounded-xl shadow-xl overflow-hidden max-h-48 custom-scrollbar">
                       {guestSuggestions.map((g, i) => (
                         <div 
@@ -1555,7 +1598,7 @@ export default function BookingsPage() {
 
     <PrintableReservationsReport 
       bookings={filteredBookings} 
-      dateText={activeTab === 'dia' ? 'Hoy, 2 de Junio, 2026' : activeTab === 'semana' ? 'Semana del 2 de Junio, 2026' : 'Mes de Junio, 2026'}
+      dateText={reportDateText}
     />
     </>
   )

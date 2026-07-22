@@ -2,14 +2,16 @@ import React, { useState } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ArrowDownCircle, ArrowUpCircle,
-  Users, BarChart3, Menu, X, LogOut, UtensilsCrossed, Calendar, DollarSign, ClipboardList
+  Users, BarChart3, Menu, X, LogOut, UtensilsCrossed, Calendar, DollarSign, ClipboardList, Mail, ContactRound
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
-// import LoginPage from './LoginPage'
+import LoginPage from './LoginPage'
 
 const navItems = [
   { to: '/admin', label: 'Dashboard', icon: <LayoutDashboard size={20} />, end: true, roles: ['admin'] },
   { to: '/admin/reservas', label: 'Planner Reservas', icon: <Calendar size={20} />, roles: ['admin', 'gerente'] },
+  { to: '/admin/clientes', label: 'Clientes', icon: <ContactRound size={20} />, roles: ['admin', 'gerente'] },
+  { to: '/admin/email-marketing', label: 'Email Marketing', icon: <Mail size={20} />, roles: ['admin', 'gerente'] },
   { to: '/admin/ingresos', label: 'Ingresos', icon: <ArrowDownCircle size={20} />, roles: ['admin', 'gerente'] },
   { to: '/admin/egresos', label: 'Egresos', icon: <ArrowUpCircle size={20} />, roles: ['admin', 'gerente'] },
   { to: '/admin/empleados', label: 'Empleados', icon: <Users size={20} />, roles: ['admin', 'gerente'] },
@@ -21,18 +23,13 @@ const navItems = [
 
 const AdminLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const { logout } = useAuth()
+  const { role, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
-  // Bypassing login completely
-  const role = 'admin'
-
-  /*
   if (!role) {
     return <LoginPage />
   }
-  */
 
   // Filtrar los ítems del menú permitidos para el rol actual
   const allowedNavItems = navItems.filter(item => item.roles.includes(role))

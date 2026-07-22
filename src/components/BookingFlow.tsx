@@ -46,11 +46,18 @@ interface BookingFlowProps {
   initialUnitId?: number | null;
 }
 
+interface DbAccommodation {
+  id: number | string;
+  price: number | string;
+  december_price: number | string;
+  discount_percent?: number | string | null;
+}
+
 const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialUnitId }) => {
   const [step, setStep] = useState(1);
   const [bcvEuroRate, setBcvEuroRate] = useState<number | null>(null);
   const [loadingRate, setLoadingRate] = useState(false);
-  const [dbAccommodations, setDbAccommodations] = useState<any[]>([]);
+  const [dbAccommodations, setDbAccommodations] = useState<DbAccommodation[]>([]);
   const { settings: hotelSettings } = useHotelSettings();
 
   React.useEffect(() => {

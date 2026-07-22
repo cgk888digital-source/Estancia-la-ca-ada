@@ -165,9 +165,6 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
     })
   }, [transactions, typeFilter, search, categoryF])
 
-  // Reset page when filters change
-  useEffect(() => { setPage(1) }, [filtered])
-
   const { totalIngresos, totalEgresos } = useMemo(() => ({
     totalIngresos: filtered.filter(t => t.type === 'ingreso').reduce((s, t) => s + t.amount, 0),
     totalEgresos: filtered.filter(t => t.type === 'egreso').reduce((s, t) => s + t.amount, 0),
@@ -307,7 +304,10 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
           {periods.map(p => (
             <button
               key={p}
-              onClick={() => setPeriod(p)}
+              onClick={() => {
+                setPeriod(p)
+                setPage(1)
+              }}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition-all
                 ${period === p
                   ? 'text-white shadow-sm'
@@ -327,7 +327,10 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
               <input
                 type="date"
                 value={customFrom}
-                onChange={e => setCustomFrom(e.target.value)}
+                onChange={e => {
+                  setCustomFrom(e.target.value)
+                  setPage(1)
+                }}
                 className="border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#C5A059] transition-colors"
               />
             </div>
@@ -336,7 +339,10 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
               <input
                 type="date"
                 value={customTo}
-                onChange={e => setCustomTo(e.target.value)}
+                onChange={e => {
+                  setCustomTo(e.target.value)
+                  setPage(1)
+                }}
                 className="border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#C5A059] transition-colors"
               />
             </div>
@@ -350,12 +356,21 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
           <Search size={16} className="text-gray-400 shrink-0" />
           <input
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => {
+              setSearch(e.target.value)
+              setPage(1)
+            }}
             placeholder="Buscar descripción o proveedor..."
             className="flex-1 text-sm outline-none bg-transparent text-gray-700 placeholder-gray-400"
           />
           {search && (
-            <button onClick={() => setSearch('')} className="text-gray-300 hover:text-gray-500 transition-colors">
+            <button
+              onClick={() => {
+                setSearch('')
+                setPage(1)
+              }}
+              className="text-gray-300 hover:text-gray-500 transition-colors"
+            >
               <X size={14} />
             </button>
           )}
@@ -380,7 +395,11 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
           {showCategoryMenu && (
             <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-2xl shadow-xl z-20 py-2 min-w-[200px]">
               <button
-                onClick={() => { setCategoryF('todas'); setShowCategoryMenu(false) }}
+                onClick={() => {
+                  setCategoryF('todas')
+                  setShowCategoryMenu(false)
+                  setPage(1)
+                }}
                 className={`w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-gray-50
                   ${categoryF === 'todas' ? 'font-bold text-gray-900' : 'text-gray-600'}`}
               >
@@ -390,7 +409,11 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
               {allCategories.map(c => (
                 <button
                   key={c}
-                  onClick={() => { setCategoryF(c); setShowCategoryMenu(false) }}
+                  onClick={() => {
+                    setCategoryF(c)
+                    setShowCategoryMenu(false)
+                    setPage(1)
+                  }}
                   className={`w-full text-left px-4 py-2.5 text-sm flex items-center gap-3 transition-colors hover:bg-gray-50
                     ${categoryF === c ? 'font-bold text-gray-900' : 'text-gray-600'}`}
                 >
