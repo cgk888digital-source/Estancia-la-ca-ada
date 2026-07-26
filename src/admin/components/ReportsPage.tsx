@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, PieChart, Pie, Cell, Legend
@@ -118,7 +118,7 @@ const ReportsPage: React.FC = () => {
   const txList = transactions.length > 0 ? transactions : mockTransactions
 
   // Filter Logic
-  const getFilterPrefix = () => {
+  const getFilterPrefix = useCallback(() => {
     if (filterType === 'dia') return filterDate.substring(0, 10) // YYYY-MM-DD
     if (filterType === 'mes') return filterDate.substring(0, 7) // YYYY-MM
     if (filterType === 'año') return filterDate.substring(0, 4) // YYYY
@@ -134,19 +134,19 @@ const ReportsPage: React.FC = () => {
       return { start: startOfWeek.toISOString().substring(0, 10), end: endOfWeek.toISOString().substring(0, 10) }
     }
     return ''
-  }
+  }, [filterType, filterDate])
 
-  const isDateInFilter = (dateStr: string) => {
+  const isDateInFilter = useCallback((dateStr: string) => {
     const prefix = getFilterPrefix()
     if (typeof prefix === 'string') {
       return dateStr.startsWith(prefix)
     } else {
       return dateStr >= prefix.start && dateStr <= prefix.end
     }
-  }
+  }, [getFilterPrefix])
 
-  const filteredTx = useMemo(() => txList.filter(t => isDateInFilter(t.date)), [txList, filterType, filterDate])
-  const filteredBookings = useMemo(() => bookings.filter(b => isDateInFilter(b.checkIn)), [bookings, filterType, filterDate])
+  const filteredTx = useMemo(() => txList.filter(t => isDateInFilter(t.date)), [txList, isDateInFilter])
+  const filteredBookings = useMemo(() => bookings.filter(b => isDateInFilter(b.checkIn)), [bookings, isDateInFilter])
 
   const ingresos = useMemo(() => filteredTx.filter(t => t.type === 'ingreso').reduce((s, t) => s + t.amount, 0), [filteredTx])
   const egresos = useMemo(() => filteredTx.filter(t => t.type === 'egreso').reduce((s, t) => s + t.amount, 0), [filteredTx])
@@ -154,14 +154,14 @@ const ReportsPage: React.FC = () => {
   const margin = ingresos > 0 ? (neto / ingresos * 100) : 0
 
   // Specific Reports Data
-  const fbCategories = ['restaurante', 'bebidas', 'almuerzos', 'alimentos']
-  const fbIngresos = useMemo(() => filteredTx.filter(t => t.type === 'ingreso' && fbCategories.includes(t.category)).reduce((s, t) => s + t.amount, 0), [filteredTx])
+  const fbCategories = useMemo<TransactionCategory[]>(() => ['restaurante', 'bebidas', 'almuerzos', 'alimentos'], [])
+  const fbIngresos = useMemo(() => filteredTx.filter(t => t.type === 'ingreso' && fbCategories.includes(t.category)).reduce((s, t) => s + t.amount, 0), [filteredTx, fbCategories])
   const nominaEgresos = useMemo(() => filteredTx.filter(t => t.category === 'empleados').reduce((s, t) => s + t.amount, 0), [filteredTx])
 
   // Pre-computed counts for JSX
   const ingresosCount = useMemo(() => filteredTx.filter(t => t.type === 'ingreso').length, [filteredTx])
   const egresosCount = useMemo(() => filteredTx.filter(t => t.type === 'egreso').length, [filteredTx])
-  const fbCount = useMemo(() => filteredTx.filter(t => t.type === 'ingreso' && fbCategories.includes(t.category)).length, [filteredTx])
+  const fbCount = useMemo(() => filteredTx.filter(t => t.type === 'ingreso' && fbCategories.includes(t.category)).length, [filteredTx, fbCategories])
   const nominaCount = useMemo(() => filteredTx.filter(t => t.category === 'empleados').length, [filteredTx])
 
   // Cabins Report Data
@@ -247,7 +247,7 @@ const ReportsPage: React.FC = () => {
         <div className="flex flex-wrap items-center gap-3">
           <select
             value={filterType}
-            onChange={e => setFilterType(e.target.value as any)}
+            onChange={e => setFilterType(e.target.value as 'dia' | 'semana' | 'mes' | 'año')}
             disabled={role === 'gerente'}
             className="text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 outline-none font-bold text-gray-700 focus:border-[#C5A059] transition-colors disabled:opacity-50"
           >

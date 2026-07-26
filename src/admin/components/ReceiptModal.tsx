@@ -24,6 +24,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({ emp, amountUsd, period, bcv
     month: 'long', 
     day: 'numeric' 
   }));
+  const [paymentId] = useState(() => Math.random().toString(36).substring(2, 8).toUpperCase());
 
   const handlePrint = () => {
     window.print();
@@ -118,7 +119,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({ emp, amountUsd, period, bcv
                 Recibo de Pago
               </h2>
               <p className="text-gray-600 font-medium">Fecha: {date}</p>
-              <p className="text-gray-600 font-medium">ID Pago: #{Math.random().toString(36).substring(2, 8).toUpperCase()}</p>
+              <p className="text-gray-600 font-medium">ID Pago: #{paymentId}</p>
             </div>
           </div>
 

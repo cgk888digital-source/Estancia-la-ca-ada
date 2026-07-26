@@ -3,6 +3,13 @@ CREATE TABLE IF NOT EXISTS public.user_roles (
   role text not null check (role in ('admin', 'gerente'))
 );
 
+CREATE TABLE IF NOT EXISTS public.hotel_settings (
+  key text primary key,
+  value text not null,
+  label text,
+  updated_at timestamptz default now()
+);
+
 -- Insert roles for the newly created users
 INSERT INTO public.user_roles (id, role)
 VALUES 
@@ -27,6 +34,7 @@ ALTER TABLE public.accommodations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.restaurant_menu ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.weekly_menu ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.comandas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.hotel_settings ENABLE ROW LEVEL SECURITY;
 
 -- 1. Transactions Policies
 -- Admin: All
@@ -75,6 +83,10 @@ CREATE POLICY "Gerente can insert bookings" ON public.bookings
   FOR INSERT TO authenticated WITH CHECK (public.get_current_role() = 'gerente');
 CREATE POLICY "Gerente can update bookings" ON public.bookings
   FOR UPDATE TO authenticated USING (public.get_current_role() = 'gerente') WITH CHECK (public.get_current_role() = 'gerente');
+
+-- Guests can create booking requests from the public app with the anon key.
+CREATE POLICY "Public can create booking requests" ON public.bookings
+  FOR INSERT TO anon WITH CHECK (true);
 
 
 -- 4. Comandas Policies
@@ -129,6 +141,15 @@ CREATE POLICY "Public can read restaurant_menu" ON public.restaurant_menu
   FOR SELECT TO anon USING (true);
 CREATE POLICY "Public can read weekly_menu" ON public.weekly_menu
   FOR SELECT TO anon USING (true);
+
+CREATE POLICY "Public can read hotel_settings" ON public.hotel_settings
+  FOR SELECT TO anon USING (true);
+CREATE POLICY "Authenticated can read hotel_settings" ON public.hotel_settings
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Admin can manage hotel_settings" ON public.hotel_settings
+  FOR ALL TO authenticated USING (public.get_current_role() = 'admin') WITH CHECK (public.get_current_role() = 'admin');
+CREATE POLICY "Gerente can update hotel_settings" ON public.hotel_settings
+  FOR UPDATE TO authenticated USING (public.get_current_role() = 'gerente') WITH CHECK (public.get_current_role() = 'gerente');
 -- What about bookings? The frontend doesn't show bookings to visitors. Admin only. So anon doesn't need bookings.
 -- BUT wait, the frontend has an "Explorar Todas las Cabañas" button that might create a booking or show availability?
 -- The EstanciaHome.tsx shows cabins, but we mock them right now or read from accommodations.
