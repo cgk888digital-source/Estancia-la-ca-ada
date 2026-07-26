@@ -485,6 +485,21 @@ export default function BookingsPage() {
   const handleAddBooking = async () => {
     if (!form.guestName.trim()) return
 
+    if (form.checkOut <= form.checkIn) {
+      alert('Error: La fecha de check-out debe ser posterior a la fecha de check-in.')
+      return
+    }
+
+    const collision = bookings.find(b => {
+      if (b.accommodationId !== Number(form.accommodationId)) return false
+      return form.checkIn < b.checkOut && form.checkOut > b.checkIn
+    })
+
+    if (collision) {
+      alert(`Error: Conflicto de fechas. La cabaña ya está reservada para el huésped "${collision.guestName}" desde el ${collision.checkIn} hasta el ${collision.checkOut}.`)
+      return
+    }
+
     const finalTotal = useCustomRate 
       ? (discountPercent > 0 ? Math.round(standardRate * (1 - discountPercent / 100)) : form.totalAmount)
       : standardRate
@@ -1383,6 +1398,31 @@ export default function BookingsPage() {
                 </div>
               </div>
 
+              {/* Collision / Date range warning */}
+              {(() => {
+                if (form.checkOut <= form.checkIn) {
+                  return (
+                    <div className="bg-rose-50 border border-rose-100 text-rose-800 text-xs p-3.5 rounded-2xl flex flex-col gap-0.5 animate-fade-in">
+                      <span className="font-bold">⚠️ Rango de Fechas Inválido</span>
+                      <span>La fecha de Check-Out debe ser posterior al Check-In.</span>
+                    </div>
+                  )
+                }
+                const collision = bookings.find(b => {
+                  if (b.accommodationId !== Number(form.accommodationId)) return false
+                  return form.checkIn < b.checkOut && form.checkOut > b.checkIn
+                })
+                if (collision) {
+                  return (
+                    <div className="bg-rose-50 border border-rose-100 text-rose-800 text-xs p-3.5 rounded-2xl flex flex-col gap-0.5 animate-pulse">
+                      <span className="font-bold">⚠️ Conflicto de Fechas Encontrado</span>
+                      <span>La cabaña ya está reservada por <strong>"{collision.guestName}"</strong> del <strong>{collision.checkIn}</strong> al <strong>{collision.checkOut}</strong>.</span>
+                    </div>
+                  )
+                }
+                return null
+              })()}
+
               {/* Extras count */}
               <div className="grid grid-cols-3 gap-3">
                 <div>
@@ -1542,7 +1582,11 @@ export default function BookingsPage() {
               <button
                 type="button"
                 onClick={handleAddBooking}
-                disabled={!form.guestName.trim()}
+                disabled={
+                  !form.guestName.trim() || 
+                  form.checkOut <= form.checkIn || 
+                  bookings.some(b => b.accommodationId === Number(form.accommodationId) && form.checkIn < b.checkOut && form.checkOut > b.checkIn)
+                }
                 className="flex-1 py-3 bg-[#C5A059] hover:bg-[#b8904a] text-white font-bold rounded-2xl text-xs uppercase tracking-wider disabled:opacity-40 transition-all flex items-center justify-center gap-1.5 active:scale-95"
               >
                 <Check size={16} /> Registrar Reserva

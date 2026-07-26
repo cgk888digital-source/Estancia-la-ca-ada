@@ -12,12 +12,11 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 // Configuración de PINs rápidos -> Mapeado a usuarios reales
-/*
-const PINS: Record<string, { email: string; role: Role }> = {
-  '1234': { email: 'admin@estancialacanada.com', role: 'admin' },
-  '5555': { email: 'gerente@estancialacanada.com', role: 'gerente' }
+const PINS: Record<string, { email: string; role: Role; pass: string }> = {
+  '1234': { email: 'admin@estancialacanada.com', role: 'admin', pass: 'password1234' },
+  '5555': { email: 'gerente@estancialacanada.com', role: 'gerente', pass: 'password5555' },
+  '9999': { email: 'empleado@estancialacanada.com', role: 'empleado', pass: 'password9999' }
 }
-*/
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [role, setRole] = useState<Role | null>(() => {
@@ -46,10 +45,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [])
 
-  const login = useCallback(async (_pin: string): Promise<boolean> => {
-    // Bypassing real authentication temporarily
-    setRole('admin')
-    localStorage.setItem('adminRole', 'admin')
+  const login = useCallback(async (pin: string): Promise<boolean> => {
+    const user = PINS[pin]
+    if (!user) return false
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: user.email,
+      password: user.pass,
+    })
+
+    if (error) {
+      console.error('Error logging in:', error.message)
+      return false
+    }
+
+    setRole(user.role)
+    localStorage.setItem('adminRole', user.role)
     return true
   }, [])
 

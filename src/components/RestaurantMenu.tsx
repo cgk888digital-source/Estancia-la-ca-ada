@@ -1,8 +1,13 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronLeft, ChevronRight, Wine, Clock, Users } from 'lucide-react'
+import { 
+  ChevronLeft, Wine, Clock, Users, 
+  ShoppingBag, Plus, Minus, Receipt, FileText, CheckCircle2 
+} from 'lucide-react'
 import { getMenu } from '../utils/menuStore'
 import { weeklyMenu } from '../data/weeklyMenu'
+import { supabase } from '../lib/supabase'
+import type { DishItem } from '../data/weeklyMenu'
 
 const galleryPlatos = [
   { src: '/assets/restaurante/platos/ceviche.png',          label: 'Ceviche del Día' },
@@ -19,13 +24,141 @@ const galleryPlatos = [
   { src: '/assets/restaurante/platos/postre-crepe.png',     label: 'Crepe de Chocolate' },
 ]
 
-const RestaurantMenu: React.FC<{ onBack: () => void; onOpenCava: () => void }> = ({ onBack, onOpenCava }) => {
+interface CartItem {
+  dish: DishItem
+  quantity: number
+  notes: string
+}
+
+const parsePrice = (priceStr?: string): number => {
+  if (!priceStr) return 0;
+  if (priceStr.toLowerCase().includes('incluido')) return 0;
+  const num = parseFloat(priceStr.replace(/[^0-9.]/g, ''));
+  return isNaN(num) ? 0 : num;
+}
+
+const RestaurantMenu: React.FC<{ 
+  onBack: () => void; 
+  onOpenCava: () => void;
+  tableId?: string | null;
+}> = ({ onBack, onOpenCava, tableId }) => {
   const [activeTab, setActiveTab] = useState('almuerzo')
   const [menu, setMenu] = useState(weeklyMenu)
+  
+  // Cart & Order state
+  const [cart, setCart] = useState<CartItem[]>([])
+  const [isCartOpen, setIsCartOpen] = useState(false)
+  const [tableOrders, setTableOrders] = useState<any[]>([])
+  const [isBillOpen, setIsBillOpen] = useState(false)
+  const [fetchingBill, setFetchingBill] = useState(false)
+  const [placingOrder, setPlacingOrder] = useState(false)
+  const [orderSuccess, setOrderSuccess] = useState(false)
+
+  const fetchTableOrders = useCallback(async () => {
+    if (!tableId) return
+    setFetchingBill(true)
+    const { data, error } = await supabase
+      .from('comandas')
+      .select('*')
+      .eq('table_id', tableId)
+      .eq('payment_status', 'pendiente')
+      .order('created_at', { ascending: false })
+    
+    if (!error && data) {
+      setTableOrders(data)
+    }
+    setFetchingBill(false)
+  }, [tableId])
 
   useEffect(() => { getMenu().then(setMenu) }, [])
 
+  useEffect(() => {
+    if (tableId) {
+      fetchTableOrders()
+      
+      const channel = supabase
+        .channel(`table_orders_${tableId}`)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'comandas',
+          filter: `table_id=eq.${tableId}`
+        }, () => {
+          fetchTableOrders()
+        })
+        .subscribe()
+        
+      return () => {
+        supabase.removeChannel(channel)
+      }
+    }
+  }, [tableId, fetchTableOrders])
+
+  const getItemQuantity = (dish: DishItem) => {
+    const item = cart.find(i => i.dish.name === dish.name)
+    return item ? item.quantity : 0
+  }
+
+  const updateQuantity = (dish: DishItem, q: number) => {
+    if (q <= 0) {
+      setCart(prev => prev.filter(i => i.dish.name !== dish.name))
+    } else {
+      setCart(prev => {
+        const existing = prev.find(i => i.dish.name === dish.name)
+        if (existing) {
+          return prev.map(i => i.dish.name === dish.name ? { ...i, quantity: q } : i)
+        } else {
+          return [...prev, { dish, quantity: q, notes: '' }]
+        }
+      })
+    }
+  }
+
+  const updateNotes = (dishName: string, notes: string) => {
+    setCart(prev => prev.map(i => i.dish.name === dishName ? { ...i, notes } : i))
+  }
+
+  const handlePlaceOrder = async () => {
+    if (cart.length === 0 || !tableId) return
+    setPlacingOrder(true)
+    
+    const totalAmount = cart.reduce((sum, item) => {
+      const price = parsePrice(item.dish.price)
+      return sum + (price * item.quantity)
+    }, 0)
+    
+    const orderItems = cart.map(item => ({
+      name: item.dish.name,
+      price: item.dish.price || 'Incluido',
+      quantity: item.quantity,
+      notes: item.notes || null
+    }))
+    
+    const { error } = await supabase
+      .from('comandas')
+      .insert({
+        table_id: tableId,
+        items: orderItems,
+        total_amount: totalAmount,
+        status: 'preparando',
+        payment_status: 'pendiente'
+      })
+      
+    if (!error) {
+      setCart([])
+      setIsCartOpen(false)
+      setOrderSuccess(true)
+      fetchTableOrders()
+      setTimeout(() => setOrderSuccess(false), 3000)
+    } else {
+      console.error('Error placing order:', error.message)
+      alert('Error al enviar el pedido: ' + error.message)
+    }
+    setPlacingOrder(false)
+  }
+
   const activeSection = menu.find(s => s.id === activeTab) ?? menu[0]
+
 
   return (
     <motion.div
@@ -34,6 +167,13 @@ const RestaurantMenu: React.FC<{ onBack: () => void; onOpenCava: () => void }> =
       exit={{ opacity: 0 }}
       className="min-h-screen bg-brand-neutral text-brand-primary font-sans pb-32"
     >
+      {tableId && (
+        <div className="bg-brand-terracotta text-white px-5 py-3 text-center text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 shadow-md sticky top-0 z-50">
+          <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+          Ordenando desde {tableId}
+        </div>
+      )}
+
       {/* ── HERO ── */}
       <div className="relative h-[55vh] w-full overflow-hidden">
         <img
@@ -328,6 +468,35 @@ const RestaurantMenu: React.FC<{ onBack: () => void; onOpenCava: () => void }> =
                         {dish.tag}
                       </span>
                     )}
+
+                    {tableId && (
+                      <div className="mt-3 flex items-center justify-end gap-2 border-t border-brand-primary/5 pt-3">
+                        {getItemQuantity(dish) > 0 ? (
+                          <div className="flex items-center bg-brand-wood text-white rounded-xl overflow-hidden shadow-sm">
+                            <button
+                              onClick={() => updateQuantity(dish, getItemQuantity(dish) - 1)}
+                              className="px-3 py-1.5 hover:bg-brand-wood/80 transition-colors text-xs font-bold"
+                            >
+                              -
+                            </button>
+                            <span className="px-2.5 text-xs font-bold">{getItemQuantity(dish)}</span>
+                            <button
+                              onClick={() => updateQuantity(dish, getItemQuantity(dish) + 1)}
+                              className="px-3 py-1.5 hover:bg-brand-wood/80 transition-colors text-xs font-bold"
+                            >
+                              +
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => updateQuantity(dish, 1)}
+                            className="px-3 py-1.5 bg-[#C5A059] text-white text-[10px] font-bold rounded-xl uppercase tracking-wider hover:bg-[#b8904a] active:scale-95 transition-all shadow-sm"
+                          >
+                            Agregar al Pedido
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               ))}
@@ -373,11 +542,268 @@ const RestaurantMenu: React.FC<{ onBack: () => void; onOpenCava: () => void }> =
             <h3 className="text-white text-2xl font-serif mb-1">Cava Virtual</h3>
             <p className="text-white/60 text-xs mb-4">Etiquetas seleccionadas por nuestro sommelier</p>
             <div className="flex items-center gap-1.5 text-brand-accent text-[10px] uppercase tracking-[0.3em] font-bold">
-              Explorar <ChevronRight size={12} />
             </div>
           </div>
         </motion.div>
       </section>
+
+      {/* ── FLOATING CART & BILL BAR ── */}
+      {tableId && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] w-full max-w-[390px] px-4">
+          <div className="bg-brand-wood/95 backdrop-blur-md rounded-2xl p-3 flex gap-3 shadow-2xl border border-white/10 text-white">
+            <button
+              onClick={() => setIsBillOpen(true)}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 active:scale-95 transition-all text-[10px] font-bold uppercase tracking-wider text-white"
+            >
+              <Receipt size={14} className="text-[#C5A059]" />
+              Ver Cuenta {tableOrders.length > 0 && `(${tableOrders.length})`}
+            </button>
+            
+            <button
+              onClick={() => cart.length > 0 && setIsCartOpen(true)}
+              disabled={cart.length === 0}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[#C5A059] hover:bg-[#b8904a] active:scale-95 transition-all text-[10px] font-bold uppercase tracking-wider text-white disabled:opacity-40 disabled:pointer-events-none"
+            >
+              <ShoppingBag size={14} />
+              Pedir ({cart.reduce((sum, i) => sum + i.quantity, 0)})
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── CART DRAWER ── */}
+      <AnimatePresence>
+        {isCartOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.5 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsCartOpen(false)}
+              className="fixed inset-0 bg-black z-[110]"
+            />
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed bottom-0 left-0 right-0 max-w-[430px] mx-auto bg-brand-neutral rounded-t-[2rem] border-t border-brand-primary/10 z-[120] px-6 pt-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] shadow-2xl flex flex-col max-h-[80dvh]"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between pb-4 border-b border-brand-primary/5 mb-4 flex-none">
+                <div>
+                  <h3 className="text-lg font-serif text-brand-wood">Tu Pedido</h3>
+                  <p className="text-[10px] uppercase tracking-widest text-brand-primary/40 font-bold">{tableId}</p>
+                </div>
+                <button
+                  onClick={() => setIsCartOpen(false)}
+                  className="w-8 h-8 rounded-full bg-brand-primary/5 flex items-center justify-center text-brand-primary/60 hover:bg-brand-primary/10 font-sans font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Items List */}
+              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-1 pb-4">
+                {cart.map((item, index) => (
+                  <div key={index} className="bg-white rounded-2xl p-4 border border-brand-primary/5 shadow-sm space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <h4 className="text-sm font-bold text-brand-wood truncate">{item.dish.name}</h4>
+                        <p className="text-xs text-[#C5A059] font-semibold mt-0.5">
+                          {item.dish.price === 'Incluido' || !item.dish.price ? 'Incluido en plan' : item.dish.price}
+                        </p>
+                      </div>
+                      
+                      {/* Quantity control */}
+                      <div className="flex items-center bg-brand-primary/5 rounded-xl overflow-hidden flex-none">
+                        <button
+                          onClick={() => updateQuantity(item.dish, item.quantity - 1)}
+                          className="px-2.5 py-1 text-brand-primary/75 hover:bg-brand-primary/10 transition-colors"
+                        >
+                          <Minus size={10} />
+                        </button>
+                        <span className="px-2 text-xs font-bold text-brand-primary">{item.quantity}</span>
+                        <button
+                          onClick={() => updateQuantity(item.dish, item.quantity + 1)}
+                          className="px-2.5 py-1 text-brand-primary/75 hover:bg-brand-primary/10 transition-colors"
+                        >
+                          <Plus size={10} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Notes field */}
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="Nota especial (ej: sin cebolla, hielo...)"
+                        value={item.notes}
+                        onChange={e => updateNotes(item.dish.name, e.target.value)}
+                        className="w-full bg-brand-neutral border border-brand-primary/5 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#C5A059] text-brand-primary"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Summary and button */}
+              <div className="pt-4 border-t border-brand-primary/5 mt-auto flex-none space-y-4 bg-brand-neutral">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-brand-primary/60">Total Estimado</span>
+                  <span className="font-bold text-brand-wood text-lg">
+                    ${cart.reduce((sum, item) => sum + (parsePrice(item.dish.price) * item.quantity), 0)}
+                  </span>
+                </div>
+
+                <button
+                  onClick={handlePlaceOrder}
+                  disabled={placingOrder}
+                  className="w-full py-3.5 bg-brand-terracotta text-white rounded-xl font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2 hover:bg-brand-terracotta/90 active:scale-95 transition-all shadow-lg disabled:opacity-50"
+                >
+                  {placingOrder ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <FileText size={14} />
+                      Enviar a Cocina
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* ── BILL DRAWER ── */}
+      <AnimatePresence>
+        {isBillOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.5 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsBillOpen(false)}
+              className="fixed inset-0 bg-black z-[110]"
+            />
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed bottom-0 left-0 right-0 max-w-[430px] mx-auto bg-brand-neutral rounded-t-[2rem] border-t border-brand-primary/10 z-[120] px-6 pt-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] shadow-2xl flex flex-col max-h-[80dvh]"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between pb-4 border-b border-brand-primary/5 mb-4 flex-none">
+                <div>
+                  <h3 className="text-lg font-serif text-brand-wood">Cuenta de la Mesa</h3>
+                  <p className="text-[10px] uppercase tracking-widest text-brand-primary/40 font-bold">{tableId}</p>
+                </div>
+                <button
+                  onClick={() => setIsBillOpen(false)}
+                  className="w-8 h-8 rounded-full bg-brand-primary/5 flex items-center justify-center text-brand-primary/60 hover:bg-brand-primary/10 font-sans font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Orders List */}
+              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-1 pb-4">
+                {fetchingBill ? (
+                  <div className="text-center py-8 text-brand-primary/40 text-xs">Cargando detalles de cuenta...</div>
+                ) : tableOrders.length === 0 ? (
+                  <div className="text-center py-8 text-brand-primary/40 text-xs">Aún no hay comandas activas para esta mesa.</div>
+                ) : (
+                  tableOrders.map((order, oIdx) => (
+                    <div key={order.id} className="bg-white rounded-2xl p-4 border border-brand-primary/5 shadow-sm space-y-3">
+                      <div className="flex items-center justify-between border-b border-brand-primary/5 pb-2">
+                        <span className="text-[10px] text-brand-primary/40 font-bold uppercase tracking-wider">
+                          Pedido #{tableOrders.length - oIdx} ({new Date(order.created_at).toLocaleTimeString('es-VE', {hour: '2-digit', minute: '2-digit'})})
+                        </span>
+                        
+                        {/* Status Badge */}
+                        <span className={`text-[9px] uppercase tracking-widest font-bold px-2 py-0.5 rounded-full ${
+                          order.status === 'preparando' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                          order.status === 'listo' ? 'bg-green-500 text-white animate-pulse' :
+                          'bg-blue-50 text-blue-700 border border-blue-200'
+                        }`}>
+                          {order.status === 'preparando' ? 'En Cocina' :
+                           order.status === 'listo' ? 'Listo' : 'Servido'}
+                        </span>
+                      </div>
+
+                      {/* Items */}
+                      <div className="space-y-1.5">
+                        {order.items?.map((item: any, iIdx: number) => (
+                          <div key={iIdx} className="flex justify-between items-start text-xs">
+                            <div className="min-w-0 pr-2">
+                              <span className="font-bold text-brand-wood">{item.quantity}x</span>{' '}
+                              <span className="text-brand-primary/75">{item.name}</span>
+                              {item.notes && (
+                                <p className="text-[9px] text-brand-primary/40 italic mt-0.5">Nota: {item.notes}</p>
+                              )}
+                            </div>
+                            <span className="font-semibold text-brand-primary/70">{item.price === 'Incluido' ? 'Incluido' : item.price}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex justify-between items-center pt-2 border-t border-brand-primary/5 text-xs font-bold text-brand-wood">
+                        <span>Subtotal comanda</span>
+                        <span>${order.total_amount}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Total and actions */}
+              {tableOrders.length > 0 && (
+                <div className="pt-4 border-t border-brand-primary/5 mt-auto flex-none space-y-4 bg-brand-neutral">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-brand-primary/60 font-bold">Total Acumulado</span>
+                    <span className="font-extrabold text-[#C5A059] text-xl">
+                      ${tableOrders.reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0)}
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      alert(`Cuenta Solicitada\n\nEl mesero se acercará a la mesa ${tableId} en breve con tu cuenta física. ¡Gracias por preferir Estancia La Cañada!`);
+                      setIsBillOpen(false);
+                    }}
+                    className="w-full py-3.5 bg-brand-wood text-white rounded-xl font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2 hover:bg-brand-wood/90 active:scale-95 transition-all shadow-lg"
+                  >
+                    <Receipt size={14} />
+                    Pedir Cuenta Física
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* ── SUCCESS POPUP ── */}
+      <AnimatePresence>
+        {orderSuccess && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="fixed inset-0 z-[200] flex items-center justify-center p-6 pointer-events-none"
+          >
+            <div className="bg-brand-wood text-white border border-brand-accent/20 rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-3 max-w-[280px] text-center">
+              <CheckCircle2 size={40} className="text-green-400" />
+              <div>
+                <h4 className="font-serif text-sm font-bold text-white mb-1">¡Pedido Enviado!</h4>
+                <p className="text-[10px] text-white/60 leading-relaxed">Tu pedido ha sido recibido en cocina y ya comenzó su preparación.</p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   )
 }

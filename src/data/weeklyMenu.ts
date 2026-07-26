@@ -72,38 +72,38 @@ export const weeklyMenu: MenuSection[] = [
     id: 'almuerzo',
     label: 'Almuerzo',
     emoji: '☀️',
-    included: 'Servicio a la Carta · No incluido en el plan básico de hospedaje',
+    included: 'Servicio a la Carta · No incluido en el plan de hospedaje',
     items: [
       {
         name: 'Ceviche del Día',
         description: 'Pescado fresco del día marinado en zumo de limón, cebolla morada, ají dulce y cilantro fresco.',
         image: 'platos/ceviche.png',
-        price: 'A la Carta'
+        price: '$14.00'
       },
       {
         name: 'Crema de Apio Asado',
         description: 'Sopa cremosa de apio andino asado al horno de leña con un toque de aceite de oliva perfumado.',
         image: 'platos/bocado-1.png',
-        price: 'A la Carta'
+        price: '$8.00'
       },
       {
         name: 'Trucha del Páramo a la Plancha',
         description: 'Filete de trucha de manantial a la plancha acompañado de vegetales de nuestra huerta salteados y papitas al romero.',
         image: 'platos/trucha-verduras.png',
-        price: 'A la Carta'
+        price: '$18.00'
       },
       {
         name: 'Raviolis de la Estancia',
         description: 'Pasta artesanal hecha en casa rellena de ricotta fresca de cabra, salteada en mantequilla de salvia.',
         image: 'platos/ravioli.png',
-        price: 'A la Carta',
+        price: '$15.00',
         tag: 'Recomendado'
       },
       {
         name: 'Fresas con Crema de Altura',
         description: 'Fresas frescas cosechadas en los campos de Mucurubá con crema chantilly batida a mano.',
         image: 'platos/postre-fresas.png',
-        price: 'A la Carta',
+        price: '$6.00',
         tag: 'Postre'
       }
     ]

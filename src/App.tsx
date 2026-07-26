@@ -1,4 +1,5 @@
-import { useState, lazy, Suspense } from 'react'
+import { useState, lazy, Suspense, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Home, Utensils, Calendar, Award, ChevronLeft, Bed } from 'lucide-react'
 import type { BookingFlowData } from './components/BookingFlow'
@@ -14,7 +15,24 @@ const CabinsGallery = lazy(() => import('./components/CabinsGallery'))
 
 type Screen = 'home' | 'restaurant' | 'excursions' | 'club' | 'cava' | 'success' | 'cabins'
 
+
 function App() {
+  const [searchParams] = useSearchParams()
+  const [tableId, setTableId] = useState<string | null>(() => {
+    return localStorage.getItem('estancia_table_id')
+  })
+
+  useEffect(() => {
+    const mesa = searchParams.get('mesa')
+    const cabana = searchParams.get('cabana')
+    const urlTableId = mesa ? `Mesa ${mesa}` : (cabana ? `Cabaña ${cabana}` : null)
+    
+    if (urlTableId) {
+      setTableId(urlTableId)
+      localStorage.setItem('estancia_table_id', urlTableId)
+    }
+  }, [searchParams])
+
   const [currentScreen, setCurrentScreen] = useState<Screen>('home')
   const [isBookingOpen, setIsBookingOpen] = useState(false)
   const [bookingData, setBookingData] = useState<BookingFlowData | null>(null)
@@ -105,6 +123,7 @@ function App() {
                   <RestaurantMenu 
                     onBack={() => navigateTo('home')} 
                     onOpenCava={() => setCurrentScreen('cava')}
+                    tableId={tableId}
                   />
                 )}
                 {currentScreen === 'cava' && (

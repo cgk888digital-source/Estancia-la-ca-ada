@@ -5,7 +5,7 @@ import {
   Users, BarChart3, Menu, X, LogOut, UtensilsCrossed, Calendar, DollarSign, ClipboardList
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
-// import LoginPage from './LoginPage'
+import LoginPage from './LoginPage'
 
 const navItems = [
   { to: '/admin', label: 'Dashboard', icon: <LayoutDashboard size={20} />, end: true, roles: ['admin'] },
@@ -21,18 +21,13 @@ const navItems = [
 
 const AdminLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const { logout } = useAuth()
+  const { role, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
-  // Bypassing login completely
-  const role = 'admin'
-
-  /*
   if (!role) {
     return <LoginPage />
   }
-  */
 
   // Filtrar los ítems del menú permitidos para el rol actual
   const allowedNavItems = navItems.filter(item => item.roles.includes(role))
