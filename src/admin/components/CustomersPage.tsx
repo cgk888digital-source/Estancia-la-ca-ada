@@ -72,7 +72,8 @@ export default function CustomersPage() {
     } catch (e) {}
     return []
   })
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(() => customers.length === 0)
+  const [syncError, setSyncError] = useState(false)
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<CustomerStatus | 'all'>('all')
   const [modalOpen, setModalOpen] = useState(false)
@@ -92,7 +93,9 @@ export default function CustomersPage() {
 
     if (error) {
       console.error('Error fetching marketing customers:', error)
+      setSyncError(true)
     } else if (data) {
+      setSyncError(false)
       const mapped = data.map(mapCustomer)
       setCustomers(mapped)
       try {
@@ -301,6 +304,18 @@ export default function CustomersPage() {
           </button>
         </div>
       </div>
+
+      {syncError && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-2xl text-xs font-bold flex items-center justify-between gap-3 shadow-sm">
+          <span>No se pudo sincronizar con el servidor — estás viendo datos guardados en este dispositivo, pueden estar desactualizados.</span>
+          <button
+            onClick={() => { setLoading(true); fetchCustomers() }}
+            className="shrink-0 underline underline-offset-2 hover:text-amber-900"
+          >
+            Reintentar
+          </button>
+        </div>
+      )}
 
       {importMessage && (
         <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-2xl text-xs font-bold flex items-center gap-2 shadow-sm animate-fade-in">
