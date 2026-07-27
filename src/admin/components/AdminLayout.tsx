@@ -29,7 +29,7 @@ const roleLabels: Record<string, string> = {
 
 const AdminLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const { role, logout } = useAuth()
+  const { role, sessionReady, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -51,6 +51,14 @@ const AdminLayout: React.FC = () => {
 
   if (!role) {
     return <LoginPage />
+  }
+
+  if (!sessionReady) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-gray-100">
+        <div className="w-10 h-10 border-4 border-[#C5A059] border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
   }
 
   return (

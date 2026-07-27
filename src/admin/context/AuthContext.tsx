@@ -5,6 +5,7 @@ export type Role = 'propiedad' | 'administracion' | 'restaurante'
 
 interface AuthContextType {
   role: Role | null
+  sessionReady: boolean
   login: (pin: string) => Promise<boolean>
   logout: () => Promise<void>
 }
@@ -27,35 +28,56 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return null
     }
   })
-
-  // On mount, restore Supabase session in background so RLS policies work
-  useEffect(() => {
-    const savedPin = localStorage.getItem('adminPin')
-    if (savedPin && PINS[savedPin]) {
-      const user = PINS[savedPin]
-      supabase.auth.signInWithPassword({
-        email: user.email,
-        password: user.pass,
-      }).catch(() => {})
+  // Empieza en false cuando hay un rol guardado: las páginas protegidas (bookings,
+  // transactions, etc.) esperan esto antes de consultar Supabase, para no disparar
+  // sus queries antes de que exista una sesión real y quedarse "pegadas" por el
+  // lock interno de supabase-js mientras se resuelve el signIn de fondo.
+  const [sessionReady, setSessionReady] = useState(() => {
+    try {
+      return !localStorage.getItem('adminPin')
+    } catch (e) {
+      return true
     }
+  })
+
+  // On mount, restore the real Supabase session BEFORE letting protected pages query RLS-protected tables
+  useEffect(() => {
+    let active = true
+    const restoreSession = async () => {
+      const savedPin = localStorage.getItem('adminPin')
+      if (savedPin && PINS[savedPin]) {
+        const user = PINS[savedPin]
+        await supabase.auth.signInWithPassword({
+          email: user.email,
+          password: user.pass,
+        }).catch(() => {})
+      }
+      if (active) setSessionReady(true)
+    }
+    restoreSession()
+    return () => { active = false }
   }, [])
 
   const login = useCallback(async (pin: string): Promise<boolean> => {
     const user = PINS[pin]
     if (!user) return false
 
-    // Set role instantly for 0ms UI
+    const { error } = await supabase.auth.signInWithPassword({
+      email: user.email,
+      password: user.pass,
+    })
+
+    if (error) {
+      console.error('Error authenticating admin user:', error)
+      return false
+    }
+
     setRole(user.role)
+    setSessionReady(true)
     try {
       localStorage.setItem('adminRole', user.role)
       localStorage.setItem('adminPin', pin)
     } catch (e) {}
-
-    // Auth in background so Supabase queries use authenticated role
-    supabase.auth.signInWithPassword({
-      email: user.email,
-      password: user.pass,
-    }).catch(() => {})
 
     return true
   }, [])
@@ -66,10 +88,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.removeItem('adminRole')
       localStorage.removeItem('adminPin')
     } catch (e) {}
-    supabase.auth.signOut().catch(() => {})
+    await supabase.auth.signOut().catch(() => {})
   }, [])
 
-  const value = useMemo(() => ({ role, login, logout }), [role, login, logout])
+  const value = useMemo(() => ({ role, sessionReady, login, logout }), [role, sessionReady, login, logout])
 
   return (
     <AuthContext.Provider value={value}>
