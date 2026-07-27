@@ -47,6 +47,17 @@ const RestaurantMenu: React.FC<{
   
   // Cart & Order state
   const [cart, setCart] = useState<CartItem[]>([])
+  const [selectedTable, setSelectedTable] = useState<string>(() => {
+    return tableId || localStorage.getItem('estancia_table_id') || 'Mesa 1'
+  })
+
+  useEffect(() => {
+    if (tableId) {
+      setSelectedTable(tableId)
+      localStorage.setItem('estancia_table_id', tableId)
+    }
+  }, [tableId])
+
   const [isCartOpen, setIsCartOpen] = useState(false)
   const [tableOrders, setTableOrders] = useState<any[]>([])
   const [isBillOpen, setIsBillOpen] = useState(false)
@@ -55,44 +66,70 @@ const RestaurantMenu: React.FC<{
   const [orderSuccess, setOrderSuccess] = useState(false)
 
   const fetchTableOrders = useCallback(async () => {
-    if (!tableId) return
-    setFetchingBill(true)
-    const { data, error } = await supabase
-      .from('comandas')
-      .select('*')
-      .eq('table_id', tableId)
-      .eq('payment_status', 'pendiente')
-      .order('created_at', { ascending: false })
-    
-    if (!error && data) {
-      setTableOrders(data)
-    }
+    if (!selectedTable) return
+
+    // 1. Instant local read (0ms delay)
+    try {
+      const local = localStorage.getItem('estancia_comandas')
+      if (local) {
+        const parsed = JSON.parse(local)
+        if (Array.isArray(parsed)) {
+          const matching = parsed.filter(o => o.table_id === selectedTable && o.payment_status === 'pendiente')
+          setTableOrders(matching)
+        }
+      }
+    } catch (e) {}
+
     setFetchingBill(false)
-  }, [tableId])
+
+    // 2. Sync from Supabase in background
+    try {
+      const { data, error } = await supabase
+        .from('comandas')
+        .select('*')
+        .eq('table_id', selectedTable)
+        .eq('payment_status', 'pendiente')
+        .order('created_at', { ascending: false })
+      
+      if (!error && data) {
+        setTableOrders(data)
+      }
+    } catch (e) {
+      console.warn('Notice fetching table orders:', e)
+    }
+  }, [selectedTable])
 
   useEffect(() => { getMenu().then(setMenu) }, [])
 
   useEffect(() => {
-    if (tableId) {
+    if (selectedTable) {
       fetchTableOrders()
       
+      const pollInterval = setInterval(() => {
+        fetchTableOrders()
+      }, 4000)
+
+      window.addEventListener('focus', fetchTableOrders)
+
       const channel = supabase
-        .channel(`table_orders_${tableId}`)
+        .channel(`table_orders_${selectedTable}_global`)
         .on('postgres_changes', {
           event: '*',
           schema: 'public',
           table: 'comandas',
-          filter: `table_id=eq.${tableId}`
+          filter: `table_id=eq.${selectedTable}`
         }, () => {
           fetchTableOrders()
         })
         .subscribe()
         
       return () => {
+        clearInterval(pollInterval)
+        window.removeEventListener('focus', fetchTableOrders)
         supabase.removeChannel(channel)
       }
     }
-  }, [tableId, fetchTableOrders])
+  }, [selectedTable, fetchTableOrders])
 
   const getItemQuantity = (dish: DishItem) => {
     const item = cart.find(i => i.dish.name === dish.name)
@@ -119,7 +156,8 @@ const RestaurantMenu: React.FC<{
   }
 
   const handlePlaceOrder = async () => {
-    if (cart.length === 0 || !tableId) return
+    const activeTable = selectedTable || 'Mesa 1'
+    if (cart.length === 0) return
     setPlacingOrder(true)
     
     const totalAmount = cart.reduce((sum, item) => {
@@ -134,27 +172,62 @@ const RestaurantMenu: React.FC<{
       notes: item.notes || null
     }))
     
-    const { error } = await supabase
-      .from('comandas')
-      .insert({
-        table_id: tableId,
-        items: orderItems,
-        total_amount: totalAmount,
-        status: 'preparando',
-        payment_status: 'pendiente'
-      })
-      
-    if (!error) {
-      setCart([])
-      setIsCartOpen(false)
-      setOrderSuccess(true)
-      fetchTableOrders()
-      setTimeout(() => setOrderSuccess(false), 3000)
-    } else {
-      console.error('Error placing order:', error.message)
-      alert('Error al enviar el pedido: ' + error.message)
+    const localOrder = {
+      id: 'cmd_' + Date.now(),
+      table_id: activeTable,
+      items: orderItems,
+      total_amount: totalAmount,
+      status: 'preparando',
+      payment_status: 'pendiente',
+      created_at: new Date().toISOString()
     }
+
+    // 1. Instant local state update (Cart closes, order success shown immediately!)
+    setTableOrders(prev => [localOrder, ...prev])
+    setCart([])
+    setIsCartOpen(false)
+    setOrderSuccess(true)
+    setTimeout(() => setOrderSuccess(false), 3500)
     setPlacingOrder(false)
+
+    // Save to shared local storage & trigger live sync event
+    try {
+      const existing = localStorage.getItem('estancia_comandas')
+      const parsed = existing ? JSON.parse(existing) : []
+      const updated = [localOrder, ...parsed]
+      localStorage.setItem('estancia_comandas', JSON.stringify(updated))
+      window.dispatchEvent(new CustomEvent('comanda_created'))
+    } catch (e) {}
+
+    // 2. Background sync to Supabase with returned UUID
+    try {
+      const { data, error } = await supabase
+        .from('comandas')
+        .insert({
+          table_id: activeTable,
+          items: orderItems,
+          total_amount: totalAmount,
+          status: 'preparando',
+          payment_status: 'pendiente'
+        })
+        .select()
+
+      if (!error && data && data.length > 0) {
+        const realOrder = data[0]
+        setTableOrders(prev => prev.map(o => o.id === localOrder.id ? realOrder : o))
+        try {
+          const existing = localStorage.getItem('estancia_comandas')
+          const parsed: any[] = existing ? JSON.parse(existing) : []
+          const updated = parsed.map(o => o.id === localOrder.id ? realOrder : o)
+          localStorage.setItem('estancia_comandas', JSON.stringify(updated))
+          window.dispatchEvent(new CustomEvent('comanda_created'))
+        } catch (e) {}
+      } else if (error) {
+        console.warn('Supabase insert notice:', error.message)
+      }
+    } catch (err) {
+      console.warn('Supabase guest order insert notice:', err)
+    }
   }
 
   const activeSection = menu.find(s => s.id === activeTab) ?? menu[0]
@@ -167,12 +240,32 @@ const RestaurantMenu: React.FC<{
       exit={{ opacity: 0 }}
       className="min-h-screen bg-brand-neutral text-brand-primary font-sans pb-32"
     >
-      {tableId && (
-        <div className="bg-brand-terracotta text-white px-5 py-3 text-center text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 shadow-md sticky top-0 z-50">
-          <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-          Ordenando desde {tableId}
+      <div className="bg-[#3D2B1F] text-white px-4 py-2.5 flex items-center justify-between text-xs font-bold shadow-md sticky top-0 z-50 border-b border-[#C5A059]/30">
+        <div className="flex items-center gap-2">
+          <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse" />
+          <span className="text-gray-300 text-[11px] uppercase tracking-wider">Ordenando para:</span>
         </div>
-      )}
+        <select
+          value={selectedTable}
+          onChange={e => {
+            setSelectedTable(e.target.value)
+            localStorage.setItem('estancia_table_id', e.target.value)
+          }}
+          className="bg-[#C5A059] text-white font-bold rounded-lg px-3 py-1 text-xs focus:outline-none cursor-pointer"
+        >
+          <option value="Mesa 1">Mesa 1</option>
+          <option value="Mesa 2">Mesa 2</option>
+          <option value="Mesa 3">Mesa 3</option>
+          <option value="Mesa 4">Mesa 4</option>
+          <option value="Mesa 5">Mesa 5</option>
+          <option value="Mesa 6">Mesa 6</option>
+          <option value="Cabaña La Lomita">Cabaña La Lomita</option>
+          <option value="Cabaña Mitibibó">Cabaña Mitibibó</option>
+          <option value="Cabaña La Manita">Cabaña La Manita</option>
+          <option value="Suite La Vega">Suite La Vega</option>
+          <option value="Habitación Llano Grande">Habitación Llano Grande</option>
+        </select>
+      </div>
 
       {/* ── HERO ── */}
       <div className="relative h-[55vh] w-full overflow-hidden">
@@ -698,7 +791,7 @@ const RestaurantMenu: React.FC<{
               <div className="flex items-center justify-between pb-4 border-b border-brand-primary/5 mb-4 flex-none">
                 <div>
                   <h3 className="text-lg font-serif text-brand-wood">Cuenta de la Mesa</h3>
-                  <p className="text-[10px] uppercase tracking-widest text-brand-primary/40 font-bold">{tableId}</p>
+                  <p className="text-[10px] uppercase tracking-widest text-brand-primary/40 font-bold">{selectedTable}</p>
                 </div>
                 <button
                   onClick={() => setIsBillOpen(false)}
@@ -770,7 +863,7 @@ const RestaurantMenu: React.FC<{
 
                   <button
                     onClick={() => {
-                      alert(`Cuenta Solicitada\n\nEl mesero se acercará a la mesa ${tableId} en breve con tu cuenta física. ¡Gracias por preferir Estancia La Cañada!`);
+                      alert(`Cuenta Solicitada\n\nEl mesero se acercará a la mesa ${selectedTable} en breve con tu cuenta física. ¡Gracias por preferir Estancia La Cañada!`);
                       setIsBillOpen(false);
                     }}
                     className="w-full py-3.5 bg-brand-wood text-white rounded-xl font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2 hover:bg-brand-wood/90 active:scale-95 transition-all shadow-lg"

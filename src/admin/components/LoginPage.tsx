@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Lock, ArrowRight, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -8,11 +9,16 @@ const LoginPage: React.FC = () => {
   const [error, setError] = useState(false)
   const [loading, setLoading] = useState(false)
   const { login } = useAuth()
+  const navigate = useNavigate()
 
   const handleKeyPress = (num: string) => {
     if (pin.length < 4) {
-      setPin(prev => prev + num)
+      const newPin = pin + num
+      setPin(newPin)
       setError(false)
+      if (newPin.length === 4) {
+        executeLogin(newPin)
+      }
     }
   }
 
@@ -21,17 +27,36 @@ const LoginPage: React.FC = () => {
     setError(false)
   }
 
-  const handleSubmit = async (e?: React.FormEvent) => {
+  const executeLogin = async (pinToUse: string) => {
+    setLoading(true)
+    const success = await login(pinToUse)
+    setLoading(false)
+
+    if (success) {
+      if (pinToUse === '3333') {
+        navigate('/admin/comandas', { replace: true })
+      } else if (pinToUse === '2222') {
+        navigate('/admin/reservas', { replace: true })
+      } else {
+        navigate('/admin', { replace: true })
+      }
+    } else {
+      setError(true)
+      setPin('')
+    }
+  }
+
+  const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault()
     if (pin.length === 4) {
-      setLoading(true)
-      const success = await login(pin)
-      if (!success) {
-        setError(true)
-        setPin('')
-      }
-      setLoading(false)
+      executeLogin(pin)
     }
+  }
+
+  const handleQuickRole = (rolePin: string) => {
+    setPin(rolePin)
+    setError(false)
+    executeLogin(rolePin)
   }
 
   return (
@@ -124,6 +149,37 @@ const LoginPage: React.FC = () => {
             >
               <ArrowRight size={24} />
             </button>
+          </div>
+
+          {/* Role PIN Quick Fill */}
+          <div className="pt-4 border-t border-gray-100 flex flex-col gap-2">
+            <p className="text-[10px] uppercase tracking-widest text-center text-gray-400 font-bold mb-1">Niveles de Acceso (PIN):</p>
+            <div className="grid grid-cols-3 gap-1.5 text-[10px]">
+              <button
+                type="button"
+                onClick={() => handleQuickRole('3333')}
+                className="p-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 font-medium text-center transition-colors border border-amber-200/60"
+              >
+                <span className="block font-bold">3333</span>
+                <span>Restaurante</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickRole('2222')}
+                className="p-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 font-medium text-center transition-colors border border-blue-200/60"
+              >
+                <span className="block font-bold">2222</span>
+                <span>Admin</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickRole('1234')}
+                className="p-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 font-medium text-center transition-colors border border-emerald-200/60"
+              >
+                <span className="block font-bold">1234</span>
+                <span>Propiedad</span>
+              </button>
+            </div>
           </div>
         </form>
       </motion.div>

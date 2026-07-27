@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ArrowDownCircle, ArrowUpCircle,
@@ -8,18 +8,24 @@ import { useAuth } from '../context/AuthContext'
 import LoginPage from './LoginPage'
 
 const navItems = [
-  { to: '/admin', label: 'Dashboard', icon: <LayoutDashboard size={20} />, end: true, roles: ['admin'] },
-  { to: '/admin/reservas', label: 'Planner Reservas', icon: <Calendar size={20} />, roles: ['admin', 'gerente'] },
-  { to: '/admin/clientes', label: 'Clientes', icon: <ContactRound size={20} />, roles: ['admin', 'gerente'] },
-  { to: '/admin/email-marketing', label: 'Email Marketing', icon: <Mail size={20} />, roles: ['admin', 'gerente'] },
-  { to: '/admin/ingresos', label: 'Ingresos', icon: <ArrowDownCircle size={20} />, roles: ['admin', 'gerente'] },
-  { to: '/admin/egresos', label: 'Egresos', icon: <ArrowUpCircle size={20} />, roles: ['admin', 'gerente'] },
-  { to: '/admin/empleados', label: 'Empleados', icon: <Users size={20} />, roles: ['admin', 'gerente'] },
-  { to: '/admin/reportes', label: 'Reportes', icon: <BarChart3 size={20} />, roles: ['admin'] },
-  { to: '/admin/menu', label: 'Menú Semanal', icon: <UtensilsCrossed size={20} />, roles: ['admin', 'gerente'] },
-  { to: '/admin/comandas', label: 'Comandas', icon: <ClipboardList size={20} />, roles: ['admin', 'gerente', 'empleado'] },
-  { to: '/admin/tarifas', label: 'Tarifas y Descuentos', icon: <DollarSign size={20} />, roles: ['admin'] },
+  { to: '/admin', label: 'Dashboard', icon: <LayoutDashboard size={20} />, end: true, roles: ['propiedad'] },
+  { to: '/admin/reservas', label: 'Planner Reservas', icon: <Calendar size={20} />, roles: ['propiedad', 'administracion'] },
+  { to: '/admin/clientes', label: 'Clientes', icon: <ContactRound size={20} />, roles: ['propiedad', 'administracion'] },
+  { to: '/admin/ingresos', label: 'Ingresos & Propinas', icon: <ArrowDownCircle size={20} />, roles: ['propiedad', 'administracion'] },
+  { to: '/admin/egresos', label: 'Egresos', icon: <ArrowUpCircle size={20} />, roles: ['propiedad', 'administracion'] },
+  { to: '/admin/email-marketing', label: 'Email Marketing', icon: <Mail size={20} />, roles: ['propiedad', 'administracion'] },
+  { to: '/admin/menu', label: 'Menú Restaurante', icon: <UtensilsCrossed size={20} />, roles: ['propiedad', 'restaurante'] },
+  { to: '/admin/comandas', label: 'Comandas POS', icon: <ClipboardList size={20} />, roles: ['propiedad', 'restaurante'] },
+  { to: '/admin/empleados', label: 'Empleados & Nómina', icon: <Users size={20} />, roles: ['propiedad'] },
+  { to: '/admin/reportes', label: 'Reportes Analíticos', icon: <BarChart3 size={20} />, roles: ['propiedad'] },
+  { to: '/admin/tarifas', label: 'Tarifas y Descuentos', icon: <DollarSign size={20} />, roles: ['propiedad'] },
 ]
+
+const roleLabels: Record<string, string> = {
+  propiedad: 'La Propiedad',
+  administracion: 'Administración',
+  restaurante: 'Restaurante & Cocina'
+}
 
 const AdminLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -27,19 +33,24 @@ const AdminLayout: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
 
+  const allowedNavItems = useMemo(() => {
+    return role ? navItems.filter(item => item.roles.includes(role)) : []
+  }, [role])
+
+  useEffect(() => {
+    if (!role) return
+    const currentItem = navItems.find(i => i.to === location.pathname || (i.to === '/admin' && location.pathname === '/admin'))
+    const isUnauthorized = currentItem && !currentItem.roles.includes(role)
+    const isDashboardForbidden = location.pathname === '/admin' && role !== 'propiedad'
+    
+    if (isUnauthorized || isDashboardForbidden) {
+      const target = allowedNavItems[0]?.to || '/admin/comandas'
+      navigate(target, { replace: true })
+    }
+  }, [role, location.pathname, allowedNavItems, navigate])
+
   if (!role) {
     return <LoginPage />
-  }
-
-  // Filtrar los ítems del menú permitidos para el rol actual
-  const allowedNavItems = navItems.filter(item => item.roles.includes(role))
-
-  // Bloqueo de rutas en caso de que el rol cambie pero siga en URL no permitida
-  const currentItem = navItems.find(i => i.to === location.pathname || (i.to === '/admin' && location.pathname === '/admin'))
-  if (currentItem && !currentItem.roles.includes(role)) {
-    // Si intenta acceder a algo que no puede, redirigirlo a lo primero que sí puede
-    navigate(allowedNavItems[0].to, { replace: true })
-    return null
   }
 
   return (
@@ -131,9 +142,11 @@ const AdminLayout: React.FC = () => {
           <div className="flex-1" />
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-[#C5A059]/20 rounded-full flex items-center justify-center text-[#C5A059] font-bold text-sm">
-              A
+              {role === 'propiedad' ? 'P' : role === 'administracion' ? 'A' : 'R'}
             </div>
-            <span className="text-sm text-gray-600 font-medium hidden sm:block">Admin</span>
+            <span className="text-xs font-bold px-3 py-1 rounded-full bg-[#C5A059]/15 text-[#3D2B1F] uppercase tracking-wider">
+              {roleLabels[role] || role}
+            </span>
           </div>
         </header>
 

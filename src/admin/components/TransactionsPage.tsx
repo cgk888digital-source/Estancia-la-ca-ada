@@ -4,7 +4,6 @@ import { mockTransactions, categoryLabels, categoryColors } from '../data/mockDa
 import type { Transaction, TransactionType, TransactionCategory, PaymentMethod, Employee } from '../types'
 import { supabase } from '../../lib/supabase'
 import ReceiptModal from './ReceiptModal'
-import { useAuth } from '../context/AuthContext'
 
 interface Props {
   typeFilter?: TransactionType
@@ -83,10 +82,9 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   const [loading, setLoading] = useState(true)
   const [viewReceipt, setViewReceipt] = useState<{emp: Employee, amountUsd: number, period: string, bcvRate: number} | null>(null)
   const [search, setSearch] = useState('')
-  const { role } = useAuth()
 
   const [categoryF, setCategoryF] = useState<TransactionCategory | 'todas'>('todas')
-  const [period, setPeriod] = useState<DatePeriod>(role === 'gerente' ? 'hoy' : 'mes')
+  const [period, setPeriod] = useState<DatePeriod>('mes')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
   const [showModal, setShowModal] = useState(false)
@@ -229,9 +227,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   const btnColor = typeFilter === 'egreso' ? 'bg-red-500 hover:bg-red-600' : 'bg-[#C5A059] hover:bg-[#b8943f]'
   const totalColor = typeFilter === 'ingreso' ? 'text-emerald-600' : typeFilter === 'egreso' ? 'text-red-500' : total >= 0 ? 'text-emerald-600' : 'text-red-500'
 
-  const periods: DatePeriod[] = role === 'gerente' 
-    ? ['hoy'] 
-    : ['hoy', 'semana', 'mes', 'año', 'personalizado', 'todo']
+  const periods: DatePeriod[] = ['hoy', 'semana', 'mes', 'año', 'personalizado', 'todo']
 
   const handleViewReceipt = (tx: Transaction) => {
     const isEventual = tx.description.toLowerCase().includes('eventual')
@@ -426,8 +422,8 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
         </div>
       </div>
 
-      {/* Summary bar (only when no typeFilter and not gerente) */}
-      {!typeFilter && filtered.length > 0 && role !== 'gerente' && (
+      {/* Summary bar (only when no typeFilter) */}
+      {!typeFilter && filtered.length > 0 && (
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-emerald-50 rounded-2xl px-4 py-3 border border-emerald-100">
             <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-0.5">Ingresos</p>

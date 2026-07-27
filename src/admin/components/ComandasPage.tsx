@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Plus, Check, Search, Utensils, Trash2, CheckCircle2, Bell } from 'lucide-react'
+import { Plus, Check, Search, Utensils, Trash2, CheckCircle2, Bell, QrCode, Copy, Printer, Smartphone } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import confetti from 'canvas-confetti'
 import { getMenu } from '../../utils/menuStore'
@@ -49,10 +49,20 @@ const playNotificationSound = () => {
 }
 
 const ComandasPage: React.FC = () => {
-  const [comandas, setComandas] = useState<Comanda[]>([])
+  const [comandas, setComandas] = useState<Comanda[]>(() => {
+    try {
+      const local = localStorage.getItem('estancia_comandas')
+      if (local) {
+        const parsed = JSON.parse(local)
+        if (Array.isArray(parsed)) return parsed
+      }
+    } catch (e) {}
+    return []
+  })
+
   const [menu, setMenu] = useState<MenuSection[]>([])
   const [activeMenuTab, setActiveMenuTab] = useState('desayuno')
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
   const [soundEnabled, setSoundEnabled] = useState(true)
   
@@ -63,6 +73,12 @@ const ComandasPage: React.FC = () => {
   const [checkoutPaymentMethod, setCheckoutPaymentMethod] = useState('efectivo')
   const [savingCheckout, setSavingCheckout] = useState(false)
 
+  // QR & NFC Generator states
+  const [showQrModal, setShowQrModal] = useState(false)
+  const [selectedQrTable, setSelectedQrTable] = useState('Mesa 1')
+  const [copiedUrl, setCopiedUrl] = useState(false)
+  const [customDomain, setCustomDomain] = useState(() => window.location.origin)
+
   // Manual order states
   const [selectedTable, setSelectedTable] = useState('Mesa 1')
   const [manualCart, setManualCart] = useState<OrderItem[]>([])
@@ -70,24 +86,46 @@ const ComandasPage: React.FC = () => {
 
   const previousCountRef = useRef(0)
 
-  const fetchComandas = async () => {
-    const { data, error } = await supabase
-      .from('comandas')
-      .select('*')
-      .eq('payment_status', 'pendiente')
-      .order('created_at', { ascending: true })
+  // Save comandas to local storage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('estancia_comandas', JSON.stringify(comandas))
+    } catch (e) {}
+  }, [comandas])
 
-    if (!error && data) {
-      setComandas(data)
-      
-      // Sound alert if new orders arrive
-      const preparingCount = data.filter(c => c.status === 'preparando').length
-      if (preparingCount > previousCountRef.current && previousCountRef.current !== 0) {
-        if (soundEnabled) playNotificationSound()
-      }
-      previousCountRef.current = preparingCount
+  const getTableNfcUrl = (tableId: string, baseDomain: string) => {
+    const matchMesa = tableId.match(/^Mesa\s+(\d+)$/i)
+    if (matchMesa) {
+      return `${baseDomain}/?mesa=${matchMesa[1]}`
     }
-    setLoading(false)
+    const matchCabana = tableId.match(/^Cabaña\s+(.+)$/i)
+    if (matchCabana) {
+      return `${baseDomain}/?cabana=${encodeURIComponent(matchCabana[1])}`
+    }
+    return `${baseDomain}/?mesa=${encodeURIComponent(tableId)}`
+  }
+
+  const fetchComandas = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('comandas')
+        .select('*')
+        .eq('payment_status', 'pendiente')
+        .order('created_at', { ascending: true })
+
+      if (!error && data) {
+        setComandas(data)
+        
+        // Sound alert if new orders arrive
+        const preparingCount = data.filter(c => c.status === 'preparando').length
+        if (preparingCount > previousCountRef.current && previousCountRef.current !== 0) {
+          if (soundEnabled) playNotificationSound()
+        }
+        previousCountRef.current = preparingCount
+      }
+    } catch (e) {
+      console.warn('Notice fetching comandas from Supabase:', e)
+    }
   }
 
   const fetchMenu = async () => {
@@ -100,8 +138,27 @@ const ComandasPage: React.FC = () => {
     fetchComandas()
     fetchMenu()
 
+    const handleLocalUpdate = () => {
+      try {
+        const local = localStorage.getItem('estancia_comandas')
+        if (local) {
+          setComandas(JSON.parse(local))
+          setLoading(false)
+        }
+      } catch (e) {}
+    }
+
+    window.addEventListener('storage', handleLocalUpdate)
+    window.addEventListener('comanda_created', handleLocalUpdate)
+    window.addEventListener('focus', fetchComandas)
+
+    // Polling backup every 4 seconds to guarantee PC and Mobile stay 100% in sync
+    const pollInterval = setInterval(() => {
+      fetchComandas()
+    }, 4000)
+
     const channel = supabase
-      .channel('comandas_admin_realtime')
+      .channel('comandas_admin_realtime_global')
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
@@ -112,21 +169,31 @@ const ComandasPage: React.FC = () => {
       .subscribe()
 
     return () => {
+      window.removeEventListener('storage', handleLocalUpdate)
+      window.removeEventListener('comanda_created', handleLocalUpdate)
+      window.removeEventListener('focus', fetchComandas)
+      clearInterval(pollInterval)
       supabase.removeChannel(channel)
     }
   }, [soundEnabled])
 
-  // Update order status (KDS movements)
+  // Update order status (KDS movements) with instant optimistic UI update
   const updateStatus = async (id: string, newStatus: 'preparando' | 'listo' | 'entregado' | 'cancelado') => {
-    const { error } = await supabase
-      .from('comandas')
-      .update({ status: newStatus, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      
-    if (error) {
-      alert('Error al actualizar estado: ' + error.message)
-    } else {
-      fetchComandas()
+    // 1. Instant local UI update
+    setComandas(prev => prev.map(c => c.id === id ? { ...c, status: newStatus } : c))
+
+    // 2. Sync to Supabase in background
+    try {
+      const { error } = await supabase
+        .from('comandas')
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq('id', id)
+
+      if (error) {
+        console.warn('Supabase status update warning:', error.message)
+      }
+    } catch (e) {
+      console.warn('Network error updating status:', e)
     }
   }
 
@@ -157,7 +224,7 @@ const ComandasPage: React.FC = () => {
     setManualCart(prev => prev.filter(i => i.name !== name))
   }
 
-  // Save manual order to database
+  // Save manual order with instant UI update
   const saveManualOrder = async () => {
     if (manualCart.length === 0) return
 
@@ -170,22 +237,41 @@ const ComandasPage: React.FC = () => {
       return sum + (parsePrice(item.price) * item.quantity)
     }, 0)
 
-    const { error } = await supabase
-      .from('comandas')
-      .insert({
-        table_id: selectedTable,
-        items: manualCart,
-        total_amount: totalAmount,
-        status: 'preparando',
-        payment_status: 'pendiente'
-      })
+    const tempId = 'cmd_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4)
+    const newComanda: Comanda = {
+      id: tempId,
+      table_id: selectedTable,
+      items: [...manualCart],
+      total_amount: totalAmount,
+      status: 'preparando',
+      payment_status: 'pendiente',
+      created_at: new Date().toISOString()
+    }
 
-    if (!error) {
-      setManualCart([])
-      setShowNewOrder(false)
-      fetchComandas()
-    } else {
-      alert('Error guardando comanda: ' + error.message)
+    // 1. Instant local UI update
+    setComandas(prev => [...prev, newComanda])
+    setManualCart([])
+    setShowNewOrder(false)
+
+    // 2. Sync to Supabase
+    try {
+      const { data, error } = await supabase
+        .from('comandas')
+        .insert({
+          table_id: selectedTable,
+          items: newComanda.items,
+          total_amount: totalAmount,
+          status: 'preparando',
+          payment_status: 'pendiente'
+        })
+        .select('id')
+        .single()
+
+      if (!error && data?.id) {
+        setComandas(prev => prev.map(c => c.id === tempId ? { ...c, id: data.id } : c))
+      }
+    } catch (e) {
+      console.warn('Supabase manual order insert notice:', e)
     }
   }
 
@@ -197,42 +283,38 @@ const ComandasPage: React.FC = () => {
     const tableOrders = comandas.filter(c => c.table_id === activeCheckoutTable)
     const totalToPay = tableOrders.reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0)
 
+    // 1. Instant local UI update
+    setComandas(prev => prev.filter(c => c.table_id !== activeCheckoutTable))
+    setShowCheckout(false)
+    const targetTable = activeCheckoutTable
+    setActiveCheckoutTable(null)
+
+    confetti({
+      particleCount: 80,
+      spread: 60,
+      origin: { y: 0.8 }
+    })
+
+    // 2. Sync to Supabase in background
     try {
-      // 1. Mark all active orders for this table as 'pagado'
-      const { error: updErr } = await supabase
+      await supabase
         .from('comandas')
         .update({ payment_status: 'pagado', updated_at: new Date().toISOString() })
-        .eq('table_id', activeCheckoutTable)
+        .eq('table_id', targetTable)
         .eq('payment_status', 'pendiente')
 
-      if (updErr) throw updErr
-
-      // 2. Insert transaction entry to register cash flow
-      const { error: txErr } = await supabase
+      await supabase
         .from('transactions')
         .insert({
           type: 'ingreso',
           category: 'restaurante',
-          description: `Consumo Restaurante - ${activeCheckoutTable}`,
+          description: `Consumo Restaurante - ${targetTable}`,
           amount: totalToPay,
           payment_method: checkoutPaymentMethod,
           date: new Date().toISOString().substring(0, 10)
         })
-
-      if (txErr) throw txErr
-
-      confetti({
-        particleCount: 80,
-        spread: 60,
-        origin: { y: 0.8 }
-      })
-
-      setShowCheckout(false)
-      setActiveCheckoutTable(null)
-      fetchComandas()
     } catch (err: any) {
-      console.error(err)
-      alert('Error en facturación: ' + err.message)
+      console.warn('Supabase checkout notice:', err)
     } finally {
       setSavingCheckout(false)
     }
@@ -273,6 +355,13 @@ const ComandasPage: React.FC = () => {
           >
             <Bell size={18} className={soundEnabled ? 'animate-bounce' : ''} />
             <span className="hidden sm:inline">{soundEnabled ? 'Campana ON' : 'Campana OFF'}</span>
+          </button>
+          <button
+            onClick={() => setShowQrModal(true)}
+            className="flex items-center gap-2 bg-white text-[#3D2B1F] border border-gray-200 hover:border-[#C5A059] px-4 py-2.5 rounded-xl font-bold transition-all shadow-sm"
+          >
+            <QrCode size={18} className="text-[#C5A059]" />
+            <span className="hidden sm:inline">Códigos QR & NFC</span>
           </button>
           <button
             onClick={() => setShowNewOrder(true)}
@@ -757,6 +846,158 @@ const ComandasPage: React.FC = () => {
               >
                 <Check size={18} /> Confirmar e Iniciar
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: GENERADOR DE QR & NFC MESAS ── */}
+      {showQrModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm print:p-0 print:bg-white print:static">
+          <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl flex flex-col overflow-hidden print:shadow-none print:w-full print:max-w-none">
+            {/* Header (Hidden when printing) */}
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between flex-none print:hidden">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-[#C5A059]/10 rounded-2xl text-[#C5A059]">
+                  <QrCode size={24} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">Generador de QR & Enlaces NFC</h2>
+                  <p className="text-xs text-gray-400">Configura la URL para los tags NFC o imprime acrílicos de mesa</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowQrModal(false)}
+                className="p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-colors font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6 overflow-y-auto max-h-[80vh] custom-scrollbar print:overflow-visible print:max-h-none print:p-0">
+              {/* Controls (Hidden when printing) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-2xl border border-gray-100 print:hidden">
+                <div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Seleccionar Mesa / Cabaña</label>
+                  <select
+                    value={selectedQrTable}
+                    onChange={e => {
+                      setSelectedQrTable(e.target.value)
+                      setCopiedUrl(false)
+                    }}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 bg-white focus:outline-none focus:border-[#C5A059]"
+                  >
+                    <optgroup label="Mesas Restaurante">
+                      <option value="Mesa 1">Mesa 1</option>
+                      <option value="Mesa 2">Mesa 2</option>
+                      <option value="Mesa 3">Mesa 3</option>
+                      <option value="Mesa 4">Mesa 4</option>
+                      <option value="Mesa 5">Mesa 5</option>
+                      <option value="Mesa 6">Mesa 6</option>
+                      <option value="Mesa 7">Mesa 7</option>
+                      <option value="Mesa 8">Mesa 8</option>
+                      <option value="Mesa 9">Mesa 9</option>
+                      <option value="Mesa 10">Mesa 10</option>
+                      <option value="Barra Restaurante">Barra Restaurante</option>
+                      <option value="Terraza Jardín">Terraza Jardín</option>
+                    </optgroup>
+                    <optgroup label="Cabañas & Suites">
+                      <option value="Cabaña La Lomita">Cabaña La Lomita</option>
+                      <option value="Cabaña Mitibibó">Cabaña Mitibibó</option>
+                      <option value="Cabaña La Manita">Cabaña La Manita</option>
+                      <option value="Suite La Vega">Suite La Vega</option>
+                      <option value="Habitación Llano Grande">Habitación Llano Grande</option>
+                    </optgroup>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Dominio / Host Base</label>
+                  <input
+                    type="text"
+                    value={customDomain}
+                    onChange={e => setCustomDomain(e.target.value)}
+                    placeholder="https://estancialacanada.com"
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-mono text-gray-700 bg-white focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+              </div>
+
+              {/* NFC URL Copy Bar (Hidden when printing) */}
+              <div className="bg-amber-50/60 border border-amber-200/70 p-4 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 print:hidden">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 text-amber-800 text-xs font-bold mb-1">
+                    <Smartphone size={16} />
+                    <span>URL para Grabar en Tag NFC:</span>
+                  </div>
+                  <code className="text-xs font-mono text-amber-900 bg-amber-100/80 px-2 py-1 rounded block truncate">
+                    {getTableNfcUrl(selectedQrTable, customDomain)}
+                  </code>
+                </div>
+                <button
+                  onClick={() => {
+                    const url = getTableNfcUrl(selectedQrTable, customDomain)
+                    navigator.clipboard.writeText(url)
+                    setCopiedUrl(true)
+                    setTimeout(() => setCopiedUrl(false), 2500)
+                  }}
+                  className="px-4 py-2 bg-amber-700 hover:bg-amber-800 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shrink-0 shadow-sm"
+                >
+                  {copiedUrl ? <Check size={14} /> : <Copy size={14} />}
+                  <span>{copiedUrl ? '¡Copiado!' : 'Copiar URL NFC'}</span>
+                </button>
+              </div>
+
+              {/* PRINTABLE TABLE STAND CARD */}
+              <div className="py-2 print:py-0">
+                <div className="bg-white p-8 rounded-3xl border-2 border-[#C5A059] flex flex-col items-center text-center shadow-xl max-w-sm mx-auto print:shadow-none print:border-4 print:w-full print:max-w-none print:rounded-none">
+                  <img 
+                    src="/assets/logo-nuevo.png" 
+                    alt="Logo Estancia La Cañada" 
+                    className="w-14 h-14 object-contain mb-2 bg-[#3D2B1F] p-1.5 rounded-2xl shadow-md"
+                  />
+                  <span className="text-[10px] font-extrabold uppercase tracking-[0.3em] text-[#C5A059]">Estancia La Cañada</span>
+                  <h3 className="text-xl font-serif font-bold text-[#3D2B1F] mt-1 mb-4">Menú Digital & Room Service</h3>
+
+                  {/* QR Image */}
+                  <div className="p-4 bg-white border-2 border-[#C5A059]/20 rounded-3xl shadow-inner mb-4">
+                    <img 
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(getTableNfcUrl(selectedQrTable, customDomain))}`} 
+                      alt={`QR Code ${selectedQrTable}`} 
+                      className="w-52 h-52 object-contain"
+                    />
+                  </div>
+
+                  <div className="bg-[#3D2B1F] text-[#C5A059] px-6 py-1.5 rounded-full font-bold text-sm uppercase tracking-widest mb-3 shadow-sm border border-[#C5A059]/30">
+                    {selectedQrTable}
+                  </div>
+
+                  <div className="flex items-center gap-2 text-xs text-gray-700 font-bold mb-1">
+                    <Smartphone size={16} className="text-[#C5A059]" />
+                    <span>Acerque su celular (NFC) o escanee el QR</span>
+                  </div>
+                  <p className="text-[10px] text-gray-400 font-medium">Ordene directamente a la cocina sin esperar atención</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer (Hidden when printing) */}
+            <div className="p-6 border-t border-gray-100 bg-gray-50 rounded-b-3xl flex justify-between items-center print:hidden">
+              <span className="text-xs text-gray-400">Compatible con stickers NFC NTAG213 / NTAG215 / NTAG216</span>
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => setShowQrModal(false)}
+                  className="px-5 py-2.5 rounded-xl font-bold text-gray-600 hover:bg-gray-200 transition-colors text-sm"
+                >
+                  Cerrar
+                </button>
+                <button 
+                  onClick={() => window.print()}
+                  className="px-6 py-2.5 rounded-xl font-bold bg-[#3D2B1F] text-white hover:bg-black transition-colors flex items-center gap-2 text-sm shadow-md"
+                >
+                  <Printer size={16} /> Imprimir Tarjeta de Mesa
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -54,7 +54,7 @@ const ReportsPage: React.FC = () => {
   const [loading, setLoading] = useState(true)
 
   // Filtering State
-  const [filterType, setFilterType] = useState<'dia' | 'semana' | 'mes' | 'año'>(role === 'gerente' ? 'dia' : 'mes')
+  const [filterType, setFilterType] = useState<'dia' | 'semana' | 'mes' | 'año'>(role === 'administracion' ? 'dia' : 'mes')
   const [filterDate, setFilterDate] = useState<string>(new Date().toISOString().substring(0, 10))
 
   // Modal State
@@ -248,11 +248,11 @@ const ReportsPage: React.FC = () => {
           <select
             value={filterType}
             onChange={e => setFilterType(e.target.value as 'dia' | 'semana' | 'mes' | 'año')}
-            disabled={role === 'gerente'}
+            disabled={role === 'administracion'}
             className="text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 outline-none font-bold text-gray-700 focus:border-[#C5A059] transition-colors disabled:opacity-50"
           >
             <option value="dia">Por Día</option>
-            {role !== 'gerente' && (
+            {role !== 'administracion' && (
               <>
                 <option value="semana">Por Semana</option>
                 <option value="mes">Por Mes</option>
@@ -263,7 +263,7 @@ const ReportsPage: React.FC = () => {
           <input
             type={filterType === 'mes' ? 'month' : 'date'}
             value={filterType === 'mes' ? filterDate.substring(0, 7) : filterDate}
-            disabled={role === 'gerente'}
+            disabled={role === 'administracion'}
             onChange={e => {
               if (filterType === 'mes') {
                 setFilterDate(e.target.value + '-01')

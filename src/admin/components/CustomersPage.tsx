@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type React from 'react'
-import { Check, Mail, Phone, Plus, Search, Sparkles, Users, X } from 'lucide-react'
+import { Check, FileSpreadsheet, Mail, Phone, Plus, Search, Sparkles, Users, X } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import { supabase } from '../../lib/supabase'
 import type { CustomerStatus, MarketingCustomer } from '../types'
 
@@ -61,17 +62,29 @@ const statusClass: Record<CustomerStatus, string> = {
 }
 
 export default function CustomersPage() {
-  const [customers, setCustomers] = useState<MarketingCustomer[]>([])
-  const [loading, setLoading] = useState(true)
+  const [customers, setCustomers] = useState<MarketingCustomer[]>(() => {
+    try {
+      const cache = localStorage.getItem('estancia_marketing_customers')
+      if (cache) {
+        const parsed = JSON.parse(cache)
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+      }
+    } catch (e) {}
+    return []
+  })
+  const [loading, setLoading] = useState(false)
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<CustomerStatus | 'all'>('all')
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<MarketingCustomer | null>(null)
   const [form, setForm] = useState(emptyForm)
   const [saved, setSaved] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importMessage, setImportMessage] = useState<string | null>(null)
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   async function fetchCustomers() {
-    setLoading(true)
     const { data, error } = await supabase
       .from('marketing_customers')
       .select('*')
@@ -79,17 +92,99 @@ export default function CustomersPage() {
 
     if (error) {
       console.error('Error fetching marketing customers:', error)
-      setCustomers([])
-    } else {
-      setCustomers((data || []).map(mapCustomer))
+    } else if (data) {
+      const mapped = data.map(mapCustomer)
+      setCustomers(mapped)
+      try {
+        localStorage.setItem('estancia_marketing_customers', JSON.stringify(mapped))
+      } catch (e) {}
     }
     setLoading(false)
   }
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchCustomers()
   }, [])
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setImporting(true)
+    setImportMessage('Leyendo archivo Excel...')
+
+    try {
+      const buffer = await file.arrayBuffer()
+      const wb = XLSX.read(buffer, { type: 'array' })
+      const wsName = wb.SheetNames[0]
+      const ws = wb.Sheets[wsName]
+      const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' })
+
+      if (rows.length === 0) {
+        alert('El archivo no contiene filas válidas.')
+        setImporting(false)
+        return
+      }
+
+      setImportMessage(`Procesando ${rows.length} registros...`)
+
+      const toInsert: any[] = []
+      for (const row of rows) {
+        const findField = (keys: string[]) => {
+          for (const k of keys) {
+            const match = Object.keys(row).find(rk => rk.toLowerCase().includes(k.toLowerCase()))
+            if (match && row[match]) return typeof row[match] === 'string' ? row[match].trim() : String(row[match])
+          }
+          return ''
+        }
+
+        const nombre = findField(['nombre', 'first name', 'guest'])
+        const apellido = findField(['apellido', 'last name'])
+        const email = findField(['email', 'correo', 'mail'])
+        const phone = findField(['móvil', 'movil', 'teléfono', 'telefono', 'phone', 'whatsapp', 'celular'])
+        const notes = findField(['observaciones', 'nota', 'notes', 'rif', 'ci'])
+
+        const fullName = `${nombre} ${apellido}`.trim() || 'Cliente Sin Nombre'
+        const cleanEmail = email && email.includes('@') ? email.toLowerCase().trim() : null
+        const cleanPhone = phone || (cleanEmail ? null : '+58 000-0000000')
+
+        if (!cleanEmail && !cleanPhone) continue
+
+        toInsert.push({
+          full_name: fullName,
+          email: cleanEmail,
+          phone: cleanPhone,
+          source: `Excel: ${file.name}`,
+          status: 'subscribed',
+          tags: ['Importado', 'Huésped'],
+          consent_email: true,
+          total_bookings: 1,
+          total_spent: 0,
+          notes: notes || null,
+        })
+      }
+
+      if (toInsert.length > 0) {
+        const { error } = await supabase.from('marketing_customers').insert(toInsert)
+        if (error) {
+          console.error('Error importing Excel rows:', error)
+          alert(`Error al importar: ${error.message}`)
+        } else {
+          setImportMessage(`¡Éxito! ${toInsert.length} clientes importados.`)
+          await fetchCustomers()
+        }
+      } else {
+        alert('No se encontraron contactos válidos en el Excel.')
+      }
+    } catch (err: any) {
+      console.error('Failed to parse Excel:', err)
+      alert(`Error al leer archivo: ${err.message}`)
+    } finally {
+      setImporting(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      setTimeout(() => setImportMessage(null), 3000)
+    }
+  }
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase()
@@ -138,25 +233,34 @@ export default function CustomersPage() {
 
     const payload = {
       full_name: form.fullName.trim(),
-      email: form.email.trim().toLowerCase() || null,
+      email: form.email.trim() || null,
       phone: form.phone.trim() || null,
       status: form.status,
       tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
       notes: form.notes.trim() || null,
       consent_email: form.consentEmail,
-      source: editing?.source || 'manual',
+      source: editing ? editing.source : 'Manual CRM',
     }
 
-    const result = editing
-      ? await supabase.from('marketing_customers').update(payload).eq('id', editing.id).select('*').single()
-      : await supabase.from('marketing_customers').insert([payload]).select('*').single()
+    let error: any = null
+    let data: any = null
 
-    if (result.error) {
-      console.error('Error saving customer:', result.error)
+    if (editing) {
+      const res = await supabase.from('marketing_customers').update(payload).eq('id', editing.id).select().single()
+      error = res.error
+      data = res.data
+    } else {
+      const res = await supabase.from('marketing_customers').insert(payload).select().single()
+      error = res.error
+      data = res.data
+    }
+
+    if (error) {
+      console.error('Error saving customer:', error)
       return
     }
 
-    const savedCustomer = mapCustomer(result.data as DbCustomer)
+    const savedCustomer = mapCustomer(data as DbCustomer)
     setCustomers(prev => editing
       ? prev.map(c => c.id === savedCustomer.id ? savedCustomer : c)
       : [savedCustomer, ...prev])
@@ -172,12 +276,38 @@ export default function CustomersPage() {
           <h1 className="text-3xl font-bold font-serif text-gray-900 flex items-center gap-2.5">
             Base de Clientes <Sparkles className="text-[#C5A059] fill-[#C5A059]/10" size={24} />
           </h1>
-          <p className="text-sm text-gray-500 mt-1">Contactos, consentimiento y segmentos para futuras campañas.</p>
+          <p className="text-sm text-gray-500 mt-1">Contactos, huéspedes y segmentos para campañas de marketing.</p>
         </div>
-        <button onClick={openCreate} className="flex items-center justify-center gap-2 px-5 py-3 bg-[#C5A059] hover:bg-[#b8904a] text-white rounded-2xl text-sm font-bold transition-all shadow-md">
-          <Plus size={18} /> Nuevo Cliente
-        </button>
+        
+        <div className="flex items-center gap-3">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            accept=".xlsx,.xls,.csv"
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            className="flex items-center justify-center gap-2 px-4 py-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-2xl text-sm font-bold transition-all shadow-md cursor-pointer disabled:opacity-50"
+          >
+            <FileSpreadsheet size={18} />
+            {importing ? 'Importando...' : 'Importar Excel / CSV'}
+          </button>
+          
+          <button onClick={openCreate} className="flex items-center justify-center gap-2 px-5 py-3 bg-[#C5A059] hover:bg-[#b8904a] text-white rounded-2xl text-sm font-bold transition-all shadow-md">
+            <Plus size={18} /> Nuevo Cliente
+          </button>
+        </div>
       </div>
+
+      {importMessage && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-2xl text-xs font-bold flex items-center gap-2 shadow-sm animate-fade-in">
+          <Check size={16} className="text-emerald-600" />
+          {importMessage}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Clientes" value={stats.total} icon={<Users size={18} />} />

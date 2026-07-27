@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, ChevronRight, Clock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, X, CheckCircle2 } from 'lucide-react';
 
 interface Experience {
   id: number;
@@ -9,7 +9,8 @@ interface Experience {
   description: string;
   gallery: string[];
   duration: string;
-  points: number;
+  points?: number;
+  price?: string;
   themeColor: string;
 }
 
@@ -17,35 +18,91 @@ const experiences: Experience[] = [
   {
     id: 1,
     category: 'Aventura',
-    title: 'Cabalgata a la Laguna de Mucubají',
-    description: 'Recorra el páramo andino a lomo de caballo entre frailejones y flores silvestres hasta la espectacular Laguna de Mucubají, a más de 3.500 m de altitud.',
+    title: 'Excursión Laguna del Hoyo',
+    description: 'Puede ser caminando o a caballo. Incluye picnic en la naturaleza.',
     gallery: [
-      '/assets/excursiones/caballos/laguna.png',
-      '/assets/excursiones/caballos/panoramica.png',
-      '/assets/excursiones/caballos/paramo-laguna.png',
-      '/assets/excursiones/caballos/grupo-frailejones.png',
-      '/assets/excursiones/caballos/frailejones.png',
-      '/assets/excursiones/caballos/jinete.png',
+      '/assets/excursiones/laguna-hoyo/1.jpg',
+      '/assets/excursiones/laguna-hoyo/2.jpg',
+      '/assets/excursiones/laguna-hoyo/3.jpg',
+      '/assets/excursiones/laguna-hoyo/4.jpg',
     ],
-    duration: '4h - 5h',
-    points: 200,
+    duration: 'Todo el día',
+    points: 250,
     themeColor: 'bg-brand-wood'
   },
   {
     id: 2,
     category: 'Aventura',
-    title: 'Rutas de Adrenalina en Quads',
-    description: 'Sienta la potencia y el polvo en nuestros circuitos off-road diseñados para los más audaces.',
-    gallery: ['/assets/quads.png'],
-    duration: '1h 45m',
+    title: 'Excursión en Moto de 4 Ruedas (Quads)',
+    description: 'Recorrido guiado en cuatrimoto de 4 ruedas por los caminos del páramo.',
+    gallery: [
+      '/assets/excursiones/quads/1.jpg',
+      '/assets/excursiones/quads/2.jpg',
+      '/assets/excursiones/quads/3.jpg',
+    ],
+    duration: '2 horas',
     points: 200,
     themeColor: 'bg-brand-terracotta'
   },
   {
-    id: 5,
+    id: 3,
+    category: 'Aventura',
+    title: 'Paseo al Bosque de los Pinos',
+    description: 'Caminata o paseo a caballo para el bosque de los pinos, saliendo directamente de la posada.',
+    gallery: [
+      '/assets/excursiones/bosque-pinos/1.jpg',
+      '/assets/excursiones/bosque-pinos/2.jpg',
+      '/assets/excursiones/bosque-pinos/3.jpg',
+      '/assets/excursiones/bosque-pinos/4.jpg',
+      '/assets/excursiones/bosque-pinos/5.jpg',
+      '/assets/excursiones/bosque-pinos/6.jpg',
+    ],
+    duration: '3 km subiendo / 3 km bajando',
+    points: 180,
+    themeColor: 'bg-brand-wood'
+  },
+  {
+    id: 7,
+    category: 'Aventura',
+    title: 'Vuelo en Parapente en las Aguas Termales',
+    description: 'Disfrute de la maravillosa vista aérea volando en parapente sobre las Aguas Termales.',
+    gallery: [
+      '/assets/excursiones/parapente/1.jpg',
+      '/assets/excursiones/parapente/2.jpg',
+      '/assets/excursiones/parapente/3.jpg',
+      '/assets/excursiones/parapente/4.jpg',
+      '/assets/excursiones/parapente/5.jpg',
+      '/assets/excursiones/parapente/6.jpg',
+    ],
+    duration: 'Vuelo guiado',
+    points: 300,
+    price: '€90',
+    themeColor: 'bg-brand-terracotta'
+  },
+  {
+    id: 8,
+    category: 'Aventura',
+    title: 'Tirolesa Las Termales',
+    description: 'Recorrido de 420 metros de tirolesa pura adrenalina sobre el valle de Aguas Termales.',
+    gallery: [
+      '/assets/excursiones/tirolesa/1.jpg',
+      '/assets/excursiones/tirolesa/2.jpg',
+      '/assets/excursiones/tirolesa/3.jpg',
+      '/assets/excursiones/tirolesa/4.jpg',
+      '/assets/excursiones/tirolesa/5.jpg',
+      '/assets/excursiones/tirolesa/6.jpg',
+      '/assets/excursiones/tirolesa/7.jpg',
+    ],
+    duration: '420 mt',
+    points: 150,
+    price: '€15 pp',
+    themeColor: 'bg-brand-terracotta'
+  },
+  {
+    id: 4,
     category: 'Aventura',
     title: 'Recorrido en Bus Antiguo por el Pueblo',
-    description: 'Un viaje en el tiempo a bordo de nuestro icónico bus antiguo. Recorra las calles del pueblo y el municipio descubriendo su arquitectura colonial, mercados locales y los paisajes únicos de los Andes venezolanos.',
+    description: 'Un viaje en el tiempo a bordo de nuestro icónico bus antiguo recorriendo las calles del pueblo y paisajes coloniales.',
     gallery: [
       '/assets/excursiones/bus-pueblo-1.png',
       '/assets/excursiones/bus-pueblo-2.png',
@@ -56,10 +113,10 @@ const experiences: Experience[] = [
     themeColor: 'bg-brand-terracotta'
   },
   {
-    id: 3,
+    id: 5,
     category: 'Relax',
-    title: 'Masajes Terapéuticos',
-    description: 'Sesiones profesionales de masaje en la comodidad del hotel. Nuestras terapeutas certificadas utilizan técnicas de relajación y descontractura para renovar cuerpo y mente.',
+    title: 'Masajes Terapéuticos & Spa',
+    description: 'Sesiones profesionales de masaje en la comodidad del hotel con terapeutas certificadas.',
     gallery: [
       '/assets/excursiones/masajes/terapeuta.png',
       '/assets/excursiones/masajes/sesion-1.png',
@@ -70,11 +127,14 @@ const experiences: Experience[] = [
     themeColor: 'bg-brand-olive'
   },
   {
-    id: 4,
+    id: 6,
     category: 'Logística',
     title: 'Transporte Privado Premium',
-    description: 'Traslados exclusivos desde y hacia el aeropuerto en vehículos de alta gama con chofer bilingüe.',
-    gallery: ['https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=2069&auto=format&fit=crop'],
+    description: 'Traslados exclusivos desde y hacia el aeropuerto y puntos de interés.',
+    gallery: [
+      'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=2069&auto=format&fit=crop',
+      '/assets/instalaciones/recepcion.png'
+    ],
     duration: 'A pedido',
     points: 80,
     themeColor: 'bg-brand-primary'
@@ -83,6 +143,11 @@ const experiences: Experience[] = [
 
 const ExcursionCard: React.FC<{ exp: Experience }> = ({ exp }) => {
   const [imgIndex, setImgIndex] = useState(0);
+  const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [bookingDate, setBookingDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [guests, setGuests] = useState(2);
+  const [cabinOrRoom, setCabinOrRoom] = useState('');
   const total = exp.gallery.length;
 
   const next = (e: React.MouseEvent) => {
@@ -153,17 +218,22 @@ const ExcursionCard: React.FC<{ exp: Experience }> = ({ exp }) => {
 
 
 
-        {/* Category badge */}
-        <div className="absolute bottom-4 left-4 z-10">
-          <span className={`px-3 py-1 rounded-full text-[9px] uppercase tracking-widest font-bold text-white ${exp.themeColor}`}>
+        {/* Category badge & Price Tag */}
+        <div className="absolute bottom-4 left-4 right-4 z-10 flex items-center justify-between pointer-events-none">
+          <span className={`px-3 py-1 rounded-full text-[9px] uppercase tracking-widest font-bold text-white shadow-md ${exp.themeColor}`}>
             {exp.category}
           </span>
+          {exp.price && (
+            <span className="px-3 py-1 rounded-full text-xs font-bold text-white bg-black/70 backdrop-blur-md border border-white/20 shadow-md">
+              {exp.price}
+            </span>
+          )}
         </div>
       </div>
 
       {/* Content */}
       <div className="p-6 flex flex-col">
-        <div className="flex items-center gap-3 text-brand-primary/40 text-[10px] mb-3 font-bold uppercase tracking-widest">
+        <div className="flex items-center justify-between text-brand-primary/40 text-[10px] mb-3 font-bold uppercase tracking-widest">
           <div className="flex items-center gap-1">
             <Clock size={12} /> {exp.duration}
           </div>
@@ -172,10 +242,112 @@ const ExcursionCard: React.FC<{ exp: Experience }> = ({ exp }) => {
         <h3 className="text-xl font-serif text-brand-wood mb-3">{exp.title}</h3>
         <p className="text-brand-primary/60 text-xs leading-relaxed mb-6">{exp.description}</p>
 
-        <button className="w-full bg-brand-neutral hover:bg-brand-primary hover:text-white text-brand-primary font-bold py-3 rounded-xl transition-all text-sm">
-          Reservar Experiencia
+        <button 
+          onClick={() => setIsBookingModalOpen(true)}
+          className="w-full bg-brand-neutral hover:bg-brand-primary hover:text-white text-brand-primary font-bold py-3 rounded-xl transition-all text-sm shadow-sm flex items-center justify-center gap-2"
+        >
+          <span>Reservar Experiencia</span>
         </button>
       </div>
+
+      {/* Booking Modal */}
+      <AnimatePresence>
+        {isBookingModalOpen && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white w-full max-w-md rounded-3xl overflow-hidden shadow-2xl p-6 relative flex flex-col gap-4 text-brand-primary"
+            >
+              <button
+                onClick={() => { setIsBookingModalOpen(false); setIsSuccess(false); }}
+                className="absolute top-4 right-4 p-2 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors"
+              >
+                <X size={18} />
+              </button>
+
+              {!isSuccess ? (
+                <>
+                  <div className="flex items-center gap-3">
+                    <div className={`p-3 rounded-2xl text-white ${exp.themeColor}`}>
+                      <Clock size={20} />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-brand-terracotta">Reserva de Experiencia</span>
+                      <h4 className="text-lg font-serif font-bold text-brand-wood">{exp.title}</h4>
+                    </div>
+                  </div>
+
+                  <div className="bg-brand-neutral/60 p-3 rounded-xl text-xs flex items-center justify-between text-brand-primary/70">
+                    <span>Duración estimada: <strong>{exp.duration}</strong></span>
+                    {exp.price && <span>Precio: <strong className="text-brand-wood">{exp.price}</strong></span>}
+                  </div>
+
+                  <div className="space-y-3 mt-2">
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-brand-primary/60 mb-1">Fecha deseada</label>
+                      <input 
+                        type="date" 
+                        value={bookingDate} 
+                        onChange={(e) => setBookingDate(e.target.value)}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-sans text-brand-primary focus:outline-none focus:border-brand-terracotta" 
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-brand-primary/60 mb-1">Cantidad de Personas</label>
+                      <select 
+                        value={guests} 
+                        onChange={(e) => setGuests(Number(e.target.value))}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-sans text-brand-primary focus:outline-none focus:border-brand-terracotta"
+                      >
+                        {[1, 2, 3, 4, 5, 6, 8, 10].map(n => (
+                          <option key={n} value={n}>{n} {n === 1 ? 'Persona' : 'Personas'}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-brand-primary/60 mb-1">Cabaña o Mesa (Opcional)</label>
+                      <input 
+                        type="text" 
+                        placeholder="Ej. Cabaña Los Frailejones / Mesa 4"
+                        value={cabinOrRoom}
+                        onChange={(e) => setCabinOrRoom(e.target.value)}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-sans text-brand-primary focus:outline-none focus:border-brand-terracotta" 
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setIsSuccess(true)}
+                    className="w-full bg-brand-terracotta hover:bg-brand-wood text-white font-bold py-3 rounded-xl transition-all text-xs tracking-wider uppercase mt-2 shadow-lg shadow-brand-terracotta/20"
+                  >
+                    Confirmar Solicitud
+                  </button>
+                </>
+              ) : (
+                <div className="py-6 flex flex-col items-center text-center gap-3">
+                  <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
+                    <CheckCircle2 size={32} />
+                  </div>
+                  <h4 className="text-xl font-serif text-brand-wood font-bold">¡Solicitud Recibida!</h4>
+                  <p className="text-xs text-brand-primary/70 max-w-xs">
+                    Hemos registrado tu solicitud para <strong>{exp.title}</strong> para el <strong>{bookingDate}</strong> ({guests} {guests === 1 ? 'persona' : 'personas'}). Recepción confirmará tu turno en breve.
+                  </p>
+                  <button
+                    onClick={() => { setIsBookingModalOpen(false); setIsSuccess(false); }}
+                    className="mt-4 px-6 py-2.5 bg-brand-primary text-white text-xs font-bold rounded-xl uppercase tracking-wider"
+                  >
+                    Aceptar
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };

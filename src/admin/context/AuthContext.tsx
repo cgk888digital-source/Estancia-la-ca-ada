@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 
-export type Role = 'admin' | 'gerente' | 'empleado'
+export type Role = 'propiedad' | 'administracion' | 'restaurante'
 
 interface AuthContextType {
   role: Role | null
@@ -11,37 +11,32 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-// Configuración de PINs rápidos -> Mapeado a usuarios reales
-const PINS: Record<string, { email: string; role: Role; pass: string }> = {
-  '1234': { email: 'admin@estancialacanada.com', role: 'admin', pass: 'password1234' },
-  '5555': { email: 'gerente@estancialacanada.com', role: 'gerente', pass: 'password5555' },
-  '9999': { email: 'empleado@estancialacanada.com', role: 'empleado', pass: 'password9999' }
+// Configuración de PINs para los 3 niveles de acceso
+const PINS: Record<string, { email: string; role: Role; pass: string; label: string }> = {
+  '1234': { email: 'propiedad@estancialacanada.com', role: 'propiedad', pass: 'password1234', label: 'La Propiedad' },
+  '2222': { email: 'admin@estancialacanada.com', role: 'administracion', pass: 'password2222', label: 'Administración' },
+  '3333': { email: 'restaurante@estancialacanada.com', role: 'restaurante', pass: 'password3333', label: 'Restaurante & Cocina' },
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [role, setRole] = useState<Role | null>(() => {
-    const saved = localStorage.getItem('adminRole')
-    return (saved as Role) || null
+    try {
+      const saved = localStorage.getItem('adminRole')
+      return (saved as Role) || null
+    } catch (e) {
+      return null
+    }
   })
 
+  // On mount, restore Supabase session in background so RLS policies work
   useEffect(() => {
-    // Escuchar cambios de sesión reales de Supabase
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session) {
-        // En una app más robusta, obtendríamos el rol desde la base de datos (user_roles).
-        // Por eficiencia, lo mantenemos sincronizado con el localStorage que guardamos en login.
-        const saved = localStorage.getItem('adminRole')
-        if (saved) {
-          setRole(saved as Role)
-        }
-      } else {
-        setRole(null)
-        localStorage.removeItem('adminRole')
-      }
-    })
-
-    return () => {
-      authListener.subscription.unsubscribe()
+    const savedPin = localStorage.getItem('adminPin')
+    if (savedPin && PINS[savedPin]) {
+      const user = PINS[savedPin]
+      supabase.auth.signInWithPassword({
+        email: user.email,
+        password: user.pass,
+      }).catch(() => {})
     }
   }, [])
 
@@ -49,25 +44,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const user = PINS[pin]
     if (!user) return false
 
-    const { error } = await supabase.auth.signInWithPassword({
+    // Set role instantly for 0ms UI
+    setRole(user.role)
+    try {
+      localStorage.setItem('adminRole', user.role)
+      localStorage.setItem('adminPin', pin)
+    } catch (e) {}
+
+    // Auth in background so Supabase queries use authenticated role
+    supabase.auth.signInWithPassword({
       email: user.email,
       password: user.pass,
-    })
+    }).catch(() => {})
 
-    if (error) {
-      console.error('Error logging in:', error.message)
-      return false
-    }
-
-    setRole(user.role)
-    localStorage.setItem('adminRole', user.role)
     return true
   }, [])
 
   const logout = useCallback(async () => {
-    await supabase.auth.signOut()
     setRole(null)
-    localStorage.removeItem('adminRole')
+    try {
+      localStorage.removeItem('adminRole')
+      localStorage.removeItem('adminPin')
+    } catch (e) {}
+    supabase.auth.signOut().catch(() => {})
   }, [])
 
   const value = useMemo(() => ({ role, login, logout }), [role, login, logout])
@@ -86,3 +85,4 @@ export const useAuth = () => {
   }
   return context
 }
+

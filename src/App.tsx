@@ -22,20 +22,27 @@ function App() {
     return localStorage.getItem('estancia_table_id')
   })
 
-  useEffect(() => {
-    const mesa = searchParams.get('mesa')
-    const cabana = searchParams.get('cabana')
-    const urlTableId = mesa ? `Mesa ${mesa}` : (cabana ? `Cabaña ${cabana}` : null)
-    
-    if (urlTableId) {
-      setTableId(urlTableId)
-      localStorage.setItem('estancia_table_id', urlTableId)
-    }
-  }, [searchParams])
-
   const [currentScreen, setCurrentScreen] = useState<Screen>('home')
   const [isBookingOpen, setIsBookingOpen] = useState(false)
   const [bookingData, setBookingData] = useState<BookingFlowData | null>(null)
+
+  useEffect(() => {
+    const mesa = searchParams.get('mesa')
+    const cabana = searchParams.get('cabana')
+
+    let urlTableId: string | null = null
+    if (mesa) {
+      urlTableId = mesa.toLowerCase().startsWith('mesa') ? mesa : `Mesa ${mesa}`
+    } else if (cabana) {
+      urlTableId = cabana.toLowerCase().startsWith('cabaña') ? cabana : `Cabaña ${cabana}`
+    }
+
+    if (urlTableId) {
+      setTableId(urlTableId)
+      localStorage.setItem('estancia_table_id', urlTableId)
+      setCurrentScreen('restaurant')
+    }
+  }, [searchParams])
   const [bookingInitialUnitId, setBookingInitialUnitId] = useState<number | null>(null)
 
   const slideVariants = {

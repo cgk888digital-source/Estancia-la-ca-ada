@@ -119,51 +119,88 @@ const mapCustomer = (db: DbCustomer): MarketingCustomer => ({
 })
 
 function matchesSegment(customer: MarketingCustomer, segment: CampaignSegment) {
-  if (!customer.email || !customer.consentEmail || customer.status === 'unsubscribed') return false
+  if (customer.status === 'unsubscribed') return false
   const ninetyDaysAgo = new Date()
   ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
   const lastStay = customer.lastStayDate ? new Date(customer.lastStayDate) : null
 
   if (segment === 'all') return true
-  if (segment === 'subscribed') return customer.status === 'subscribed' || customer.status === 'vip'
+  if (segment === 'subscribed') return customer.status === 'subscribed' || customer.status === 'vip' || !customer.status
   if (segment === 'vip') return customer.status === 'vip' || customer.tags.includes('vip')
   if (segment === 'prospect') return customer.status === 'prospect'
   if (segment === 'recent_guests') return !!lastStay && lastStay >= ninetyDaysAgo
   if (segment === 'no_recent_stay') return !lastStay || lastStay < ninetyDaysAgo
-  return false
+  return true
 }
 
 export default function EmailMarketingPage() {
-  const [customers, setCustomers] = useState<MarketingCustomer[]>([])
-  const [campaigns, setCampaigns] = useState<EmailCampaign[]>([])
-  const [templates, setTemplates] = useState<EmailTemplate[]>([])
-  const [loading, setLoading] = useState(true)
+  const [customers, setCustomers] = useState<MarketingCustomer[]>(() => {
+    try {
+      const cache = localStorage.getItem('estancia_marketing_customers')
+      if (cache) {
+        const parsed = JSON.parse(cache)
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+      }
+    } catch (e) {}
+    return []
+  })
+
+  const [campaigns, setCampaigns] = useState<EmailCampaign[]>(() => {
+    try {
+      const cache = localStorage.getItem('estancia_email_campaigns')
+      if (cache) {
+        const parsed = JSON.parse(cache)
+        if (Array.isArray(parsed)) return parsed
+      }
+    } catch (e) {}
+    return []
+  })
+
+  const [templates, setTemplates] = useState<EmailTemplate[]>(() => {
+    try {
+      const cache = localStorage.getItem('estancia_email_templates')
+      if (cache) {
+        const parsed = JSON.parse(cache)
+        if (Array.isArray(parsed)) return parsed
+      }
+    } catch (e) {}
+    return []
+  })
+
+  const [loading, setLoading] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
   const [form, setForm] = useState(emptyCampaign)
   const [copied, setCopied] = useState(false)
 
   async function fetchData() {
-    setLoading(true)
     const [customersRes, campaignsRes, templatesRes] = await Promise.all([
       supabase.from('marketing_customers').select('*').order('created_at', { ascending: false }),
       supabase.from('email_campaigns').select('*').order('created_at', { ascending: false }),
       supabase.from('email_templates').select('*').order('created_at', { ascending: false }),
     ])
 
-    if (customersRes.error) console.error('Error fetching marketing customers:', customersRes.error)
-    else setCustomers((customersRes.data || []).map(mapCustomer))
+    if (!customersRes.error && customersRes.data) {
+      const mapped = customersRes.data.map(mapCustomer)
+      setCustomers(mapped)
+      try { localStorage.setItem('estancia_marketing_customers', JSON.stringify(mapped)) } catch (e) {}
+    }
 
-    if (campaignsRes.error) console.error('Error fetching campaigns:', campaignsRes.error)
-    else setCampaigns((campaignsRes.data || []).map(mapCampaign))
+    if (!campaignsRes.error && campaignsRes.data) {
+      const mapped = campaignsRes.data.map(mapCampaign)
+      setCampaigns(mapped)
+      try { localStorage.setItem('estancia_email_campaigns', JSON.stringify(mapped)) } catch (e) {}
+    }
 
-    if (templatesRes.error) console.error('Error fetching templates:', templatesRes.error)
-    else setTemplates((templatesRes.data || []).map(mapTemplate))
+    if (!templatesRes.error && templatesRes.data) {
+      const mapped = templatesRes.data.map(mapTemplate)
+      setTemplates(mapped)
+      try { localStorage.setItem('estancia_email_templates', JSON.stringify(mapped)) } catch (e) {}
+    }
 
     setLoading(false)
   }
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData()
   }, [])
 

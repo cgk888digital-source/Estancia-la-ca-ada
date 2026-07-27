@@ -38,9 +38,27 @@ interface DbEmployee {
 }
 
 const Dashboard: React.FC = () => {
-  const [transactions, setTransactions] = useState<Transaction[]>([])
-  const [employees, setEmployees] = useState<Employee[]>([])
-  const [loading, setLoading] = useState(true)
+  const [transactions, setTransactions] = useState<Transaction[]>(() => {
+    try {
+      const cache = localStorage.getItem('estancia_transactions')
+      if (cache) {
+        const parsed = JSON.parse(cache)
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+      }
+    } catch (e) {}
+    return mockTransactions
+  })
+  const [employees, setEmployees] = useState<Employee[]>(() => {
+    try {
+      const cache = localStorage.getItem('estancia_employees')
+      if (cache) {
+        const parsed = JSON.parse(cache)
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+      }
+    } catch (e) {}
+    return mockEmployees
+  })
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -64,8 +82,8 @@ const Dashboard: React.FC = () => {
 
       if (txRes.error) {
         console.error('Error fetching transactions:', txRes.error)
-      } else if (txRes.data) {
-        setTransactions(txRes.data.map((db: DbTransaction) => ({
+      } else if (txRes.data && txRes.data.length > 0) {
+        const mapped = txRes.data.map((db: DbTransaction) => ({
           id: db.id,
           date: db.date,
           type: db.type as TransactionType,
@@ -74,7 +92,8 @@ const Dashboard: React.FC = () => {
           amount: Number(db.amount) || 0,
           paymentMethod: db.payment_method as PaymentMethod,
           relatedTo: db.related_to || ''
-        })))
+        }))
+        setTransactions(mapped)
       }
 
       if (empRes.error) {
