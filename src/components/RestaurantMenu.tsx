@@ -8,6 +8,8 @@ import { getMenu } from '../utils/menuStore'
 import { weeklyMenu } from '../data/weeklyMenu'
 import { supabase } from '../lib/supabase'
 import type { DishItem } from '../data/weeklyMenu'
+import { buildTableLocations, roomLocations } from '../data/orderingLocations'
+import { useHotelSettings } from '../utils/useHotelSettings'
 
 const galleryPlatos = [
   { src: '/assets/restaurante/platos/ceviche.png',          label: 'Ceviche del Día' },
@@ -44,7 +46,9 @@ const RestaurantMenu: React.FC<{
 }> = ({ onBack, onOpenCava, tableId }) => {
   const [activeTab, setActiveTab] = useState('almuerzo')
   const [menu, setMenu] = useState(weeklyMenu)
-  
+  const { settings: hotelSettings } = useHotelSettings()
+  const tableLocations = buildTableLocations(Number(hotelSettings.table_count) || 6)
+
   // Cart & Order state
   const [cart, setCart] = useState<CartItem[]>([])
   const [selectedTable, setSelectedTable] = useState<string>(() => {
@@ -253,17 +257,16 @@ const RestaurantMenu: React.FC<{
           }}
           className="bg-[#C5A059] text-white font-bold rounded-lg px-3 py-1 text-xs focus:outline-none cursor-pointer"
         >
-          <option value="Mesa 1">Mesa 1</option>
-          <option value="Mesa 2">Mesa 2</option>
-          <option value="Mesa 3">Mesa 3</option>
-          <option value="Mesa 4">Mesa 4</option>
-          <option value="Mesa 5">Mesa 5</option>
-          <option value="Mesa 6">Mesa 6</option>
-          <option value="Cabaña La Lomita">Cabaña La Lomita</option>
-          <option value="Cabaña Mitibibó">Cabaña Mitibibó</option>
-          <option value="Cabaña La Manita">Cabaña La Manita</option>
-          <option value="Suite La Vega">Suite La Vega</option>
-          <option value="Habitación Llano Grande">Habitación Llano Grande</option>
+          <optgroup label="Mesas">
+            {tableLocations.map(loc => (
+              <option key={loc.slug} value={loc.label}>{loc.label}</option>
+            ))}
+          </optgroup>
+          <optgroup label="Habitaciones y Cabañas">
+            {roomLocations.map(loc => (
+              <option key={loc.slug} value={loc.label}>{loc.label}</option>
+            ))}
+          </optgroup>
         </select>
       </div>
 

@@ -1,6 +1,6 @@
 import React from 'react'
 import type { Booking } from '../types'
-import { accommodationOptions } from '../../data/accommodations'
+import { activeAccommodationOptions } from '../../data/accommodations'
 
 interface Props {
   bookings: Booking[]
@@ -9,7 +9,7 @@ interface Props {
 
 const PrintableReservationsReport: React.FC<Props> = ({ bookings, dateText }) => {
   // Sort accommodations by ID (or name)
-  const sortedAccommodations = [...accommodationOptions].sort((a, b) => a.id - b.id)
+  const sortedAccommodations = [...activeAccommodationOptions].sort((a, b) => a.id - b.id)
 
   // Get active or future bookings for the week/day context
 

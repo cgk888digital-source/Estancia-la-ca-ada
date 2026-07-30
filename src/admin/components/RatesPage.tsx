@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Sliders, Check, Sparkles, DollarSign, Percent, AlertCircle, Clock } from 'lucide-react'
-import { accommodationOptions } from '../../data/accommodations'
+import { Sliders, Check, Sparkles, DollarSign, Percent, AlertCircle, Clock, UtensilsCrossed } from 'lucide-react'
+import { accommodationOptions, activeAccommodationOptions } from '../../data/accommodations'
 import { supabase } from '../../lib/supabase'
 
 interface DbAccommodation {
@@ -30,6 +30,12 @@ export default function RatesPage() {
   const [successTimes, setSuccessTimes] = useState(false)
   const [errorTimes, setErrorTimes] = useState('')
 
+  // Restaurant table count (used to generate the Mesa 1..N QR/NFC codes in Comandas)
+  const [tableCount, setTableCount] = useState('6')
+  const [savingTableCount, setSavingTableCount] = useState(false)
+  const [successTableCount, setSuccessTableCount] = useState(false)
+  const [errorTableCount, setErrorTableCount] = useState('')
+
   async function fetchAll() {
     setLoading(true)
     setErrorMsg('')
@@ -42,7 +48,8 @@ export default function RatesPage() {
     if (accRes.error) {
       setErrorMsg('No se pudieron cargar las tarifas de la base de datos.')
     } else if (accRes.data) {
-      setRates(accRes.data.map(d => ({
+      const activeIds = new Set(activeAccommodationOptions.map(o => o.id))
+      setRates(accRes.data.filter(d => activeIds.has(Number(d.id))).map(d => ({
         id: Number(d.id),
         title: d.title,
         price: Number(d.price),
@@ -56,6 +63,9 @@ export default function RatesPage() {
       settingsRes.data.forEach((row: { key: string; value: string }) => {
         if (row.key === 'checkin_time' || row.key === 'checkout_time') {
           map[row.key] = row.value
+        }
+        if (row.key === 'table_count') {
+          setTableCount(row.value)
         }
       })
       setHotelTimes(prev => ({ ...prev, ...map }))
@@ -132,6 +142,32 @@ export default function RatesPage() {
       setErrorTimes('Error al guardar los horarios.')
     } finally {
       setSavingTimes(false)
+    }
+  }
+
+  const handleSaveTableCount = async () => {
+    const n = Number(tableCount)
+    if (!Number.isInteger(n) || n < 1) {
+      setErrorTableCount('Ingresa un número de mesas válido (mínimo 1).')
+      return
+    }
+
+    setSavingTableCount(true)
+    setErrorTableCount('')
+
+    try {
+      const { error } = await supabase
+        .from('hotel_settings')
+        .upsert([{ key: 'table_count', value: String(n), label: 'Número de Mesas', updated_at: new Date().toISOString() }], { onConflict: 'key' })
+
+      if (error) throw error
+
+      setSuccessTableCount(true)
+      setTimeout(() => setSuccessTableCount(false), 3000)
+    } catch {
+      setErrorTableCount('Error al guardar el número de mesas.')
+    } finally {
+      setSavingTableCount(false)
     }
   }
 
@@ -238,6 +274,58 @@ export default function RatesPage() {
               <p className="text-[8px] uppercase tracking-widest text-white/40 font-bold mb-1">Vista previa Check-out</p>
               <p className="text-sm font-bold text-[#C5A059]">🕚 {hotelTimes.checkout_time || '—'}</p>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── SECCIÓN 1.5: Mesas del Restaurante (para QR/NFC en Comandas) ── */}
+      <div className="bg-white border border-gray-200/60 rounded-[2rem] overflow-hidden shadow-sm">
+        <div className="px-6 pt-6 pb-4 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <h2 className="text-lg font-bold font-serif text-gray-800 flex items-center gap-2">
+              <UtensilsCrossed size={18} className="text-[#C5A059]" />
+              Mesas del Restaurante
+            </h2>
+            <p className="text-xs text-gray-400 mt-1">
+              Define cuántas mesas hay para generar sus códigos QR/NFC en Comandas → "Generar QR/NFC".
+            </p>
+          </div>
+          <button
+            onClick={handleSaveTableCount}
+            disabled={savingTableCount}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-[#3D2B1F] hover:bg-[#2e1f14] text-white rounded-2xl text-xs uppercase tracking-wider font-extrabold transition-all active:scale-95 disabled:opacity-50 shrink-0"
+          >
+            {savingTableCount ? (
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <Check size={14} />
+            )}
+            Guardar
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          {successTableCount && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-2xl text-xs font-semibold flex items-center gap-2">
+              <Sparkles size={15} className="text-emerald-600" />
+              ¡Número de mesas actualizado!
+            </div>
+          )}
+          {errorTableCount && (
+            <div className="bg-rose-50 border border-rose-200 text-rose-800 px-4 py-3 rounded-2xl text-xs font-semibold flex items-center gap-2">
+              <AlertCircle size={15} className="text-rose-600" />
+              {errorTableCount}
+            </div>
+          )}
+          <div className="max-w-xs">
+            <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Cantidad de Mesas</label>
+            <input
+              type="number"
+              min={1}
+              value={tableCount}
+              onChange={e => setTableCount(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold text-gray-700 outline-none focus:border-[#C5A059] focus:ring-1 focus:ring-[#C5A059]/30 transition-all"
+            />
           </div>
         </div>
       </div>

@@ -16,6 +16,7 @@ export const mockBookings: Booking[] = [
     paymentStatus: 'completo',
     paymentMethod: 'transferencia',
     status: 'checkout_hoy',
+    confirmed: true,
     specialNotes: 'Traen un perro Poodle pequeño con su camita. Requieren leña adicional para la chimenea de piedra.'
   },
   {
@@ -32,6 +33,7 @@ export const mockBookings: Booking[] = [
     paymentStatus: 'pendiente',
     paymentMethod: 'transferencia',
     status: 'confirmado',
+    confirmed: true,
     specialNotes: 'Celebración familiar. Traen dos mascotas pequeñas autorizadas. Requieren cuna de bebé en la hab. principal.'
   },
 
@@ -50,6 +52,7 @@ export const mockBookings: Booking[] = [
     paymentStatus: 'parcial',
     paymentMethod: 'tarjeta',
     status: 'checkin_hoy',
+    confirmed: true,
     specialNotes: 'Huéspedes estrictamente vegetarianos. Es su aniversario de bodas de oro, coordinar botella de espumante de cortesía.'
   },
   {
@@ -66,6 +69,7 @@ export const mockBookings: Booking[] = [
     paymentStatus: 'completo',
     paymentMethod: 'transferencia',
     status: 'confirmado',
+    confirmed: true,
     specialNotes: 'Huéspedes extranjeros (Estados Unidos). Solicitaron tour guiado completo por los senderos del páramo.'
   },
 
@@ -84,6 +88,7 @@ export const mockBookings: Booking[] = [
     paymentStatus: 'completo',
     paymentMethod: 'transferencia',
     status: 'ocupado',
+    confirmed: true,
     specialNotes: 'Solicitaron excursión de cabalgata al atardecer para el miércoles por la tarde.'
   },
   {
@@ -100,6 +105,7 @@ export const mockBookings: Booking[] = [
     paymentStatus: 'parcial',
     paymentMethod: 'tarjeta',
     status: 'confirmado',
+    confirmed: true,
     specialNotes: 'Celebración de cumpleaños infantil de 6 años. Requieren apoyo para decorar con globos en la terraza exterior.'
   },
 
@@ -118,6 +124,7 @@ export const mockBookings: Booking[] = [
     paymentStatus: 'completo',
     paymentMethod: 'efectivo',
     status: 'limpieza', // En proceso de limpieza
+    confirmed: true,
     specialNotes: 'Huésped muy cordial. Hizo check-out a las 8:00 AM y felicitó al chef por las arepas andinas.'
   },
   {
@@ -134,6 +141,7 @@ export const mockBookings: Booking[] = [
     paymentStatus: 'completo',
     paymentMethod: 'transferencia',
     status: 'confirmado',
+    confirmed: true,
     specialNotes: 'Recién casados. Requieren arreglo floral con rosas del páramo en la habitación a su llegada.'
   },
   {
@@ -150,6 +158,7 @@ export const mockBookings: Booking[] = [
     paymentStatus: 'completo',
     paymentMethod: 'efectivo',
     status: 'confirmado',
+    confirmed: true,
     specialNotes: 'Solicitó reserva de mesa prioritaria en el comedor para maridaje de vinos el viernes por la noche.'
   },
 
@@ -168,6 +177,7 @@ export const mockBookings: Booking[] = [
     paymentStatus: 'completo',
     paymentMethod: 'tarjeta',
     status: 'ocupado',
+    confirmed: true,
     specialNotes: 'Creadora de contenido italiana. Tomará fotografías profesionales de la estancia y bar Micata para redes sociales.'
   },
   {
@@ -184,6 +194,7 @@ export const mockBookings: Booking[] = [
     paymentStatus: 'parcial',
     paymentMethod: 'transferencia',
     status: 'confirmado',
+    confirmed: true,
     specialNotes: 'Viaje de descanso. Requiere check-in tardío (alrededor de las 8:00 PM) debido al viaje por carretera.'
   }
 ]

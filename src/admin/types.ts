@@ -58,6 +58,8 @@ export interface Booking {
   paymentStatus: 'completo' | 'parcial' | 'pendiente'
   paymentMethod: 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque'
   status: 'checkout_hoy' | 'checkin_hoy' | 'ocupado' | 'confirmado' | 'limpieza'
+  /** false = reserva recién creada por el huésped (BookingFlow), aún no revisada por el staff. */
+  confirmed: boolean
   specialNotes?: string
   locator?: string
 }

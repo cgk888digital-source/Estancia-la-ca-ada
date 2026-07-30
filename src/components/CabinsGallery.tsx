@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, X, Dog, Bed, Eye, Calendar } from 'lucide-react';
-import { accommodationOptions } from '../data/accommodations';
+import { activeAccommodationOptions } from '../data/accommodations';
 import type { AccommodationOption } from '../data/accommodations';
 import { supabase } from '../lib/supabase';
 import { useHotelSettings } from '../utils/useHotelSettings';
@@ -18,7 +18,7 @@ interface ExtendedCabin extends AccommodationOption {
 
 const CabinsGallery: React.FC<CabinsGalleryProps> = ({ onBookCabin }) => {
   const { settings: hotelSettings } = useHotelSettings();
-  const [cabins, setCabins] = useState<ExtendedCabin[]>(accommodationOptions);
+  const [cabins, setCabins] = useState<ExtendedCabin[]>(activeAccommodationOptions);
   const [selectedCabin, setSelectedCabin] = useState<ExtendedCabin | null>(null);
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
 

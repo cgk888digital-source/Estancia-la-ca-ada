@@ -120,6 +120,8 @@ const mapCustomer = (db: DbCustomer): MarketingCustomer => ({
 
 function matchesSegment(customer: MarketingCustomer, segment: CampaignSegment) {
   if (customer.status === 'unsubscribed') return false
+  if (!customer.consentEmail) return false
+  if (!customer.email) return false
   const ninetyDaysAgo = new Date()
   ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
   const lastStay = customer.lastStayDate ? new Date(customer.lastStayDate) : null
@@ -131,6 +133,14 @@ function matchesSegment(customer: MarketingCustomer, segment: CampaignSegment) {
   if (segment === 'recent_guests') return !!lastStay && lastStay >= ninetyDaysAgo
   if (segment === 'no_recent_stay') return !lastStay || lastStay < ninetyDaysAgo
   return true
+}
+
+function plainTextToHtml(text: string) {
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  return escaped.split('\n').map(line => line || '&nbsp;').join('<br />')
 }
 
 export default function EmailMarketingPage() {
@@ -171,6 +181,8 @@ export default function EmailMarketingPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [form, setForm] = useState(emptyCampaign)
   const [copied, setCopied] = useState(false)
+  const [sendingCampaignId, setSendingCampaignId] = useState<string | null>(null)
+  const [sendError, setSendError] = useState('')
 
   async function fetchData() {
     const [customersRes, campaignsRes, templatesRes] = await Promise.all([
@@ -265,19 +277,125 @@ export default function EmailMarketingPage() {
     setModalOpen(false)
   }
 
-  async function markAsSent(campaign: EmailCampaign) {
-    const { data, error } = await supabase
-      .from('email_campaigns')
-      .update({ status: 'sent', sent_at: new Date().toISOString() })
-      .eq('id', campaign.id)
-      .select('*')
-      .single()
+  async function dispatchToResend(subject: string, plainBody: string, recipients: MarketingCustomer[]) {
+    const { data, error } = await supabase.functions.invoke('send-campaign', {
+      body: {
+        subject,
+        html: plainTextToHtml(plainBody),
+        recipients: recipients.map(c => ({ email: c.email, name: c.fullName })),
+      },
+    })
+    if (error) throw new Error(error.message || 'Error invocando la función de envío.')
+    return data as { sent: number; failed: { email: string; error?: string }[] }
+  }
 
-    if (error) {
-      console.error('Error marking campaign as sent:', error)
+  async function recordRecipients(campaignId: string, recipients: MarketingCustomer[], failed: { email: string }[]) {
+    await supabase.from('email_campaign_recipients').insert(recipients.map(customer => {
+      const didFail = failed.some(f => f.email === customer.email)
+      return {
+        campaign_id: campaignId,
+        customer_id: customer.id,
+        email: customer.email,
+        status: didFail ? 'bounced' : 'sent',
+        sent_at: didFail ? null : new Date().toISOString(),
+      }
+    }))
+  }
+
+  async function createAndSendCampaign() {
+    if (!form.name.trim() || !form.subject.trim() || !form.body.trim()) return
+    if (audience.length === 0) {
+      setSendError('No hay destinatarios con consentimiento de email en este segmento.')
       return
     }
-    setCampaigns(prev => prev.map(item => item.id === campaign.id ? mapCampaign(data as DbCampaign) : item))
+
+    setSendError('')
+    setSendingCampaignId('new')
+
+    const payload = {
+      name: form.name.trim(),
+      subject: form.subject.trim(),
+      preview_text: form.previewText.trim() || null,
+      body: form.body.trim(),
+      segment: form.segment,
+      status: 'draft' as CampaignStatus,
+      scheduled_at: null,
+      sent_at: null,
+      recipient_count: audience.length,
+    }
+
+    const { data, error } = await supabase.from('email_campaigns').insert([payload]).select('*').single()
+    if (error) {
+      console.error('Error saving email campaign:', error)
+      setSendError('No se pudo guardar la campaña.')
+      setSendingCampaignId(null)
+      return
+    }
+
+    const campaign = mapCampaign(data as DbCampaign)
+
+    try {
+      const result = await dispatchToResend(campaign.subject, campaign.body, audience)
+      await recordRecipients(campaign.id, audience, result.failed)
+
+      const { data: updated } = await supabase
+        .from('email_campaigns')
+        .update({ status: 'sent', sent_at: new Date().toISOString(), recipient_count: result.sent })
+        .eq('id', campaign.id)
+        .select('*')
+        .single()
+
+      setCampaigns(prev => [updated ? mapCampaign(updated as DbCampaign) : campaign, ...prev])
+
+      if (result.failed.length > 0) {
+        setSendError(`Enviada con ${result.failed.length} fallo(s) de ${audience.length} destinatarios.`)
+      }
+
+      setForm(emptyCampaign)
+      setModalOpen(false)
+    } catch (err) {
+      console.error('Error sending campaign:', err)
+      setSendError(err instanceof Error ? err.message : 'Error enviando la campaña.')
+      setCampaigns(prev => [campaign, ...prev]) // se guarda como borrador para no perder el trabajo
+    } finally {
+      setSendingCampaignId(null)
+    }
+  }
+
+  async function sendExistingCampaign(campaign: EmailCampaign) {
+    const recipients = customers.filter(c => matchesSegment(c, campaign.segment))
+    if (recipients.length === 0) {
+      setSendError('No hay destinatarios con consentimiento de email en este segmento.')
+      return
+    }
+
+    setSendError('')
+    setSendingCampaignId(campaign.id)
+
+    try {
+      const result = await dispatchToResend(campaign.subject, campaign.body, recipients)
+      await recordRecipients(campaign.id, recipients, result.failed)
+
+      const { data, error } = await supabase
+        .from('email_campaigns')
+        .update({ status: 'sent', sent_at: new Date().toISOString(), recipient_count: result.sent })
+        .eq('id', campaign.id)
+        .select('*')
+        .single()
+
+      if (!error && data) {
+        setCampaigns(prev => prev.map(item => item.id === campaign.id ? mapCampaign(data as DbCampaign) : item))
+      }
+
+      if (result.failed.length > 0) {
+        setSendError(`Enviada con ${result.failed.length} fallo(s) de ${recipients.length} destinatarios.`)
+      }
+    } catch (err) {
+      console.error('Error sending campaign:', err)
+      setSendError(err instanceof Error ? err.message : 'Error enviando la campaña.')
+    } finally {
+      setSendingCampaignId(null)
+    }
   }
 
   async function copyAudience() {
@@ -308,6 +426,13 @@ export default function EmailMarketingPage() {
         <StatCard label="Enviadas" value={stats.sent} icon={<Send size={18} />} />
       </div>
 
+      {sendError && !modalOpen && (
+        <div className="bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-2xl text-xs font-semibold flex items-center justify-between gap-3">
+          <span>{sendError}</span>
+          <button onClick={() => setSendError('')} className="shrink-0 hover:text-rose-900"><X size={14} /></button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_0.8fr] gap-6">
         <div className="bg-white border border-gray-100 rounded-3xl shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
@@ -332,8 +457,12 @@ export default function EmailMarketingPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     {campaign.status !== 'sent' && (
-                      <button onClick={() => markAsSent(campaign)} className="px-4 py-2 rounded-xl border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 text-xs font-bold uppercase tracking-wider">
-                        Marcar enviada
+                      <button
+                        onClick={() => sendExistingCampaign(campaign)}
+                        disabled={sendingCampaignId === campaign.id}
+                        className="px-4 py-2 rounded-xl border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 text-xs font-bold uppercase tracking-wider disabled:opacity-50"
+                      >
+                        {sendingCampaignId === campaign.id ? 'Enviando...' : 'Enviar Ahora'}
                       </button>
                     )}
                   </div>
@@ -394,6 +523,12 @@ export default function EmailMarketingPage() {
               </div>
             </div>
 
+            {sendError && (
+              <div className="bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-2xl text-xs font-semibold">
+                {sendError}
+              </div>
+            )}
+
             <div className="flex flex-col sm:flex-row gap-3 pt-2">
               <button onClick={() => saveCampaign('draft')} className="flex-1 py-3 border border-gray-200 text-gray-600 font-bold rounded-2xl text-sm hover:bg-gray-50">
                 Guardar Borrador
@@ -401,8 +536,12 @@ export default function EmailMarketingPage() {
               <button onClick={() => saveCampaign('scheduled')} disabled={!form.scheduledAt} className="flex-1 py-3 border border-blue-200 bg-blue-50 text-blue-700 font-bold rounded-2xl text-sm disabled:opacity-40">
                 Programar
               </button>
-              <button onClick={() => saveCampaign('sent')} className="flex-1 py-3 bg-[#C5A059] hover:bg-[#b8904a] text-white font-bold rounded-2xl text-sm flex items-center justify-center gap-2">
-                <Mail size={16} /> Registrar Envío
+              <button
+                onClick={createAndSendCampaign}
+                disabled={sendingCampaignId === 'new'}
+                className="flex-1 py-3 bg-[#C5A059] hover:bg-[#b8904a] text-white font-bold rounded-2xl text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <Mail size={16} /> {sendingCampaignId === 'new' ? 'Enviando...' : 'Enviar Campaña Ahora'}
               </button>
             </div>
           </div>

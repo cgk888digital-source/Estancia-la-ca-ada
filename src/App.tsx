@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Home, Utensils, Calendar, Award, ChevronLeft, Bed } from 'lucide-react'
 import type { BookingFlowData } from './components/BookingFlow'
+import { resolveLocationSlug } from './data/orderingLocations'
+import { useHotelSettings } from './utils/useHotelSettings'
 
 const EstanciaHome = lazy(() => import('./components/EstanciaHome'))
 const RestaurantMenu = lazy(() => import('./components/RestaurantMenu'))
@@ -18,6 +20,7 @@ type Screen = 'home' | 'restaurant' | 'excursions' | 'club' | 'cava' | 'success'
 
 function App() {
   const [searchParams] = useSearchParams()
+  const { settings: hotelSettings } = useHotelSettings()
   const [tableId, setTableId] = useState<string | null>(() => {
     return localStorage.getItem('estancia_table_id')
   })
@@ -27,11 +30,16 @@ function App() {
   const [bookingData, setBookingData] = useState<BookingFlowData | null>(null)
 
   useEffect(() => {
+    const loc = searchParams.get('loc')
     const mesa = searchParams.get('mesa')
     const cabana = searchParams.get('cabana')
 
     let urlTableId: string | null = null
-    if (mesa) {
+    if (loc) {
+      const resolved = resolveLocationSlug(loc, Number(hotelSettings.table_count) || 6)
+      urlTableId = resolved?.label ?? null
+    } else if (mesa) {
+      // Legacy QR/NFC codes printed before the unified `?loc=` scheme.
       urlTableId = mesa.toLowerCase().startsWith('mesa') ? mesa : `Mesa ${mesa}`
     } else if (cabana) {
       urlTableId = cabana.toLowerCase().startsWith('cabaña') ? cabana : `Cabaña ${cabana}`
@@ -42,7 +50,7 @@ function App() {
       localStorage.setItem('estancia_table_id', urlTableId)
       setCurrentScreen('restaurant')
     }
-  }, [searchParams])
+  }, [searchParams, hotelSettings.table_count])
   const [bookingInitialUnitId, setBookingInitialUnitId] = useState<number | null>(null)
 
   const slideVariants = {

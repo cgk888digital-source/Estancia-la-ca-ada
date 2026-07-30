@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, X, Users, Dog, Calendar as CalendarIcon, Award, Check } from 'lucide-react';
-import { accommodationOptions } from '../data/accommodations';
+import { activeAccommodationOptions } from '../data/accommodations';
 import { supabase } from '../lib/supabase';
 import { getBcvEuroRate } from '../utils/exchangeRate';
 import { useHotelSettings } from '../utils/useHotelSettings';
@@ -146,16 +146,17 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
       case 1:
       case 6:
       case 7:
+      case 50:
+      case 51:
+      case 52:
         return isDecember ? 158 : 137;
       case 2:
       case 4:
         return isDecember ? 337 : 297;
-      case 5:
-      case 8:
-      case 9:
-        return isDecember ? 76 : 64;
-      case 3:
-        return isDecember ? 70 : 60;
+      case 30: case 31: case 32: case 33: case 34: case 35:
+        return isDecember ? 70 : 60; // Galería La Manita (habitaciones 1-6)
+      case 36: case 37: case 38: case 39: case 40: case 41:
+        return isDecember ? 76 : 64; // Galería Llano Grande (habitaciones 7-12)
       default:
         return 0;
     }
@@ -265,7 +266,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
 
 
   const selectedData = selectedUnits.length > 0 
-    ? accommodationOptions.filter(o => selectedUnits.includes(o.id))
+    ? activeAccommodationOptions.filter(o => selectedUnits.includes(o.id))
     : [];
   const totalNights = selectedDates.start && selectedDates.end
     ? Math.ceil(Math.abs(selectedDates.end.getTime() - selectedDates.start.getTime()) / (1000 * 60 * 60 * 24))
@@ -275,15 +276,17 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
 
   const getRoomMaxCapacity = (roomId: number): number => {
     switch (roomId) {
-      case 1: return 6; // Suite 6p
-      case 6: return 5; // Suite 5p
-      case 7: return 4; // Suite 4p
+      case 1: case 50: case 51: return 6; // Suite 6p (Hab. 13/14, 15/16)
+      case 6: case 52: return 5; // Suite 5p (Hab. 17/18, 19/20)
+      case 7: return 4; // Suite 4p (Hab. 21)
       case 2: return 10; // Cabaña La Lomita
       case 4: return 9; // Cabaña Mitibibo
-      case 5: return 2; // Llano Grande Matrimonial King
-      case 8: return 4; // Llano Grande King + Litera
-      case 9: return 4; // Llano Grande Queen + 2 Camas
-      case 3: return 3; // Galería La Manita
+      case 30: case 35:
+        return 2; // Galería La Manita (habitaciones 1 y 6, matrimonial sola)
+      case 31: case 32: case 33: case 34:
+        return 4; // Galería La Manita (habitaciones 2-5, Queen + litera)
+      case 36: case 37: case 38: case 39: case 40: case 41:
+        return 4; // Galería Llano Grande (habitaciones 7-12)
       default: return 0;
     }
   };
@@ -502,7 +505,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
               </div>
 
               <div className="space-y-8">
-                {accommodationOptions.map((opt) => {
+                {activeAccommodationOptions.map((opt) => {
                   const currentImg = galleryIndex[opt.id] ?? 0;
                   const total = opt.gallery.length;
                   const goNext = (e: React.MouseEvent) => {
@@ -1242,6 +1245,7 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
                     payment_status: 'parcial',
                     payment_method: selectedPayment || 'transferencia',
                     status: initialStatus,
+                    confirmed: false, // reserva enviada por el huésped, pendiente de revisión del staff
                     special_notes: `${notes}${N > 1 ? `. Código de grupo: ${bookingCode}` : ''}`,
                     locator: bookingCode
                   };

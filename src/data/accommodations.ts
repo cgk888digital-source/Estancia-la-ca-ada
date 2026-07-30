@@ -10,9 +10,18 @@ export interface AccommodationOption {
   description: string;
   rooms: string[];
   amenities: string[];
+  /** Physical room number as used internally (housekeeping, tarifa sheet). Only set for individually-rented rooms. */
+  roomNumber?: number;
+  /**
+   * false = kept only so historical bookings (accommodation_id referencing this option) still
+   * resolve a title/image. No longer offered for new bookings. See La Manita / Llano Grande split below.
+   */
+  active?: boolean;
 }
 
 export const accommodationOptions: AccommodationOption[] = [
+  // Legacy: Paxer confirma que en realidad hay 2 suites de 6 pax (Hab. 13/14 y 15/16), no 1.
+  // Se mantiene solo por el historial de reservas; ver las 2 unidades reales más abajo.
   {
     id: 1,
     title: "Galería Suite La Vega (6 Personas)",
@@ -20,6 +29,7 @@ export const accommodationOptions: AccommodationOption[] = [
     price: 137,
     capacity: "Hasta 6 Personas",
     pets: "Consultar",
+    active: false,
     image: "/assets/suites/la-vega/exterior.jpg",
     gallery: [
       "/assets/suites/la-vega/exterior.jpg",
@@ -57,8 +67,46 @@ export const accommodationOptions: AccommodationOption[] = [
     amenities: ["2 Baños Privados", "Neverita", "Terrazas Dobles", "Vistas a la Montaña"]
   },
   {
+    id: 50,
+    title: "Galería Suite La Vega — Habitación 13/14",
+    type: "Suite Comunicante",
+    price: 137,
+    capacity: "Hasta 6 Personas",
+    pets: "Consultar",
+    image: "/assets/suites/la-vega/exterior.jpg",
+    gallery: [
+      "/assets/suites/la-vega/exterior.jpg",
+      "/assets/suites/la-vega/img-1.png",
+      "/assets/suites/la-vega/img-2.png",
+      "/assets/suites/la-vega/img-3.png",
+      "/assets/suites/la-vega/img-4.png",
+    ],
+    description: "2 habitaciones comunicantes con 2 baños propios y terrazas a ambos lados, ideal para familias o grupos de hasta 6 personas.",
+    rooms: ["Matrimonial (Cama King)", "2 Literas (4 camas de una plaza)"],
+    amenities: ["2 Baños Privados", "Neverita", "Terrazas Dobles", "Vistas a la Montaña"]
+  },
+  {
+    id: 51,
+    title: "Galería Suite La Vega — Habitación 15/16",
+    type: "Suite Comunicante",
+    price: 137,
+    capacity: "Hasta 6 Personas",
+    pets: "Consultar",
+    image: "/assets/suites/la-vega/exterior.jpg",
+    gallery: [
+      "/assets/suites/la-vega/exterior.jpg",
+      "/assets/suites/la-vega/img-1.png",
+      "/assets/suites/la-vega/img-2.png",
+      "/assets/suites/la-vega/img-3.png",
+      "/assets/suites/la-vega/img-4.png",
+    ],
+    description: "2 habitaciones comunicantes con 2 baños propios y terrazas a ambos lados, ideal para familias o grupos de hasta 6 personas.",
+    rooms: ["Matrimonial (Cama King)", "2 Literas (4 camas de una plaza)"],
+    amenities: ["2 Baños Privados", "Neverita", "Terrazas Dobles", "Vistas a la Montaña"]
+  },
+  {
     id: 6,
-    title: "Galería Suite La Vega (5 Personas)",
+    title: "Galería Suite La Vega — Habitación 17/18",
     type: "Suite Comunicante",
     price: 137,
     capacity: "Hasta 5 Personas",
@@ -100,8 +148,27 @@ export const accommodationOptions: AccommodationOption[] = [
     amenities: ["2 Baños Privados", "Neverita", "Terrazas Dobles", "Vistas a la Montaña"]
   },
   {
+    id: 52,
+    title: "Galería Suite La Vega — Habitación 19/20",
+    type: "Suite Comunicante",
+    price: 137,
+    capacity: "Hasta 5 Personas",
+    pets: "Consultar",
+    image: "/assets/suites/la-vega/exterior.jpg",
+    gallery: [
+      "/assets/suites/la-vega/exterior.jpg",
+      "/assets/suites/la-vega/img-1.png",
+      "/assets/suites/la-vega/img-2.png",
+      "/assets/suites/la-vega/img-3.png",
+      "/assets/suites/la-vega/img-4.png",
+    ],
+    description: "2 habitaciones comunicantes con 2 baños propios y terrazas a ambos lados. Configurada con Cama King, Litera y Cama Individual.",
+    rooms: ["Matrimonial (Cama King)", "Litera + Cama Individual (3 camas de una plaza)"],
+    amenities: ["2 Baños Privados", "Neverita", "Terrazas Dobles", "Vistas a la Montaña"]
+  },
+  {
     id: 7,
-    title: "Galería Suite La Vega (4 Personas)",
+    title: "Galería Suite La Vega — Habitación 21",
     type: "Suite Comunicante",
     price: 137,
     capacity: "Hasta 4 Personas",
@@ -186,6 +253,11 @@ export const accommodationOptions: AccommodationOption[] = [
     rooms: ["2 Habitaciones dobles", "1 Habitación múltiple (literas)", "Salón con chimenea"],
     amenities: ["3 Baños Privados", "Cocina Equipada", "Chimenea", "Vistas Panorámicas"]
   },
+  // ── LEGACY (active: false) ──────────────────────────────────────────────
+  // These 4 entries were the old aggregated SKUs, replaced below by 12 individually
+  // bookable rooms (La Manita 1-6, Llano Grande 7-12) per the real tarifa sheet.
+  // Kept here ONLY so historical bookings still resolve a title/image; excluded from
+  // every "new booking" surface via `activeAccommodationOptions`.
   {
     id: 5,
     title: "Galería Llano Grande (Matrimonial King)",
@@ -194,28 +266,11 @@ export const accommodationOptions: AccommodationOption[] = [
     capacity: "Hasta 2 Personas",
     pets: "Consultar",
     image: "/assets/suites/llano-grande/exterior.png",
-    gallery: [
-      "/assets/suites/llano-grande/exterior.png",
-      "/assets/suites/llano-grande/img-1.png",
-      "/assets/suites/llano-grande/img-2.png",
-      "/assets/suites/llano-grande/img-3.png",
-      "/assets/suites/llano-grande/img-4.png",
-      "/assets/suites/llano-grande/img-5.png",
-      "/assets/suites/llano-grande/img-6.png",
-      "/assets/suites/llano-grande/img-7.png",
-      "/assets/suites/llano-grande/img-8.png",
-      "/assets/suites/llano-grande/img-9.png",
-      "/assets/suites/llano-grande/img-10.png",
-      "/assets/suites/llano-grande/img-11.png",
-      "/assets/suites/llano-grande/img-12.png",
-      "/assets/suites/llano-grande/img-13.png",
-      "/assets/suites/llano-grande/img-14.png",
-      "/assets/suites/llano-grande/img-15.png",
-      "/assets/suites/llano-grande/img-16.png",
-    ],
+    gallery: ["/assets/suites/llano-grande/exterior.png"],
     description: "Habitación rústica y acogedora en Galería Llano Grande, equipada con cama matrimonial King y detalles artesanales.",
     rooms: ["Matrimonial (Cama King)", "Baño Privado"],
-    amenities: ["Baño Privado", "Detalles artesanales", "Acceso a jardines"]
+    amenities: ["Baño Privado", "Detalles artesanales", "Acceso a jardines"],
+    active: false
   },
   {
     id: 8,
@@ -225,28 +280,11 @@ export const accommodationOptions: AccommodationOption[] = [
     capacity: "Hasta 4 Personas",
     pets: "Consultar",
     image: "/assets/suites/llano-grande/exterior.png",
-    gallery: [
-      "/assets/suites/llano-grande/exterior.png",
-      "/assets/suites/llano-grande/img-1.png",
-      "/assets/suites/llano-grande/img-2.png",
-      "/assets/suites/llano-grande/img-3.png",
-      "/assets/suites/llano-grande/img-4.png",
-      "/assets/suites/llano-grande/img-5.png",
-      "/assets/suites/llano-grande/img-6.png",
-      "/assets/suites/llano-grande/img-7.png",
-      "/assets/suites/llano-grande/img-8.png",
-      "/assets/suites/llano-grande/img-9.png",
-      "/assets/suites/llano-grande/img-10.png",
-      "/assets/suites/llano-grande/img-11.png",
-      "/assets/suites/llano-grande/img-12.png",
-      "/assets/suites/llano-grande/img-13.png",
-      "/assets/suites/llano-grande/img-14.png",
-      "/assets/suites/llano-grande/img-15.png",
-      "/assets/suites/llano-grande/img-16.png",
-    ],
+    gallery: ["/assets/suites/llano-grande/exterior.png"],
     description: "Habitación familiar en Galería Llano Grande, equipada con cama matrimonial King y litera para un total de 4 personas.",
     rooms: ["Matrimonial (Cama King)", "1 Litera", "Baño Privado"],
-    amenities: ["Baño Privado", "Detalles artesanales", "Acceso a jardines"]
+    amenities: ["Baño Privado", "Detalles artesanales", "Acceso a jardines"],
+    active: false
   },
   {
     id: 9,
@@ -256,28 +294,11 @@ export const accommodationOptions: AccommodationOption[] = [
     capacity: "Hasta 4 Personas",
     pets: "Consultar",
     image: "/assets/suites/llano-grande/exterior.png",
-    gallery: [
-      "/assets/suites/llano-grande/exterior.png",
-      "/assets/suites/llano-grande/img-1.png",
-      "/assets/suites/llano-grande/img-2.png",
-      "/assets/suites/llano-grande/img-3.png",
-      "/assets/suites/llano-grande/img-4.png",
-      "/assets/suites/llano-grande/img-5.png",
-      "/assets/suites/llano-grande/img-6.png",
-      "/assets/suites/llano-grande/img-7.png",
-      "/assets/suites/llano-grande/img-8.png",
-      "/assets/suites/llano-grande/img-9.png",
-      "/assets/suites/llano-grande/img-10.png",
-      "/assets/suites/llano-grande/img-11.png",
-      "/assets/suites/llano-grande/img-12.png",
-      "/assets/suites/llano-grande/img-13.png",
-      "/assets/suites/llano-grande/img-14.png",
-      "/assets/suites/llano-grande/img-15.png",
-      "/assets/suites/llano-grande/img-16.png",
-    ],
+    gallery: ["/assets/suites/llano-grande/exterior.png"],
     description: "Habitación familiar en Galería Llano Grande, equipada con cama matrimonial Queen y 2 camas individuales.",
     rooms: ["Matrimonial (Cama Queen)", "2 Camas Individuales", "Baño Privado"],
-    amenities: ["Baño Privado", "Detalles artesanales", "Acceso a jardines"]
+    amenities: ["Baño Privado", "Detalles artesanales", "Acceso a jardines"],
+    active: false
   },
   {
     id: 3,
@@ -287,24 +308,186 @@ export const accommodationOptions: AccommodationOption[] = [
     capacity: "Hasta 3 Personas",
     pets: "Consultar",
     image: "/assets/suites/la-manita/exterior.png",
-    gallery: [
-      "/assets/suites/la-manita/exterior.png",
-      "/assets/suites/la-manita/fachada.png",
-      "/assets/suites/la-manita/hab-1.png",
-      "/assets/suites/la-manita/hab-1-bano.png",
-      "/assets/suites/la-manita/hab-2.png",
-      "/assets/suites/la-manita/hab-2-bano.png",
-      "/assets/suites/la-manita/hab-3.png",
-      "/assets/suites/la-manita/hab-3-bano.png",
-      "/assets/suites/la-manita/hab-4.png",
-      "/assets/suites/la-manita/hab-4-bano.png",
-      "/assets/suites/la-manita/hab-5.png",
-      "/assets/suites/la-manita/hab-5-bano.png",
-      "/assets/suites/la-manita/hab-6.png",
-      "/assets/suites/la-manita/hab-6-bano.png",
-    ],
+    gallery: ["/assets/suites/la-manita/exterior.png"],
     description: "Habitaciones independientes con baño privado, techos de madera y vistas a la montaña. Capacidad máxima de 3 personas.",
     rooms: ["Cama doble + litera", "Baño privado por habitación"],
+    amenities: ["Baño Privado", "Techos de Madera", "Vistas a la Montaña"],
+    active: false
+  },
+
+  // ── GALERÍA LA MANITA — 6 habitaciones individuales (tarifa: $60 / $70 Dic., Hasta 3 Pax) ──
+  {
+    id: 30,
+    roomNumber: 1,
+    title: "Galería La Manita — Habitación 1",
+    type: "Habitación de Galería",
+    price: 60,
+    capacity: "Hasta 3 Personas",
+    pets: "Consultar",
+    image: "/assets/suites/la-manita/hab-1.png",
+    gallery: ["/assets/suites/la-manita/exterior.png", "/assets/suites/la-manita/fachada.png", "/assets/suites/la-manita/hab-1.png", "/assets/suites/la-manita/hab-1-bano.png"],
+    description: "Habitación independiente con baño privado, techos de madera y vistas a la montaña.",
+    rooms: ["Matrimonial (Cama Queen)", "Baño Privado"],
     amenities: ["Baño Privado", "Techos de Madera", "Vistas a la Montaña"]
+  },
+  {
+    id: 31,
+    roomNumber: 2,
+    title: "Galería La Manita — Habitación 2",
+    type: "Habitación de Galería",
+    price: 60,
+    capacity: "Hasta 4 Personas",
+    pets: "Consultar",
+    image: "/assets/suites/la-manita/hab-2.png",
+    gallery: ["/assets/suites/la-manita/exterior.png", "/assets/suites/la-manita/fachada.png", "/assets/suites/la-manita/hab-2.png", "/assets/suites/la-manita/hab-2-bano.png"],
+    description: "Habitación independiente con baño privado, techos de madera y vistas a la montaña.",
+    rooms: ["Matrimonial (Cama Queen)", "1 Litera", "Baño Privado"],
+    amenities: ["Baño Privado", "Techos de Madera", "Vistas a la Montaña"]
+  },
+  {
+    id: 32,
+    roomNumber: 3,
+    title: "Galería La Manita — Habitación 3",
+    type: "Habitación de Galería",
+    price: 60,
+    capacity: "Hasta 4 Personas",
+    pets: "Consultar",
+    image: "/assets/suites/la-manita/hab-3.png",
+    gallery: ["/assets/suites/la-manita/exterior.png", "/assets/suites/la-manita/fachada.png", "/assets/suites/la-manita/hab-3.png", "/assets/suites/la-manita/hab-3-bano.png"],
+    description: "Habitación independiente con baño privado, techos de madera y vistas a la montaña.",
+    rooms: ["Matrimonial (Cama Queen)", "1 Litera", "Baño Privado"],
+    amenities: ["Baño Privado", "Techos de Madera", "Vistas a la Montaña"]
+  },
+  {
+    id: 33,
+    roomNumber: 4,
+    title: "Galería La Manita — Habitación 4",
+    type: "Habitación de Galería",
+    price: 60,
+    capacity: "Hasta 4 Personas",
+    pets: "Consultar",
+    image: "/assets/suites/la-manita/hab-4.png",
+    gallery: ["/assets/suites/la-manita/exterior.png", "/assets/suites/la-manita/fachada.png", "/assets/suites/la-manita/hab-4.png", "/assets/suites/la-manita/hab-4-bano.png"],
+    description: "Habitación independiente con baño privado, techos de madera y vistas a la montaña.",
+    rooms: ["Matrimonial (Cama Queen)", "1 Litera", "Baño Privado"],
+    amenities: ["Baño Privado", "Techos de Madera", "Vistas a la Montaña"]
+  },
+  {
+    id: 34,
+    roomNumber: 5,
+    title: "Galería La Manita — Habitación 5",
+    type: "Habitación de Galería",
+    price: 60,
+    capacity: "Hasta 4 Personas",
+    pets: "Consultar",
+    image: "/assets/suites/la-manita/hab-5.png",
+    gallery: ["/assets/suites/la-manita/exterior.png", "/assets/suites/la-manita/fachada.png", "/assets/suites/la-manita/hab-5.png", "/assets/suites/la-manita/hab-5-bano.png"],
+    description: "Habitación independiente con baño privado, techos de madera y vistas a la montaña.",
+    rooms: ["Matrimonial (Cama Queen)", "1 Litera", "Baño Privado"],
+    amenities: ["Baño Privado", "Techos de Madera", "Vistas a la Montaña"]
+  },
+  {
+    id: 35,
+    roomNumber: 6,
+    title: "Galería La Manita — Habitación 6",
+    type: "Habitación de Galería",
+    price: 60,
+    capacity: "Hasta 2 Personas",
+    pets: "Consultar",
+    image: "/assets/suites/la-manita/hab-6.png",
+    gallery: ["/assets/suites/la-manita/exterior.png", "/assets/suites/la-manita/fachada.png", "/assets/suites/la-manita/hab-6.png", "/assets/suites/la-manita/hab-6-bano.png"],
+    description: "Habitación independiente con baño privado, techos de madera y vistas a la montaña.",
+    rooms: ["Matrimonial (Cama Queen)", "Baño Privado"],
+    amenities: ["Baño Privado", "Techos de Madera", "Vistas a la Montaña"]
+  },
+
+  // ── GALERÍA LLANO GRANDE — 6 habitaciones individuales (tarifa: $64 / $76 Dic., Hasta 4 Pax) ──
+  {
+    id: 36,
+    roomNumber: 7,
+    title: "Galería Llano Grande — Habitación 7",
+    type: "Habitación de Galería",
+    price: 64,
+    capacity: "Hasta 4 Personas",
+    pets: "Consultar",
+    image: "/assets/suites/llano-grande/exterior.png",
+    gallery: Array.from({ length: 17 }, (_, i) => i === 0 ? "/assets/suites/llano-grande/exterior.png" : `/assets/suites/llano-grande/img-${i}.png`),
+    description: "Habitación rústica y acogedora en Galería Llano Grande, equipada con cama matrimonial King y detalles artesanales.",
+    rooms: ["Matrimonial (Cama King)", "Baño Privado"],
+    amenities: ["Baño Privado", "Detalles artesanales", "Acceso a jardines"]
+  },
+  {
+    id: 37,
+    roomNumber: 8,
+    title: "Galería Llano Grande — Habitación 8",
+    type: "Habitación de Galería",
+    price: 64,
+    capacity: "Hasta 4 Personas",
+    pets: "Consultar",
+    image: "/assets/suites/llano-grande/exterior.png",
+    gallery: Array.from({ length: 17 }, (_, i) => i === 0 ? "/assets/suites/llano-grande/exterior.png" : `/assets/suites/llano-grande/img-${i}.png`),
+    description: "Habitación familiar en Galería Llano Grande, equipada con cama matrimonial King y litera.",
+    rooms: ["Matrimonial (Cama King)", "1 Litera", "Baño Privado"],
+    amenities: ["Baño Privado", "Detalles artesanales", "Acceso a jardines"]
+  },
+  {
+    id: 38,
+    roomNumber: 9,
+    title: "Galería Llano Grande — Habitación 9",
+    type: "Habitación de Galería",
+    price: 64,
+    capacity: "Hasta 4 Personas",
+    pets: "Consultar",
+    image: "/assets/suites/llano-grande/exterior.png",
+    gallery: Array.from({ length: 17 }, (_, i) => i === 0 ? "/assets/suites/llano-grande/exterior.png" : `/assets/suites/llano-grande/img-${i}.png`),
+    description: "Habitación familiar en Galería Llano Grande, equipada con cama matrimonial King y litera.",
+    rooms: ["Matrimonial (Cama King)", "1 Litera", "Baño Privado"],
+    amenities: ["Baño Privado", "Detalles artesanales", "Acceso a jardines"]
+  },
+  {
+    id: 39,
+    roomNumber: 10,
+    title: "Galería Llano Grande — Habitación 10",
+    type: "Habitación de Galería",
+    price: 64,
+    capacity: "Hasta 4 Personas",
+    pets: "Consultar",
+    image: "/assets/suites/llano-grande/exterior.png",
+    gallery: Array.from({ length: 17 }, (_, i) => i === 0 ? "/assets/suites/llano-grande/exterior.png" : `/assets/suites/llano-grande/img-${i}.png`),
+    description: "Habitación familiar en Galería Llano Grande, equipada con cama matrimonial King y 2 camas individuales.",
+    rooms: ["Matrimonial (Cama King)", "2 Camas Individuales", "Baño Privado"],
+    amenities: ["Baño Privado", "Detalles artesanales", "Acceso a jardines"]
+  },
+  {
+    id: 40,
+    roomNumber: 11,
+    title: "Galería Llano Grande — Habitación 11",
+    type: "Habitación de Galería",
+    price: 64,
+    capacity: "Hasta 4 Personas",
+    pets: "Consultar",
+    image: "/assets/suites/llano-grande/exterior.png",
+    gallery: Array.from({ length: 17 }, (_, i) => i === 0 ? "/assets/suites/llano-grande/exterior.png" : `/assets/suites/llano-grande/img-${i}.png`),
+    description: "Habitación familiar en Galería Llano Grande, equipada con cama matrimonial Queen y 2 camas individuales.",
+    rooms: ["Matrimonial (Cama Queen)", "2 Camas Individuales", "Baño Privado"],
+    amenities: ["Baño Privado", "Detalles artesanales", "Acceso a jardines"]
+  },
+  {
+    id: 41,
+    roomNumber: 12,
+    title: "Galería Llano Grande — Habitación 12",
+    type: "Habitación de Galería",
+    price: 64,
+    capacity: "Hasta 4 Personas",
+    pets: "Consultar",
+    image: "/assets/suites/llano-grande/exterior.png",
+    gallery: Array.from({ length: 17 }, (_, i) => i === 0 ? "/assets/suites/llano-grande/exterior.png" : `/assets/suites/llano-grande/img-${i}.png`),
+    description: "Habitación familiar en Galería Llano Grande, equipada con cama matrimonial Queen y 2 camas individuales.",
+    rooms: ["Matrimonial (Cama Queen)", "2 Camas Individuales", "Baño Privado"],
+    amenities: ["Baño Privado", "Detalles artesanales", "Acceso a jardines"]
   }
 ];
+
+/** Options actually offered for new bookings (excludes deprecated/legacy SKUs). Use this everywhere
+ *  except historical lookups by id, where the full `accommodationOptions` (incl. legacy) is needed. */
+export const activeAccommodationOptions = accommodationOptions.filter(o => o.active !== false);

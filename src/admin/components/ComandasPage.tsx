@@ -4,6 +4,8 @@ import { supabase } from '../../lib/supabase'
 import confetti from 'canvas-confetti'
 import { getMenu } from '../../utils/menuStore'
 import type { MenuSection, DishItem } from '../../data/weeklyMenu'
+import { buildTableLocations, roomLocations, getOrderingLocationUrl } from '../../data/orderingLocations'
+import { useHotelSettings } from '../../utils/useHotelSettings'
 
 interface OrderItem {
   name: string
@@ -73,11 +75,16 @@ const ComandasPage: React.FC = () => {
   const [checkoutPaymentMethod, setCheckoutPaymentMethod] = useState('efectivo')
   const [savingCheckout, setSavingCheckout] = useState(false)
 
+  const { settings: hotelSettings } = useHotelSettings()
+  const tableLocations = buildTableLocations(Number(hotelSettings.table_count) || 6)
+  const allLocations = [...tableLocations, ...roomLocations]
+
   // QR & NFC Generator states
   const [showQrModal, setShowQrModal] = useState(false)
-  const [selectedQrTable, setSelectedQrTable] = useState('Mesa 1')
+  const [selectedQrLocationSlug, setSelectedQrLocationSlug] = useState('mesa-1')
   const [copiedUrl, setCopiedUrl] = useState(false)
   const [customDomain, setCustomDomain] = useState(() => window.location.origin)
+  const selectedQrLocation = allLocations.find(l => l.slug === selectedQrLocationSlug) ?? null
 
   // Manual order states
   const [selectedTable, setSelectedTable] = useState('Mesa 1')
@@ -92,18 +99,6 @@ const ComandasPage: React.FC = () => {
       localStorage.setItem('estancia_comandas', JSON.stringify(comandas))
     } catch (e) {}
   }, [comandas])
-
-  const getTableNfcUrl = (tableId: string, baseDomain: string) => {
-    const matchMesa = tableId.match(/^Mesa\s+(\d+)$/i)
-    if (matchMesa) {
-      return `${baseDomain}/?mesa=${matchMesa[1]}`
-    }
-    const matchCabana = tableId.match(/^Cabaña\s+(.+)$/i)
-    if (matchCabana) {
-      return `${baseDomain}/?cabana=${encodeURIComponent(matchCabana[1])}`
-    }
-    return `${baseDomain}/?mesa=${encodeURIComponent(tableId)}`
-  }
 
   const fetchComandas = async () => {
     try {
@@ -683,16 +678,16 @@ const ComandasPage: React.FC = () => {
                       onChange={e => setSelectedTable(e.target.value)}
                       className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#C5A059] bg-white font-bold text-gray-700"
                     >
-                      <option value="Mesa 1">Mesa 1</option>
-                      <option value="Mesa 2">Mesa 2</option>
-                      <option value="Mesa 3">Mesa 3</option>
-                      <option value="Mesa 4">Mesa 4</option>
-                      <option value="Mesa 5">Mesa 5</option>
-                      <option value="Cabaña La Lomita">Cabaña La Lomita</option>
-                      <option value="Cabaña Mitibibó">Cabaña Mitibibó</option>
-                      <option value="Cabaña La Manita">Cabaña La Manita</option>
-                      <option value="Galería Suite La Vega">Galería Suite La Vega</option>
-                      <option value="Habitación Llano Grande">Habitación Llano Grande</option>
+                      <optgroup label="Mesas">
+                        {tableLocations.map(loc => (
+                          <option key={loc.slug} value={loc.label}>{loc.label}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Habitaciones y Cabañas">
+                        {roomLocations.map(loc => (
+                          <option key={loc.slug} value={loc.label}>{loc.label}</option>
+                        ))}
+                      </optgroup>
                     </select>
                   </div>
                   <div className="space-y-1">
@@ -878,35 +873,24 @@ const ComandasPage: React.FC = () => {
               {/* Controls (Hidden when printing) */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-2xl border border-gray-100 print:hidden">
                 <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Seleccionar Mesa / Cabaña</label>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Seleccionar Mesa / Habitación / Cabaña</label>
                   <select
-                    value={selectedQrTable}
+                    value={selectedQrLocationSlug}
                     onChange={e => {
-                      setSelectedQrTable(e.target.value)
+                      setSelectedQrLocationSlug(e.target.value)
                       setCopiedUrl(false)
                     }}
                     className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 bg-white focus:outline-none focus:border-[#C5A059]"
                   >
                     <optgroup label="Mesas Restaurante">
-                      <option value="Mesa 1">Mesa 1</option>
-                      <option value="Mesa 2">Mesa 2</option>
-                      <option value="Mesa 3">Mesa 3</option>
-                      <option value="Mesa 4">Mesa 4</option>
-                      <option value="Mesa 5">Mesa 5</option>
-                      <option value="Mesa 6">Mesa 6</option>
-                      <option value="Mesa 7">Mesa 7</option>
-                      <option value="Mesa 8">Mesa 8</option>
-                      <option value="Mesa 9">Mesa 9</option>
-                      <option value="Mesa 10">Mesa 10</option>
-                      <option value="Barra Restaurante">Barra Restaurante</option>
-                      <option value="Terraza Jardín">Terraza Jardín</option>
+                      {tableLocations.map(loc => (
+                        <option key={loc.slug} value={loc.slug}>{loc.label}</option>
+                      ))}
                     </optgroup>
-                    <optgroup label="Cabañas & Suites">
-                      <option value="Cabaña La Lomita">Cabaña La Lomita</option>
-                      <option value="Cabaña Mitibibó">Cabaña Mitibibó</option>
-                      <option value="Cabaña La Manita">Cabaña La Manita</option>
-                      <option value="Suite La Vega">Suite La Vega</option>
-                      <option value="Habitación Llano Grande">Habitación Llano Grande</option>
+                    <optgroup label="Habitaciones y Cabañas">
+                      {roomLocations.map(loc => (
+                        <option key={loc.slug} value={loc.slug}>{loc.label}</option>
+                      ))}
                     </optgroup>
                   </select>
                 </div>
@@ -931,12 +915,13 @@ const ComandasPage: React.FC = () => {
                     <span>URL para Grabar en Tag NFC:</span>
                   </div>
                   <code className="text-xs font-mono text-amber-900 bg-amber-100/80 px-2 py-1 rounded block truncate">
-                    {getTableNfcUrl(selectedQrTable, customDomain)}
+                    {selectedQrLocation ? getOrderingLocationUrl(selectedQrLocation, customDomain) : ''}
                   </code>
                 </div>
                 <button
                   onClick={() => {
-                    const url = getTableNfcUrl(selectedQrTable, customDomain)
+                    if (!selectedQrLocation) return
+                    const url = getOrderingLocationUrl(selectedQrLocation, customDomain)
                     navigator.clipboard.writeText(url)
                     setCopiedUrl(true)
                     setTimeout(() => setCopiedUrl(false), 2500)
@@ -961,15 +946,15 @@ const ComandasPage: React.FC = () => {
 
                   {/* QR Image */}
                   <div className="p-4 bg-white border-2 border-[#C5A059]/20 rounded-3xl shadow-inner mb-4">
-                    <img 
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(getTableNfcUrl(selectedQrTable, customDomain))}`} 
-                      alt={`QR Code ${selectedQrTable}`} 
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(selectedQrLocation ? getOrderingLocationUrl(selectedQrLocation, customDomain) : '')}`}
+                      alt={`QR Code ${selectedQrLocation?.label ?? ''}`}
                       className="w-52 h-52 object-contain"
                     />
                   </div>
 
                   <div className="bg-[#3D2B1F] text-[#C5A059] px-6 py-1.5 rounded-full font-bold text-sm uppercase tracking-widest mb-3 shadow-sm border border-[#C5A059]/30">
-                    {selectedQrTable}
+                    {selectedQrLocation?.label}
                   </div>
 
                   <div className="flex items-center gap-2 text-xs text-gray-700 font-bold mb-1">

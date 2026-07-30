@@ -40,17 +40,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   })
 
-  // On mount, restore the real Supabase session BEFORE letting protected pages query RLS-protected tables
+  // On mount, restore the real Supabase session BEFORE letting protected pages query RLS-protected tables.
+  // supabase-js already persists the session in localStorage, so we only need to check it (fast, no network
+  // round trip for password hashing) and fall back to signInWithPassword only if there's truly no session left.
   useEffect(() => {
     let active = true
     const restoreSession = async () => {
       const savedPin = localStorage.getItem('adminPin')
       if (savedPin && PINS[savedPin]) {
-        const user = PINS[savedPin]
-        await supabase.auth.signInWithPassword({
-          email: user.email,
-          password: user.pass,
-        }).catch(() => {})
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) {
+          const user = PINS[savedPin]
+          await supabase.auth.signInWithPassword({
+            email: user.email,
+            password: user.pass,
+          }).catch(() => {})
+        }
       }
       if (active) setSessionReady(true)
     }

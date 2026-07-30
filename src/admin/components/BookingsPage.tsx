@@ -3,7 +3,7 @@ import {
   Calendar, Users, Check, LogIn, LogOut, Trash2, Search, Plus, X, Phone, Mail,
   Info, DollarSign, Baby, Sparkles, RefreshCw, Printer
 } from 'lucide-react'
-import { accommodationOptions } from '../../data/accommodations'
+import { accommodationOptions, activeAccommodationOptions } from '../../data/accommodations'
 import { mockBookings } from '../data/mockBookings'
 import { supabase } from '../../lib/supabase'
 import type { Booking } from '../types'
@@ -76,6 +76,7 @@ interface DbBooking {
   payment_status?: string | null
   payment_method?: string | null
   status?: string | null
+  confirmed?: boolean | null
   special_notes?: string | null
   locator?: string | null
 }
@@ -110,8 +111,6 @@ const todayDate = new Date()
 const todayStr = formatLocalDate(todayDate)
 const defaultCheckOutStr = formatLocalDate(addDays(todayDate, 3))
 const todayLongLabel = todayDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })
-const currentMonthLabel = todayDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
-const currentMonthTitle = currentMonthLabel.charAt(0).toUpperCase() + currentMonthLabel.slice(1)
 
 // Mappers between DB format (snake_case) and React format (camelCase)
 const mapDbBookingToReact = (db: DbBooking): Booking => ({
@@ -133,6 +132,7 @@ const mapDbBookingToReact = (db: DbBooking): Booking => ({
   paymentStatus: (db.payment_status || 'pendiente') as 'completo' | 'parcial' | 'pendiente',
   paymentMethod: (db.payment_method || 'transferencia') as 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque',
   status: (db.status || 'confirmado') as 'checkout_hoy' | 'checkin_hoy' | 'ocupado' | 'confirmado' | 'limpieza',
+  confirmed: db.confirmed ?? true,
   specialNotes: db.special_notes || '',
   locator: db.locator || ''
 })
@@ -146,10 +146,31 @@ const calculateNights = (startStr: string, endStr: string) => {
   return diffDays > 0 ? diffDays : 1
 }
 
-const getPaymentColorClasses = (paymentStatus: string) => {
-  if (paymentStatus === 'completo') return { bg: 'bg-emerald-500/10 border-emerald-300 text-emerald-900', bullet: 'bg-emerald-500', text: 'text-emerald-600', badge: 'bg-emerald-100 border-emerald-300 text-emerald-800' }
-  if (paymentStatus === 'parcial') return { bg: 'bg-blue-500/10 border-blue-300 text-blue-900', bullet: 'bg-blue-500', text: 'text-blue-600', badge: 'bg-blue-100 border-blue-300 text-blue-800' }
-  return { bg: 'bg-orange-500/10 border-orange-300 text-orange-900', bullet: 'bg-orange-500', text: 'text-orange-600', badge: 'bg-orange-100 border-orange-300 text-orange-800' }
+// Paleta calcada de Paxer (el software que la clienta ya usa) para que el color de cada
+// reserva se vea igual en ambos sistemas: Reservado (azul cielo) → Sin pago (azul) →
+// Pago parcial (naranja) → Pagado (verde).
+type EffectivePaymentState = 'reservado' | 'sin_pago' | 'parcial' | 'pagado'
+
+const getEffectivePaymentState = (booking: Pick<Booking, 'confirmed' | 'paymentStatus'>): EffectivePaymentState => {
+  if (!booking.confirmed) return 'reservado'
+  if (booking.paymentStatus === 'completo') return 'pagado'
+  if (booking.paymentStatus === 'parcial') return 'parcial'
+  return 'sin_pago'
+}
+
+const paymentStateLabels: Record<EffectivePaymentState, string> = {
+  reservado: 'Reservado',
+  sin_pago: 'Sin Pago',
+  parcial: 'Pago Parcial',
+  pagado: 'Pagado'
+}
+
+const getPaymentColorClasses = (booking: Pick<Booking, 'confirmed' | 'paymentStatus'>) => {
+  const state = getEffectivePaymentState(booking)
+  if (state === 'pagado') return { bg: 'bg-emerald-500/10 border-emerald-300 text-emerald-900', bullet: 'bg-emerald-500', text: 'text-emerald-600', badge: 'bg-emerald-100 border-emerald-300 text-emerald-800' }
+  if (state === 'parcial') return { bg: 'bg-orange-500/10 border-orange-300 text-orange-900', bullet: 'bg-orange-500', text: 'text-orange-600', badge: 'bg-orange-100 border-orange-300 text-orange-800' }
+  if (state === 'sin_pago') return { bg: 'bg-blue-500/10 border-blue-400 text-blue-900', bullet: 'bg-blue-600', text: 'text-blue-700', badge: 'bg-blue-100 border-blue-400 text-blue-900' }
+  return { bg: 'bg-sky-500/10 border-sky-300 text-sky-900', bullet: 'bg-sky-400', text: 'text-sky-600', badge: 'bg-sky-100 border-sky-300 text-sky-800' }
 }
 
 export default function BookingsPage() {
@@ -160,7 +181,12 @@ export default function BookingsPage() {
   const [activeTab, setActiveTab] = useState<'dia' | 'semana' | 'mes'>('dia')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
-  
+  const [weekAnchor, setWeekAnchor] = useState(() => new Date(todayDate))
+  const [monthAnchor, setMonthAnchor] = useState(() => new Date(todayDate.getFullYear(), todayDate.getMonth(), 1))
+  const [mesMode, setMesMode] = useState<'mes' | 'personalizado'>('mes')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
+
   // Modals
   const [showAddModal, setShowAddModal] = useState(false)
 
@@ -213,10 +239,10 @@ export default function BookingsPage() {
       if (!acc) return 0
       roomPrice = acc.price
       if (isDecember) {
-        if (accId === 1 || accId === 6 || accId === 7) roomPrice = 158
+        if (accId === 1 || accId === 6 || accId === 7 || accId === 50 || accId === 51 || accId === 52) roomPrice = 158
         else if (accId === 2 || accId === 4) roomPrice = 337
-        else if (accId === 5) roomPrice = 76
-        else if (accId === 3) roomPrice = 70
+        else if (accId >= 30 && accId <= 35) roomPrice = 70 // Galería La Manita (habitaciones 1-6)
+        else if (accId >= 36 && accId <= 41) roomPrice = 76 // Galería Llano Grande (habitaciones 7-12)
       }
     }
     
@@ -343,7 +369,7 @@ export default function BookingsPage() {
 
   // 1. Dynamic states calculation for TODAY's Day View
   const cabinStatesToday = useMemo(() => {
-    return accommodationOptions.map(acc => {
+    return activeAccommodationOptions.map(acc => {
       // Find any booking affecting this cabin today
       // A booking occupies checkIn (inclusive) to checkOut (exclusive) or is checked out today
       const todayBooking = bookings.find(b => {
@@ -374,11 +400,11 @@ export default function BookingsPage() {
     })
   }, [bookings])
 
-  // 2. Weekly grid calculation (Next 7 days starting today)
+  // 2. Weekly grid calculation (7 days starting from weekAnchor, navigable)
   const weekDays = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(todayDate)
-      d.setDate(todayDate.getDate() + i)
+      const d = new Date(weekAnchor)
+      d.setDate(weekAnchor.getDate() + i)
       const yr = d.getFullYear()
       const mo = String(d.getMonth() + 1).padStart(2, '0')
       const dy = String(d.getDate()).padStart(2, '0')
@@ -390,7 +416,21 @@ export default function BookingsPage() {
         monthLabel: d.toLocaleDateString('es-ES', { month: 'short' })
       }
     })
-  }, [])
+  }, [weekAnchor])
+
+  const weekRangeLabel = useMemo(() => {
+    const start = weekDays[0]
+    const end = weekDays[6]
+    if (!start || !end) return ''
+    const startD = new Date(start.dateStr)
+    const endD = new Date(end.dateStr)
+    return `${startD.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} - ${endD.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}`
+  }, [weekDays])
+
+  const monthAnchorLabel = useMemo(() => {
+    const label = monthAnchor.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
+    return label.charAt(0).toUpperCase() + label.slice(1)
+  }, [monthAnchor])
 
   // 3. Filters and Search Results
   const filteredBookings = useMemo(() => {
@@ -404,20 +444,42 @@ export default function BookingsPage() {
     })
   }, [bookings, searchQuery])
 
+  // 3.b. "Mes" tab list: further narrowed to the selected month, or a custom date range
+  const monthListBookings = useMemo(() => {
+    let rangeStart: string | null = null
+    let rangeEnd: string | null = null
+
+    if (mesMode === 'personalizado') {
+      if (!customFrom || !customTo) return []
+      rangeStart = customFrom
+      rangeEnd = customTo
+    } else {
+      const y = monthAnchor.getFullYear()
+      const m = monthAnchor.getMonth()
+      rangeStart = `${y}-${String(m + 1).padStart(2, '0')}-01`
+      const lastDay = new Date(y, m + 1, 0).getDate()
+      rangeEnd = `${y}-${String(m + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+    }
+
+    return filteredBookings.filter(b => b.checkIn <= rangeEnd! && b.checkOut >= rangeStart!)
+  }, [filteredBookings, mesMode, monthAnchor, customFrom, customTo])
+
   const reportDateText = activeTab === 'dia'
     ? `Hoy, ${todayLongLabel}`
     : activeTab === 'semana'
-      ? `Semana del ${todayLongLabel}`
-      : `Mes de ${currentMonthTitle}`
+      ? `Semana del ${weekRangeLabel}`
+      : mesMode === 'personalizado'
+        ? `Del ${customFrom || '—'} al ${customTo || '—'}`
+        : `Mes de ${monthAnchorLabel}`
 
   // Memoized monthly revenue total (avoids inline reduce on every render)
   const totalMonthlyRevenue = useMemo(() => {
-    return bookings.reduce((s, b) => s + b.totalAmount, 0)
-  }, [bookings])
+    return monthListBookings.reduce((s, b) => s + b.totalAmount, 0)
+  }, [monthListBookings])
 
   // Key stats today
   const stats = useMemo(() => {
-    const totalCabins = accommodationOptions.length
+    const totalCabins = activeAccommodationOptions.length
     const occupied = cabinStatesToday.filter(c => c.status === 'ocupado').length
     const checkins = cabinStatesToday.filter(c => c.status === 'checkin_hoy').length
     const checkouts = cabinStatesToday.filter(c => c.status === 'checkout_hoy').length
@@ -513,6 +575,20 @@ export default function BookingsPage() {
     setSelectedBooking(null)
   }
 
+  const handleConfirmBooking = async (bookingId: string) => {
+    const { error } = await supabase
+      .from('bookings')
+      .update({ confirmed: true })
+      .eq('id', bookingId)
+
+    if (error) {
+      console.error('Error confirming booking:', error)
+    } else {
+      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, confirmed: true } : b))
+      setSelectedBooking(prev => prev && prev.id === bookingId ? { ...prev, confirmed: true } : prev)
+    }
+  }
+
   const handleAddBooking = async () => {
     if (!form.guestName.trim()) return
 
@@ -554,6 +630,7 @@ export default function BookingsPage() {
         : Number(form.amountPaid) > 0 ? 'parcial' : 'pendiente',
       payment_method: form.paymentMethod,
       status: initialStatus,
+      confirmed: true, // reserva creada directamente por el staff, no requiere revisión aparte
       special_notes: form.specialNotes.trim() || null,
       locator: locatorCode
     }
@@ -729,7 +806,7 @@ export default function BookingsPage() {
             if (['checkin_hoy', 'checkout_hoy', 'disponible', 'limpieza'].includes(status)) {
               badgeBg = 'bg-white border-gray-200 text-gray-800 shadow-sm'
             } else if (booking) {
-              badgeBg = getPaymentColorClasses(booking.paymentStatus).badge
+              badgeBg = getPaymentColorClasses(booking).badge
             }
 
             return (
@@ -838,11 +915,7 @@ export default function BookingsPage() {
                     {status === 'ocupado' && booking && (
                       <button
                         onClick={() => setSelectedBooking(booking)}
-                        className={`w-full py-3 font-bold rounded-xl text-xs uppercase tracking-wider transition-all border ${
-                          booking.paymentStatus === 'completo' ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200' :
-                          booking.paymentStatus === 'parcial' ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200' :
-                          'bg-orange-50 hover:bg-orange-100 text-orange-700 border-orange-200'
-                        }`}
+                        className={`w-full py-3 font-bold rounded-xl text-xs uppercase tracking-wider transition-all border ${getPaymentColorClasses(booking).badge}`}
                       >
                         Ver Detalles
                       </button>
@@ -879,6 +952,38 @@ export default function BookingsPage() {
       {/* TAB B: SEMANA VIEW (Highly intuitive visual board / Gantt-like) */}
       {activeTab === 'semana' && (
         <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-3 border-b border-gray-100 bg-gray-50/40">
+            <div className="flex flex-wrap items-center gap-4">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Estatus de reserva</span>
+              {(['reservado', 'sin_pago', 'parcial', 'pagado'] as const).map(state => (
+                <div key={state} className="flex items-center gap-1.5">
+                  <span className={`w-2.5 h-2.5 rounded-full ${getPaymentColorClasses({ confirmed: state !== 'reservado', paymentStatus: state === 'pagado' ? 'completo' : state === 'parcial' ? 'parcial' : 'pendiente' }).bullet}`} />
+                  <span className="text-[10px] font-semibold text-gray-500">{paymentStateLabels[state]}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setWeekAnchor(d => { const n = new Date(d); n.setDate(n.getDate() - 7); return n })}
+                className="p-1.5 rounded-lg border border-gray-200 hover:bg-white text-gray-500"
+              >
+                ←
+              </button>
+              <span className="text-xs font-bold text-gray-700 min-w-[140px] text-center">{weekRangeLabel}</span>
+              <button
+                onClick={() => setWeekAnchor(d => { const n = new Date(d); n.setDate(n.getDate() + 7); return n })}
+                className="p-1.5 rounded-lg border border-gray-200 hover:bg-white text-gray-500"
+              >
+                →
+              </button>
+              <button
+                onClick={() => setWeekAnchor(new Date(todayDate))}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-white text-[10px] font-bold text-gray-500 uppercase tracking-wider"
+              >
+                Hoy
+              </button>
+            </div>
+          </div>
           <div className="overflow-x-auto">
             <div className="min-w-[800px] divide-y divide-gray-100">
               {/* Header row (Dates) */}
@@ -906,7 +1011,7 @@ export default function BookingsPage() {
               </div>
 
               {/* Rows per Cabin */}
-              {accommodationOptions.map(acc => (
+              {activeAccommodationOptions.map(acc => (
                 <div key={acc.id} className="flex hover:bg-gray-50/40 transition-colors">
                   {/* Cabin Details Info */}
                   <div className="w-56 shrink-0 p-4 border-r border-gray-100 flex items-center gap-3">
@@ -940,10 +1045,10 @@ export default function BookingsPage() {
                           {currentBooking ? (
                             <button
                               onClick={() => setSelectedBooking(currentBooking)}
-                              className={`w-full h-full rounded-2xl p-2 text-left flex flex-col justify-between border transition-all hover:brightness-95 active:scale-98 ${getPaymentColorClasses(currentBooking.paymentStatus).bg}`}
+                              className={`w-full h-full rounded-2xl p-2 text-left flex flex-col justify-between border transition-all hover:brightness-95 active:scale-98 ${getPaymentColorClasses(currentBooking).bg}`}
                             >
                               <div className="flex items-center gap-1">
-                                <span className={`w-1.5 h-1.5 rounded-full ${getPaymentColorClasses(currentBooking.paymentStatus).bullet} shrink-0`} />
+                                <span className={`w-1.5 h-1.5 rounded-full ${getPaymentColorClasses(currentBooking).bullet} shrink-0`} />
                                 <span className="text-[10px] font-extrabold truncate max-w-full block leading-none">
                                   {currentBooking.guestName.split(' ')[0]}
                                 </span>
@@ -955,15 +1060,15 @@ export default function BookingsPage() {
                           ) : checkOutBooking ? (
                             <button
                               onClick={() => setSelectedBooking(checkOutBooking)}
-                              className={`w-full h-full rounded-2xl p-2 text-left flex flex-col justify-between border transition-all hover:brightness-95 ${getPaymentColorClasses(checkOutBooking.paymentStatus).bg}`}
+                              className={`w-full h-full rounded-2xl p-2 text-left flex flex-col justify-between border transition-all hover:brightness-95 ${getPaymentColorClasses(checkOutBooking).bg}`}
                             >
                               <div className="flex items-center gap-1">
-                                <span className={`w-1.5 h-1.5 rounded-full ${getPaymentColorClasses(checkOutBooking.paymentStatus).bullet} shrink-0`} />
+                                <span className={`w-1.5 h-1.5 rounded-full ${getPaymentColorClasses(checkOutBooking).bullet} shrink-0`} />
                                 <span className="text-[10px] font-extrabold truncate block leading-none">
                                   Sale: {checkOutBooking.guestName.split(' ')[0]}
                                 </span>
                               </div>
-                              <span className={`text-[8px] font-bold ${getPaymentColorClasses(checkOutBooking.paymentStatus).text}`}>Checkout Hoy</span>
+                              <span className={`text-[8px] font-bold ${getPaymentColorClasses(checkOutBooking).text}`}>Checkout Hoy</span>
                             </button>
                           ) : (
                             // Empty cell (available)
@@ -991,17 +1096,77 @@ export default function BookingsPage() {
       {/* TAB C: MES VIEW (Month Analytics & Detailed Lists) */}
       {activeTab === 'mes' && (
         <div className="space-y-6">
+          {/* Period navigation */}
+          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+            {mesMode === 'mes' ? (
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => { setMonthAnchor(d => new Date(d.getFullYear(), d.getMonth() - 1, 1)); setMonthPage(1) }}
+                  className="p-2 rounded-xl border border-gray-200 hover:bg-gray-50 text-gray-500"
+                >
+                  ←
+                </button>
+                <span className="text-sm font-bold text-gray-800 min-w-[160px] text-center">{monthAnchorLabel}</span>
+                <button
+                  onClick={() => { setMonthAnchor(d => new Date(d.getFullYear(), d.getMonth() + 1, 1)); setMonthPage(1) }}
+                  className="p-2 rounded-xl border border-gray-200 hover:bg-gray-50 text-gray-500"
+                >
+                  →
+                </button>
+                <button
+                  onClick={() => { setMonthAnchor(new Date(todayDate.getFullYear(), todayDate.getMonth(), 1)); setMonthPage(1) }}
+                  className="px-3 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wider"
+                >
+                  Hoy
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Desde</label>
+                <input
+                  type="date"
+                  value={customFrom}
+                  onChange={e => { setCustomFrom(e.target.value); setMonthPage(1) }}
+                  className="border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059]"
+                />
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Hasta</label>
+                <input
+                  type="date"
+                  value={customTo}
+                  onChange={e => { setCustomTo(e.target.value); setMonthPage(1) }}
+                  className="border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059]"
+                />
+              </div>
+            )}
+            <div className="flex rounded-xl overflow-hidden border border-gray-200 text-xs font-bold uppercase tracking-wider">
+              <button
+                onClick={() => { setMesMode('mes'); setMonthPage(1) }}
+                className={`px-4 py-2 transition-colors ${mesMode === 'mes' ? 'bg-[#3D2B1F] text-white' : 'text-gray-400 hover:bg-gray-50'}`}
+              >
+                Por Mes
+              </button>
+              <button
+                onClick={() => { setMesMode('personalizado'); setMonthPage(1) }}
+                className={`px-4 py-2 transition-colors ${mesMode === 'personalizado' ? 'bg-[#3D2B1F] text-white' : 'text-gray-400 hover:bg-gray-50'}`}
+              >
+                Rango Personalizado
+              </button>
+            </div>
+          </div>
+
           {/* Monthly KPI card summaries */}
           <div className="bg-white rounded-[2.5rem] p-6 shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-4 gap-6">
             <div className="text-center md:text-left">
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Periodo</span>
-              <h3 className="text-2xl font-bold font-serif text-gray-800 mt-1">{currentMonthTitle}</h3>
+              <h3 className="text-2xl font-bold font-serif text-gray-800 mt-1">
+                {mesMode === 'personalizado' ? (customFrom && customTo ? `${customFrom} → ${customTo}` : 'Selecciona un rango') : monthAnchorLabel}
+              </h3>
               <p className="text-xs text-gray-400 mt-0.5">Estadísticas estimadas</p>
             </div>
-            
+
             <div className="flex flex-col justify-center border-t md:border-t-0 md:border-l border-gray-100 pt-4 md:pt-0 md:pl-6">
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Reservas del Mes</span>
-              <p className="text-2xl font-bold text-[#C5A059] mt-1">{bookings.length} Reservas</p>
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Reservas del Periodo</span>
+              <p className="text-2xl font-bold text-[#C5A059] mt-1">{monthListBookings.length} Reservas</p>
               <p className="text-xs text-gray-400 mt-0.5">Ocupación total programada</p>
             </div>
 
@@ -1022,7 +1187,7 @@ export default function BookingsPage() {
           <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <h3 className="text-sm font-bold text-gray-700 uppercase tracking-widest">Lista Detallada de Reservas</h3>
-              <span className="text-xs text-gray-400 font-medium">Mostrando {Math.min(monthPage * PAGE_SIZE, filteredBookings.length)} de {filteredBookings.length} reservas</span>
+              <span className="text-xs text-gray-400 font-medium">Mostrando {Math.min(monthPage * PAGE_SIZE, monthListBookings.length)} de {monthListBookings.length} reservas</span>
             </div>
 
             <div className="overflow-x-auto">
@@ -1038,15 +1203,19 @@ export default function BookingsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {filteredBookings.length === 0 ? (
+                  {monthListBookings.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="text-center py-16">
                         <Calendar size={32} className="text-gray-200 mx-auto mb-3" />
-                        <p className="text-sm text-gray-400 font-medium">No se encontraron reservas coincidentes</p>
+                        <p className="text-sm text-gray-400 font-medium">
+                          {mesMode === 'personalizado' && (!customFrom || !customTo)
+                            ? 'Selecciona una fecha de inicio y fin.'
+                            : 'No se encontraron reservas en este periodo.'}
+                        </p>
                       </td>
                     </tr>
                   ) : (
-                    filteredBookings.slice((monthPage - 1) * PAGE_SIZE, monthPage * PAGE_SIZE).map(b => {
+                    monthListBookings.slice((monthPage - 1) * PAGE_SIZE, monthPage * PAGE_SIZE).map(b => {
                       const acc = getAccommodation(b.accommodationId)
                       const conf = statusConfig[b.status]
                       return (
@@ -1094,8 +1263,8 @@ export default function BookingsPage() {
                           </td>
                           <td className="px-6 py-4 text-right">
                             <span className="text-sm font-bold text-gray-900">{fmt(b.totalAmount)}</span>
-                            <span className={`block text-[9px] font-bold mt-0.5 ${b.paymentStatus === 'completo' ? 'text-emerald-600' : b.paymentStatus === 'parcial' ? 'text-amber-500' : 'text-rose-500'}`}>
-                              {b.paymentStatus === 'completo' ? 'PAGADO' : b.paymentStatus === 'parcial' ? 'ABONADO' : 'PENDIENTE'}
+                            <span className={`block text-[9px] font-bold mt-0.5 ${getPaymentColorClasses(b).text}`}>
+                              {paymentStateLabels[getEffectivePaymentState(b)].toUpperCase()}
                             </span>
                           </td>
                         </tr>
@@ -1107,7 +1276,7 @@ export default function BookingsPage() {
             </div>
 
             {/* Pagination Controls */}
-            {filteredBookings.length > PAGE_SIZE && (
+            {monthListBookings.length > PAGE_SIZE && (
               <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between">
                 <button
                   onClick={() => setMonthPage(p => Math.max(1, p - 1))}
@@ -1117,11 +1286,11 @@ export default function BookingsPage() {
                   ← Anterior
                 </button>
                 <span className="text-xs font-semibold text-gray-500">
-                  Página {monthPage} de {Math.ceil(filteredBookings.length / PAGE_SIZE)}
+                  Página {monthPage} de {Math.ceil(monthListBookings.length / PAGE_SIZE)}
                 </span>
                 <button
-                  onClick={() => setMonthPage(p => Math.min(Math.ceil(filteredBookings.length / PAGE_SIZE), p + 1))}
-                  disabled={monthPage >= Math.ceil(filteredBookings.length / PAGE_SIZE)}
+                  onClick={() => setMonthPage(p => Math.min(Math.ceil(monthListBookings.length / PAGE_SIZE), p + 1))}
+                  disabled={monthPage >= Math.ceil(monthListBookings.length / PAGE_SIZE)}
                   className="px-4 py-2 border border-gray-200 rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95"
                 >
                   Siguiente →
@@ -1151,6 +1320,10 @@ export default function BookingsPage() {
                     )}
                   </div>
                   <h2 className="text-xl font-bold font-serif text-gray-800 mt-1">Detalle del Huésped</h2>
+                  <span className={`inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full border text-[9px] font-extrabold uppercase tracking-widest ${getPaymentColorClasses(selectedBooking).badge}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${getPaymentColorClasses(selectedBooking).bullet}`} />
+                    {paymentStateLabels[getEffectivePaymentState(selectedBooking)]}
+                  </span>
                 </div>
                 <button
                   onClick={() => setSelectedBooking(null)}
@@ -1265,6 +1438,15 @@ export default function BookingsPage() {
 
             {/* Quick Actions Drawer Footer */}
             <div className="border-t border-gray-100 pt-4 space-y-2">
+              {!selectedBooking.confirmed && (
+                <button
+                  onClick={() => handleConfirmBooking(selectedBooking.id)}
+                  className="w-full flex items-center justify-center gap-1.5 py-3.5 bg-sky-500 hover:bg-sky-600 text-white font-bold rounded-2xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-lg shadow-sky-500/10"
+                >
+                  <Check size={15} /> Confirmar Reserva
+                </button>
+              )}
+
               {selectedBooking.status === 'checkin_hoy' && (
                 <button
                   onClick={() => handleCheckIn(selectedBooking.id)}
@@ -1406,7 +1588,7 @@ export default function BookingsPage() {
                     }}
                     className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white"
                   >
-                    {accommodationOptions.map(acc => (
+                    {activeAccommodationOptions.map(acc => (
                       <option key={acc.id} value={acc.id}>{acc.title} ({acc.type} - ${acc.price}/noche)</option>
                     ))}
                   </select>
