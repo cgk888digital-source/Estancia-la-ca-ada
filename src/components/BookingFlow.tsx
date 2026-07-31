@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, X, Users, Dog, Calendar as CalendarIcon, Award, Check } from 'lucide-react';
-import { activeAccommodationOptions } from '../data/accommodations';
+import { activeAccommodationOptions, getMaxCapacity } from '../data/accommodations';
 import { supabase } from '../lib/supabase';
 import { getBcvEuroRate } from '../utils/exchangeRate';
 import { useHotelSettings } from '../utils/useHotelSettings';
@@ -274,22 +274,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
 
   const isDecember = selectedDates.start ? getSeason(selectedDates.start) === 'dec' : false;
 
-  const getRoomMaxCapacity = (roomId: number): number => {
-    switch (roomId) {
-      case 1: case 50: case 51: return 6; // Suite 6p (Hab. 13/14, 15/16)
-      case 6: case 52: return 5; // Suite 5p (Hab. 17/18, 19/20)
-      case 7: return 4; // Suite 4p (Hab. 21)
-      case 2: return 10; // Cabaña La Lomita
-      case 4: return 9; // Cabaña Mitibibo
-      case 30: case 35:
-        return 2; // Galería La Manita (habitaciones 1 y 6, matrimonial sola)
-      case 31: case 32: case 33: case 34:
-        return 4; // Galería La Manita (habitaciones 2-5, Queen + litera)
-      case 36: case 37: case 38: case 39: case 40: case 41:
-        return 4; // Galería Llano Grande (habitaciones 7-12)
-      default: return 0;
-    }
-  };
+  // Capacidad numérica: siempre desde accommodations.ts (getMaxCapacity), nunca duplicada aquí.
+  const getRoomMaxCapacity = getMaxCapacity;
 
   const selectedCapacity = selectedUnits.reduce((acc, id) => acc + getRoomMaxCapacity(id), 0);
   const totalOccupants = occupants.adults + occupants.children;

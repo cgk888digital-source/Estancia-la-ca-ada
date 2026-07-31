@@ -3,7 +3,7 @@ import {
   Calendar, Users, Check, LogIn, LogOut, Trash2, Search, Plus, X, Phone, Mail,
   Info, DollarSign, Baby, Sparkles, RefreshCw, Printer
 } from 'lucide-react'
-import { accommodationOptions, activeAccommodationOptions } from '../../data/accommodations'
+import { accommodationOptions, activeAccommodationOptions, getMaxCapacity } from '../../data/accommodations'
 import { mockBookings } from '../data/mockBookings'
 import { supabase } from '../../lib/supabase'
 import type { Booking } from '../types'
@@ -607,7 +607,14 @@ export default function BookingsPage() {
       return
     }
 
-    const finalTotal = useCustomRate 
+    const maxCapacity = getMaxCapacity(Number(form.accommodationId))
+    const totalGuests = Number(form.adults) + Number(form.children)
+    if (maxCapacity > 0 && totalGuests > maxCapacity) {
+      alert(`Error: Capacidad excedida. Esta habitación/cabaña admite hasta ${maxCapacity} personas (adultos + niños) y se ingresaron ${totalGuests}.`)
+      return
+    }
+
+    const finalTotal = useCustomRate
       ? (discountPercent > 0 ? Math.round(standardRate * (1 - discountPercent / 100)) : form.totalAmount)
       : standardRate
 
@@ -834,7 +841,7 @@ export default function BookingsPage() {
                       {accommodation.type}
                     </span>
                     <h3 className="text-xl font-bold font-serif text-white leading-tight">
-                      {accommodation.title}
+                      {accommodation.title} <span className="text-white/70 font-sans font-semibold text-sm">({accommodation.maxCapacity} pax)</span>
                     </h3>
                   </div>
                 </div>
@@ -1021,7 +1028,7 @@ export default function BookingsPage() {
                       className="w-12 h-12 object-cover rounded-xl bg-gray-100 shrink-0"
                     />
                     <div className="min-w-0">
-                      <h4 className="text-sm font-bold text-gray-800 truncate leading-tight">{acc.title}</h4>
+                      <h4 className="text-sm font-bold text-gray-800 truncate leading-tight">{acc.title} <span className="text-gray-400 font-medium">({acc.maxCapacity} pax)</span></h4>
                       <span className="text-[9px] uppercase tracking-widest text-[#C5A059] font-bold block mt-0.5">{acc.type}</span>
                     </div>
                   </div>
@@ -1581,15 +1588,15 @@ export default function BookingsPage() {
                     value={form.accommodationId}
                     onChange={e => {
                       const id = Number(e.target.value)
-                      setForm(f => ({ 
-                        ...f, 
+                      setForm(f => ({
+                        ...f,
                         accommodationId: id
                       }))
                     }}
                     className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white"
                   >
                     {activeAccommodationOptions.map(acc => (
-                      <option key={acc.id} value={acc.id}>{acc.title} ({acc.type} - ${acc.price}/noche)</option>
+                      <option key={acc.id} value={acc.id}>{acc.title} ({acc.type} - ${acc.price}/noche) — Máx. {acc.maxCapacity} pax</option>
                     ))}
                   </select>
                 </div>
@@ -1642,6 +1649,16 @@ export default function BookingsPage() {
                     <div className="bg-rose-50 border border-rose-100 text-rose-800 text-xs p-3.5 rounded-2xl flex flex-col gap-0.5 animate-pulse">
                       <span className="font-bold">⚠️ Conflicto de Fechas Encontrado</span>
                       <span>La cabaña ya está reservada por <strong>"{collision.guestName}"</strong> del <strong>{collision.checkIn}</strong> al <strong>{collision.checkOut}</strong>.</span>
+                    </div>
+                  )
+                }
+                const maxCapacity = getMaxCapacity(Number(form.accommodationId))
+                const totalGuests = Number(form.adults) + Number(form.children)
+                if (maxCapacity > 0 && totalGuests > maxCapacity) {
+                  return (
+                    <div className="bg-rose-50 border border-rose-100 text-rose-800 text-xs p-3.5 rounded-2xl flex flex-col gap-0.5 animate-fade-in">
+                      <span className="font-bold">⚠️ Capacidad Excedida</span>
+                      <span>Esta habitación/cabaña admite hasta <strong>{maxCapacity} personas</strong> (adultos + niños) y se ingresaron <strong>{totalGuests}</strong>.</span>
                     </div>
                   )
                 }
@@ -1808,9 +1825,10 @@ export default function BookingsPage() {
                 type="button"
                 onClick={handleAddBooking}
                 disabled={
-                  !form.guestName.trim() || 
-                  form.checkOut <= form.checkIn || 
-                  bookings.some(b => b.accommodationId === Number(form.accommodationId) && form.checkIn < b.checkOut && form.checkOut > b.checkIn)
+                  !form.guestName.trim() ||
+                  form.checkOut <= form.checkIn ||
+                  bookings.some(b => b.accommodationId === Number(form.accommodationId) && form.checkIn < b.checkOut && form.checkOut > b.checkIn) ||
+                  (getMaxCapacity(Number(form.accommodationId)) > 0 && (Number(form.adults) + Number(form.children)) > getMaxCapacity(Number(form.accommodationId)))
                 }
                 className="flex-1 py-3 bg-[#C5A059] hover:bg-[#b8904a] text-white font-bold rounded-2xl text-xs uppercase tracking-wider disabled:opacity-40 transition-all flex items-center justify-center gap-1.5 active:scale-95"
               >
