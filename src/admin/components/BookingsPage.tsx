@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import {
   Calendar, Users, Check, LogIn, LogOut, Trash2, Search, Plus, X, Phone, Mail,
   Info, DollarSign, Baby, Sparkles, RefreshCw, Printer
@@ -181,11 +181,17 @@ export default function BookingsPage() {
   const [activeTab, setActiveTab] = useState<'dia' | 'semana' | 'mes'>('dia')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
+  const [editingAccommodation, setEditingAccommodation] = useState(false)
   const [weekAnchor, setWeekAnchor] = useState(() => new Date(todayDate))
   const [monthAnchor, setMonthAnchor] = useState(() => new Date(todayDate.getFullYear(), todayDate.getMonth(), 1))
   const [mesMode, setMesMode] = useState<'mes' | 'personalizado'>('mes')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
+  const [dragInfo, setDragInfo] = useState<{ bookingId: string; mode: 'move' | 'resize-left' | 'resize-right' } | null>(null)
+  const [dragOverCell, setDragOverCell] = useState<string | null>(null)
+  // Seleccionar un rango vacío arrastrando (mousedown en un día + hasta soltar en otro) para
+  // abrir "Nueva Reserva" con check-in/check-out ya llenos, igual que en Paxer.
+  const [rangeSelect, setRangeSelect] = useState<{ accId: number; startDateStr: string; endDateStr: string } | null>(null)
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false)
@@ -209,7 +215,7 @@ export default function BookingsPage() {
     babies: 0,
     pets: 0,
     totalAmount: 180,
-    amountPaid: 90,
+    amountPaid: 0,
     paymentMethod: 'transferencia' as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque',
     specialNotes: ''
   })
@@ -271,7 +277,7 @@ export default function BookingsPage() {
       babies: 0,
       pets: 0,
       totalAmount: 180,
-      amountPaid: 90,
+      amountPaid: 0,
       paymentMethod: 'transferencia',
       specialNotes: ''
     })
@@ -319,6 +325,28 @@ export default function BookingsPage() {
 
     return () => clearTimeout(timer)
   }, [form.guestName, shouldShowGuestSuggestions])
+
+  // Al soltar el mouse tras seleccionar un rango de días vacíos en la Semana, abre
+  // "Nueva Reserva" con el check-in/check-out ya llenos según lo seleccionado.
+  useEffect(() => {
+    if (!rangeSelect) return
+
+    const handleMouseUp = () => {
+      const [fromStr, toStr] = rangeSelect.startDateStr <= rangeSelect.endDateStr
+        ? [rangeSelect.startDateStr, rangeSelect.endDateStr]
+        : [rangeSelect.endDateStr, rangeSelect.startDateStr]
+      const checkOutStr = formatLocalDate(addDays(new Date(toStr), 1))
+
+      openAddModal()
+      setForm(f => ({ ...f, accommodationId: rangeSelect.accId, checkIn: fromStr, checkOut: checkOutStr }))
+      setRangeSelect(null)
+    }
+
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => window.removeEventListener('mouseup', handleMouseUp)
+  }, [rangeSelect])
+
+  const dragOverCellRef = useRef<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -588,6 +616,131 @@ export default function BookingsPage() {
       setSelectedBooking(prev => prev && prev.id === bookingId ? { ...prev, confirmed: true } : prev)
     }
   }
+
+  // Arrastrar una reserva en la vista Semana: mover el bloque completo o estirar un borde
+  // para cambiar solo el check-in o el check-out. Valida colisión antes de guardar.
+  // Núcleo compartido: valida capacidad + colisión y persiste un cambio de fechas y/o
+  // de habitación/cabaña asignada. Lo usan tanto el arrastre en la Semana como el
+  // desplegable de "cambiar habitación" en el detalle de la reserva.
+  const reassignBooking = async (bookingId: string, newAccId: number, newCheckIn: string, newCheckOut: string) => {
+    const booking = bookings.find(b => b.id === bookingId)
+    if (!booking) return false
+
+    if (newAccId !== booking.accommodationId) {
+      const maxCapacity = getMaxCapacity(newAccId)
+      const totalGuests = booking.guestsCount.adults + booking.guestsCount.children
+      if (maxCapacity > 0 && totalGuests > maxCapacity) {
+        alert(`Error: Capacidad excedida. Esa habitación/cabaña admite hasta ${maxCapacity} personas y esta reserva tiene ${totalGuests}.`)
+        return false
+      }
+    }
+
+    const collision = bookings.find(b =>
+      b.id !== bookingId &&
+      b.accommodationId === newAccId &&
+      newCheckIn < b.checkOut && newCheckOut > b.checkIn
+    )
+    if (collision) {
+      alert(`Error: Conflicto de fechas. Ya está reservada por "${collision.guestName}" del ${collision.checkIn} al ${collision.checkOut}.`)
+      return false
+    }
+
+    const { error } = await supabase
+      .from('bookings')
+      .update({ accommodation_id: newAccId, check_in: newCheckIn, check_out: newCheckOut })
+      .eq('id', bookingId)
+
+    if (error) {
+      console.error('Error reassigning booking:', error)
+      alert('Error al actualizar la reserva. Intenta de nuevo.')
+      return false
+    }
+
+    setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, accommodationId: newAccId, checkIn: newCheckIn, checkOut: newCheckOut } : b))
+    setSelectedBooking(prev => prev && prev.id === bookingId ? { ...prev, accommodationId: newAccId, checkIn: newCheckIn, checkOut: newCheckOut } : prev)
+    return true
+  }
+
+  const handleDropOnCell = async (accId: number, dropDateStr: string) => {
+    if (!dragInfo) return
+    const info = dragInfo
+    setDragInfo(null)
+    setDragOverCell(null)
+
+    const booking = bookings.find(b => b.id === info.bookingId)
+    if (!booking) return
+
+    let newCheckIn = booking.checkIn
+    let newCheckOut = booking.checkOut
+    let newAccId = booking.accommodationId
+
+    if (info.mode === 'move') {
+      // Arrastrar el cuerpo permite soltarlo en otra fila: reasigna de habitación/cabaña.
+      const nights = calculateNights(booking.checkIn, booking.checkOut)
+      newCheckIn = dropDateStr
+      newCheckOut = formatLocalDate(addDays(new Date(dropDateStr), nights))
+      newAccId = accId
+    } else {
+      // Estirar un borde solo cambia fechas, dentro de la misma fila.
+      if (accId !== booking.accommodationId) return
+      if (info.mode === 'resize-left') {
+        newCheckIn = dropDateStr
+        if (newCheckIn >= booking.checkOut) {
+          alert('Error: la fecha de check-in debe ser anterior al check-out.')
+          return
+        }
+      } else if (info.mode === 'resize-right') {
+        newCheckOut = dropDateStr
+        if (newCheckOut <= booking.checkIn) {
+          alert('Error: la fecha de check-out debe ser posterior al check-in.')
+          return
+        }
+      }
+    }
+
+    if (newCheckIn === booking.checkIn && newCheckOut === booking.checkOut && newAccId === booking.accommodationId) return
+
+    await reassignBooking(booking.id, newAccId, newCheckIn, newCheckOut)
+  }
+
+  // Mover/estirar una reserva existente en la Semana. Usa la posición real del mouse
+  // (document.elementsFromPoint) en vez de los eventos nativos de drag&drop de HTML5:
+  // así detecta la celda de fecha que está DEBAJO aunque la propia barra la tape
+  // visualmente — con drag&drop nativo, encoger una reserva (arrastrar el borde hacia
+  // adentro) no soltaba sobre nada porque el mouse quedaba sobre la barra, no la celda.
+  useEffect(() => {
+    if (!dragInfo) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const stack = document.elementsFromPoint(e.clientX, e.clientY)
+      const cellEl = stack.find((el): el is HTMLElement => el instanceof HTMLElement && !!el.dataset.plannerCell)
+      const key = cellEl?.dataset.plannerCell ?? null
+      if (dragOverCellRef.current !== key) {
+        dragOverCellRef.current = key
+        setDragOverCell(key)
+      }
+    }
+
+    const handleMouseUp = () => {
+      const key = dragOverCellRef.current
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+      dragOverCellRef.current = null
+      setDragInfo(null)
+      setDragOverCell(null)
+      if (key) {
+        const [accIdStr, dateStr] = key.split('|')
+        handleDropOnCell(Number(accIdStr), dateStr)
+      }
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [dragInfo])
 
   const handleAddBooking = async () => {
     if (!form.guestName.trim()) return
@@ -1018,7 +1171,15 @@ export default function BookingsPage() {
               </div>
 
               {/* Rows per Cabin */}
-              {activeAccommodationOptions.map(acc => (
+              {activeAccommodationOptions.map(acc => {
+                const weekStartStr = weekDays[0].dateStr
+                const weekEndStr = weekDays[6].dateStr
+                // Reservas de este cuarto que tocan la semana visible, como una sola barra continua
+                const rowBookings = bookings.filter(b =>
+                  b.accommodationId === acc.id && b.checkIn <= weekEndStr && b.checkOut > weekStartStr
+                )
+
+                return (
                 <div key={acc.id} className="flex hover:bg-gray-50/40 transition-colors">
                   {/* Cabin Details Info */}
                   <div className="w-56 shrink-0 p-4 border-r border-gray-100 flex items-center gap-3">
@@ -1028,73 +1189,120 @@ export default function BookingsPage() {
                       className="w-12 h-12 object-cover rounded-xl bg-gray-100 shrink-0"
                     />
                     <div className="min-w-0">
-                      <h4 className="text-sm font-bold text-gray-800 truncate leading-tight">{acc.title} <span className="text-gray-400 font-medium">({acc.maxCapacity} pax)</span></h4>
+                      <h4 className="text-sm font-bold text-gray-800 truncate leading-tight">{acc.title}</h4>
                       <span className="text-[9px] uppercase tracking-widest text-[#C5A059] font-bold block mt-0.5">{acc.type}</span>
+                      <span className="text-[10px] text-gray-400 font-semibold block mt-0.5">({acc.maxCapacity} pax) - (1 Habs)</span>
                     </div>
                   </div>
 
-                  {/* 7 columns showing booking segments */}
-                  <div className="flex-1 grid grid-cols-7 divide-x divide-gray-100 relative">
-                    {weekDays.map(day => {
-                      // Check if there is an active booking on this date
-                      const currentBooking = bookings.find(b => {
-                        if (b.accommodationId !== acc.id) return false
-                        return day.dateStr >= b.checkIn && day.dateStr < b.checkOut
-                      })
+                  {/* 7 columns: fondo con zonas de drop + barras de reserva superpuestas */}
+                  <div className="flex-1 relative">
+                    <div className="grid grid-cols-7 divide-x divide-gray-100 h-20">
+                      {weekDays.map(day => {
+                        const isOccupied = rowBookings.some(b => day.dateStr >= b.checkIn && day.dateStr < b.checkOut)
+                        const checkOutBooking = !isOccupied
+                          ? bookings.find(b => b.accommodationId === acc.id && b.checkOut === day.dateStr && b.status === 'checkout_hoy')
+                          : undefined
+                        const isDragTarget = dragOverCell === `${acc.id}|${day.dateStr}`
+                        const isRangeSelected = !!rangeSelect && rangeSelect.accId === acc.id &&
+                          day.dateStr >= (rangeSelect.startDateStr <= rangeSelect.endDateStr ? rangeSelect.startDateStr : rangeSelect.endDateStr) &&
+                          day.dateStr <= (rangeSelect.startDateStr <= rangeSelect.endDateStr ? rangeSelect.endDateStr : rangeSelect.startDateStr)
 
-                      // Special check: check out today
-                      const checkOutBooking = bookings.find(b => {
-                        return b.accommodationId === acc.id && b.checkOut === day.dateStr && b.status === 'checkout_hoy'
-                      })
+                        return (
+                          <div
+                            key={day.dateStr}
+                            data-planner-cell={`${acc.id}|${day.dateStr}`}
+                            className={`p-2 h-20 flex items-center justify-center relative transition-colors ${isDragTarget || isRangeSelected ? 'bg-[#C5A059]/10' : ''}`}
+                          >
+                            {isOccupied ? null : checkOutBooking ? (
+                              <button
+                                onClick={() => setSelectedBooking(checkOutBooking)}
+                                className={`w-full h-full rounded-2xl p-2 text-left flex flex-col justify-between border transition-all hover:brightness-95 ${getPaymentColorClasses(checkOutBooking).bg}`}
+                              >
+                                <div className="flex items-center gap-1">
+                                  <span className={`w-1.5 h-1.5 rounded-full ${getPaymentColorClasses(checkOutBooking).bullet} shrink-0`} />
+                                  <span className="text-[10px] font-extrabold truncate block leading-none">
+                                    Sale: {checkOutBooking.guestName.split(' ')[0]}
+                                  </span>
+                                </div>
+                                <span className={`text-[8px] font-bold ${getPaymentColorClasses(checkOutBooking).text}`}>Checkout Hoy</span>
+                              </button>
+                            ) : (
+                              <button
+                                onMouseDown={() => setRangeSelect({ accId: acc.id, startDateStr: day.dateStr, endDateStr: day.dateStr })}
+                                onMouseEnter={() => {
+                                  setRangeSelect(prev => (prev && prev.accId === acc.id) ? { ...prev, endDateStr: day.dateStr } : prev)
+                                }}
+                                title="Clic para un día, o arrastra hasta el día de salida"
+                                className={`w-full h-full rounded-2xl border-2 border-dashed transition-all flex items-center justify-center group select-none
+                                  ${isRangeSelected ? 'border-[#C5A059] bg-[#C5A059]/10 text-[#C5A059]' : 'border-gray-100 hover:border-[#C5A059]/40 hover:bg-[#C5A059]/5 text-gray-300 hover:text-[#C5A059]'}`}
+                              >
+                                <Plus size={16} className="group-hover:scale-110 transition-transform" />
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {/* Barras arrastrables: mueve el bloque o estira un borde para cambiar fechas */}
+                    {rowBookings.map(b => {
+                      const occupiedIdx = weekDays.reduce<number[]>((acc2, day, i) => {
+                        if (day.dateStr >= b.checkIn && day.dateStr < b.checkOut) acc2.push(i)
+                        return acc2
+                      }, [])
+                      if (occupiedIdx.length === 0) return null
+                      const startIdx = occupiedIdx[0]
+                      const endIdx = occupiedIdx[occupiedIdx.length - 1]
+                      const leftPct = (startIdx / 7) * 100
+                      const widthPct = ((endIdx - startIdx + 1) / 7) * 100
+                      const colors = getPaymentColorClasses(b)
+                      const isBeingDragged = dragInfo?.bookingId === b.id
 
                       return (
-                        <div key={day.dateStr} className="p-2 h-20 flex items-center justify-center relative">
-                          {currentBooking ? (
-                            <button
-                              onClick={() => setSelectedBooking(currentBooking)}
-                              className={`w-full h-full rounded-2xl p-2 text-left flex flex-col justify-between border transition-all hover:brightness-95 active:scale-98 ${getPaymentColorClasses(currentBooking).bg}`}
-                            >
-                              <div className="flex items-center gap-1">
-                                <span className={`w-1.5 h-1.5 rounded-full ${getPaymentColorClasses(currentBooking).bullet} shrink-0`} />
-                                <span className="text-[10px] font-extrabold truncate max-w-full block leading-none">
-                                  {currentBooking.guestName.split(' ')[0]}
-                                </span>
-                              </div>
-                              <span className="text-[8px] font-bold text-gray-400 tracking-wider">
-                                {currentBooking.guestsCount.adults} Huésp.
+                        <div
+                          key={b.id}
+                          style={{ left: `calc(${leftPct}% + 4px)`, width: `calc(${widthPct}% - 8px)` }}
+                          className={`absolute top-2 bottom-2 rounded-2xl border flex items-stretch overflow-hidden ${colors.bg} ${isBeingDragged ? 'opacity-40' : ''}`}
+                        >
+                          {/* Borde izquierdo: arrastrar para cambiar solo el check-in */}
+                          <div
+                            onMouseDown={e => { e.preventDefault(); setDragInfo({ bookingId: b.id, mode: 'resize-left' }) }}
+                            title="Arrastra para cambiar el check-in"
+                            className="w-2 shrink-0 cursor-ew-resize hover:bg-black/10 transition-colors select-none"
+                          />
+
+                          {/* Cuerpo: arrastrar para mover toda la reserva, click (sin arrastrar) para ver detalle */}
+                          <button
+                            onMouseDown={() => setDragInfo({ bookingId: b.id, mode: 'move' })}
+                            onClick={() => setSelectedBooking(b)}
+                            title="Arrastra para mover la reserva"
+                            className="flex-1 min-w-0 p-2 text-left flex flex-col justify-between cursor-grab active:cursor-grabbing hover:brightness-95 transition-all select-none"
+                          >
+                            <div className="flex items-center gap-1">
+                              <span className={`w-1.5 h-1.5 rounded-full ${colors.bullet} shrink-0`} />
+                              <span className="text-[10px] font-extrabold truncate max-w-full block leading-none">
+                                {b.guestName.split(' ')[0]}
                               </span>
-                            </button>
-                          ) : checkOutBooking ? (
-                            <button
-                              onClick={() => setSelectedBooking(checkOutBooking)}
-                              className={`w-full h-full rounded-2xl p-2 text-left flex flex-col justify-between border transition-all hover:brightness-95 ${getPaymentColorClasses(checkOutBooking).bg}`}
-                            >
-                              <div className="flex items-center gap-1">
-                                <span className={`w-1.5 h-1.5 rounded-full ${getPaymentColorClasses(checkOutBooking).bullet} shrink-0`} />
-                                <span className="text-[10px] font-extrabold truncate block leading-none">
-                                  Sale: {checkOutBooking.guestName.split(' ')[0]}
-                                </span>
-                              </div>
-                              <span className={`text-[8px] font-bold ${getPaymentColorClasses(checkOutBooking).text}`}>Checkout Hoy</span>
-                            </button>
-                          ) : (
-                            // Empty cell (available)
-                            <button
-                              onClick={() => {
-                                openAddModal()
-                                setForm(f => ({ ...f, accommodationId: acc.id, checkIn: day.dateStr }))
-                              }}
-                              className="w-full h-full rounded-2xl border-2 border-dashed border-gray-100 hover:border-[#C5A059]/40 hover:bg-[#C5A059]/5 transition-all flex items-center justify-center text-gray-300 hover:text-[#C5A059] group"
-                            >
-                              <Plus size={16} className="group-hover:scale-110 transition-transform" />
-                            </button>
-                          )}
+                            </div>
+                            <span className="text-[8px] font-bold text-gray-400 tracking-wider">
+                              {b.guestsCount.adults} Huésp.
+                            </span>
+                          </button>
+
+                          {/* Borde derecho: arrastrar para cambiar solo el check-out */}
+                          <div
+                            onMouseDown={e => { e.preventDefault(); setDragInfo({ bookingId: b.id, mode: 'resize-right' }) }}
+                            title="Arrastra para cambiar el check-out"
+                            className="w-2 shrink-0 cursor-ew-resize hover:bg-black/10 transition-colors select-none"
+                          />
                         </div>
                       )
                     })}
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         </div>
@@ -1312,7 +1520,7 @@ export default function BookingsPage() {
       {selectedBooking && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-end p-0 bg-black/40 backdrop-blur-sm">
           {/* Overlay click to close */}
-          <div className="absolute inset-0" onClick={() => setSelectedBooking(null)} />
+          <div className="absolute inset-0" onClick={() => { setSelectedBooking(null); setEditingAccommodation(false) }} />
           
           <div className="relative w-full max-w-md h-[90vh] sm:h-screen bg-white rounded-t-3xl sm:rounded-l-3xl sm:rounded-tr-none shadow-2xl p-6 flex flex-col justify-between overflow-y-auto animate-in slide-in-from-bottom sm:slide-in-from-right duration-300">
             <div>
@@ -1333,7 +1541,7 @@ export default function BookingsPage() {
                   </span>
                 </div>
                 <button
-                  onClick={() => setSelectedBooking(null)}
+                  onClick={() => { setSelectedBooking(null); setEditingAccommodation(false) }}
                   className="p-2 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600"
                 >
                   <X size={20} />
@@ -1358,8 +1566,40 @@ export default function BookingsPage() {
 
                 {/* 2. Cabin detail */}
                 <div className="space-y-3">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Estadía Asignada</span>
-                  {(() => {
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Estadía Asignada</span>
+                    {!editingAccommodation && (
+                      <button
+                        onClick={() => setEditingAccommodation(true)}
+                        className="text-[10px] font-bold text-[#C5A059] uppercase tracking-wider hover:underline"
+                      >
+                        Cambiar
+                      </button>
+                    )}
+                  </div>
+                  {editingAccommodation ? (
+                    <div className="space-y-2">
+                      <select
+                        value={selectedBooking.accommodationId}
+                        onChange={e => {
+                          const newAccId = Number(e.target.value)
+                          reassignBooking(selectedBooking.id, newAccId, selectedBooking.checkIn, selectedBooking.checkOut)
+                            .then(ok => { if (ok) setEditingAccommodation(false) })
+                        }}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white"
+                      >
+                        {activeAccommodationOptions.map(acc => (
+                          <option key={acc.id} value={acc.id}>{acc.title} ({acc.type} - Máx. {acc.maxCapacity} pax)</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => setEditingAccommodation(false)}
+                        className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:underline"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  ) : (() => {
                     const acc = getAccommodation(selectedBooking.accommodationId)
                     return (
                       <div className="flex items-center gap-3 bg-white p-3 border border-gray-100 rounded-2xl">

@@ -378,11 +378,11 @@ const EstanciaHome: React.FC<{
             >
               <div className="flex flex-col justify-center p-5 flex-1">
                 <span className="text-brand-accent text-[9px] uppercase tracking-widest font-bold mb-2">Celebra lo que importa</span>
-                <h3 className="text-lg font-serif text-white mb-2 leading-tight">Salón de Eventos</h3>
+                <h3 className="text-lg font-serif text-white mb-2 leading-tight">Salón Principal</h3>
                 <p className="text-white/60 text-[11px] leading-relaxed">Capacidad para grupos, con iluminación y equipamiento a medida.</p>
               </div>
               <div className="relative w-2/5 flex-none overflow-hidden">
-                <img src="/assets/instalaciones/salon-eventos.jpg" alt="Salón de Eventos" className="w-full h-full object-cover" />
+                <img src="/assets/instalaciones/salon-eventos.jpg" alt="Salón Principal" className="w-full h-full object-cover" />
               </div>
             </motion.div>
 
@@ -503,7 +503,7 @@ const EstanciaHome: React.FC<{
               viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.7 }}
               className="relative h-64 rounded-3xl overflow-hidden shadow-lg shadow-black/5"
             >
-              <img src="/assets/instalaciones/terraza-fiesta.png" alt="Terraza de Fiestas" className="w-full h-full object-cover" />
+              <img src="/assets/instalaciones/terraza-fiesta.jpg" alt="Terraza de Fiestas" className="w-full h-full object-cover" />
               <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
               <div className="absolute bottom-5 left-5 right-5">
                 <span className="text-brand-accent text-[9px] uppercase tracking-[0.4em] font-bold block mb-1">Eventos & Celebraciones</span>

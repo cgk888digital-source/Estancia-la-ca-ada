@@ -247,7 +247,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
           key={d}
           disabled={isPast}
           onClick={() => handleDateClick(date)}
-          className={`h-12 w-full flex items-center justify-center relative transition-all duration-300 rounded-full
+          className={`h-10 w-full flex items-center justify-center relative transition-all duration-300 rounded-full
             ${isPast ? 'text-brand-primary/10 cursor-not-allowed' : 'text-brand-primary hover:bg-brand-terracotta/10'}
             ${selected ? 'bg-brand-terracotta text-white !rounded-full shadow-lg shadow-brand-terracotta/40' : ''}
             ${range ? 'bg-brand-terracotta/10 !rounded-none' : ''}
@@ -342,15 +342,15 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="px-6 py-10 space-y-8"
+              className="px-6 py-6 space-y-5 pb-28"
             >
               <div>
-                <h2 className="text-4xl font-serif mb-2">Seleccione sus fechas</h2>
-                <p className="text-brand-primary/60">Disfrute de la tranquilidad del páramo.</p>
+                <h2 className="text-3xl font-serif mb-1">Seleccione sus fechas</h2>
+                <p className="text-brand-primary/60 text-sm">Disfrute de la tranquilidad del páramo.</p>
               </div>
 
-              <div className="bg-white rounded-[2.5rem] p-8 shadow-xl shadow-black/5 border border-brand-primary/5">
-                <div className="flex items-center justify-between mb-8">
+              <div className="bg-white rounded-[2.5rem] p-6 shadow-xl shadow-black/5 border border-brand-primary/5">
+                <div className="flex items-center justify-between mb-5">
                   <h3 className="text-xl font-serif capitalize">
                     {currentMonth.toLocaleString('es-ES', { month: 'long', year: 'numeric' })}
                   </h3>
@@ -364,7 +364,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                   </div>
                 </div>
 
-                <div className="grid grid-cols-7 mb-4">
+                <div className="grid grid-cols-7 mb-2">
                   {['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sa'].map(day => (
                     <div key={day} className="text-center text-[10px] uppercase tracking-widest font-bold text-brand-primary/30">
                       {day}
@@ -372,60 +372,13 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                   ))}
                 </div>
 
-                <motion.div 
+                <motion.div
                   key={currentMonth.toISOString()}
-                  className="grid grid-cols-7 gap-y-2"
+                  className="grid grid-cols-7 gap-y-1"
                 >
                   {renderCalendar()}
                 </motion.div>
               </div>
-
-              {selectedDates.start && (
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="flex items-center justify-between p-6 bg-white rounded-3xl shadow-xl border border-brand-primary/5"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-brand-neutral rounded-2xl flex items-center justify-center text-brand-terracotta">
-                      <CalendarIcon size={24} />
-                    </div>
-                    <div>
-                      <p className="text-[10px] uppercase tracking-widest text-brand-primary/40 font-bold">Su Estadía</p>
-                      <p className="text-sm font-medium text-brand-primary">
-                        {selectedDates.start.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
-                        {selectedDates.end ? (
-                          <>
-                            <span className="mx-2 text-brand-primary/20">→</span>
-                            {selectedDates.end.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
-                          </>
-                        ) : (
-                          <span className="ml-2 text-brand-terracotta italic text-xs animate-pulse">
-                            — Seleccione fecha de salida
-                          </span>
-                        )}
-                      </p>
-                      {selectedDates.end && (
-                        <p className="text-[9px] text-brand-terracotta font-bold uppercase tracking-widest mt-1">
-                          {Math.ceil(Math.abs(selectedDates.end.getTime() - selectedDates.start.getTime()) / (1000 * 60 * 60 * 24))} Noches seleccionadas
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <button 
-                    disabled={!selectedDates.end}
-                    onClick={() => setStep(2)}
-                    className={`px-8 py-4 rounded-2xl font-bold transition-all active:scale-95 text-sm shadow-lg
-                      ${selectedDates.end 
-                        ? 'bg-brand-terracotta text-white shadow-brand-terracotta/20' 
-                        : 'bg-brand-primary/5 text-brand-primary/20 cursor-not-allowed shadow-none'
-                      }
-                    `}
-                  >
-                    Continuar
-                  </button>
-                </motion.div>
-              )}
             </motion.div>
           )}
 
@@ -659,6 +612,16 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                 <div>
                   <h2 className="text-4xl font-serif mb-2">Ficha de Reserva</h2>
                   <p className="text-brand-primary/60">Por favor, complete sus datos para continuar.</p>
+                </div>
+              </div>
+
+              <div className="bg-brand-terracotta/5 border border-brand-terracotta/10 rounded-3xl p-5 flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-brand-primary/40 font-bold">Total de su Estadía</p>
+                  <p className="text-2xl font-serif text-brand-wood leading-tight">${totalStayPrice}</p>
+                  <p className="text-[10px] text-brand-primary/50 mt-0.5">
+                    {totalNights} {totalNights === 1 ? 'noche' : 'noches'} · Abono para reservar (50%): <span className="font-bold text-brand-terracotta">${depositAmount}</span>
+                  </p>
                 </div>
               </div>
 
@@ -1080,6 +1043,53 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
           )}
         </AnimatePresence>
       </main>
+
+      {step === 1 && selectedDates.start && (
+        <motion.div
+          initial={{ y: 100 }}
+          animate={{ y: 0 }}
+          className="absolute bottom-0 left-0 w-full bg-white p-5 px-6 flex items-center justify-between shadow-2xl border-t border-brand-primary/5 z-[110] pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-11 h-11 shrink-0 bg-brand-neutral rounded-2xl flex items-center justify-center text-brand-terracotta">
+              <CalendarIcon size={20} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase tracking-widest text-brand-primary/40 font-bold">Su Estadía</p>
+              <p className="text-sm font-medium text-brand-primary truncate">
+                {selectedDates.start.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
+                {selectedDates.end ? (
+                  <>
+                    <span className="mx-2 text-brand-primary/20">→</span>
+                    {selectedDates.end.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
+                  </>
+                ) : (
+                  <span className="ml-2 text-brand-terracotta italic text-xs animate-pulse">
+                    — Seleccione fecha de salida
+                  </span>
+                )}
+              </p>
+              {selectedDates.end && (
+                <p className="text-[9px] text-brand-terracotta font-bold uppercase tracking-widest mt-1">
+                  {Math.ceil(Math.abs(selectedDates.end.getTime() - selectedDates.start.getTime()) / (1000 * 60 * 60 * 24))} Noches seleccionadas
+                </p>
+              )}
+            </div>
+          </div>
+          <button
+            disabled={!selectedDates.end}
+            onClick={() => setStep(2)}
+            className={`px-6 py-4 rounded-2xl font-bold transition-all active:scale-95 text-sm shadow-lg shrink-0
+              ${selectedDates.end
+                ? 'bg-brand-terracotta text-white shadow-brand-terracotta/20'
+                : 'bg-brand-primary/5 text-brand-primary/20 cursor-not-allowed shadow-none'
+              }
+            `}
+          >
+            Continuar
+          </button>
+        </motion.div>
+      )}
 
       {step === 3 && (
         <motion.div 
