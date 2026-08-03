@@ -388,19 +388,19 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="px-6 py-10 space-y-12"
+              className="px-6 py-6 space-y-8 pb-28"
             >
               <div className="flex items-center gap-4">
                 <button onClick={() => setStep(1)} className="p-2 bg-brand-primary/5 rounded-full">
                   <ChevronLeft size={20} />
                 </button>
                 <div>
-                  <h2 className="text-4xl font-serif mb-2">¿Quiénes viajan?</h2>
-                  <p className="text-brand-primary/60">Configure la ocupación de su estadía.</p>
+                  <h2 className="text-3xl font-serif mb-1">¿Quiénes viajan?</h2>
+                  <p className="text-brand-primary/60 text-sm">Configure la ocupación de su estadía.</p>
                 </div>
               </div>
 
-              <div className="bg-white rounded-[2.5rem] p-8 shadow-xl shadow-black/5 border border-brand-primary/5 space-y-12">
+              <div className="bg-white rounded-[2.5rem] p-6 shadow-xl shadow-black/5 border border-brand-primary/5 space-y-8">
                 <OccupantRow icon={<Users size={28} />} label="Adultos" sub="Mayores de 12 años" value={occupants.adults} onUpdate={(d) => updateOccupant('adults', d)} />
                 <OccupantRow icon={<Users size={28} className="scale-75" />} label="Niños" sub="De 3 a 12 años" value={occupants.children} onUpdate={(d) => updateOccupant('children', d)} />
                 <OccupantRow icon={<Users size={28} className="scale-50" />} label="Bebés" sub="De 0 a 2 años" value={occupants.babies} onUpdate={(d) => updateOccupant('babies', d)} />
@@ -414,14 +414,6 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                   </motion.div>
                 )}
               </AnimatePresence>
-
-              <button 
-                disabled={occupants.adults === 0}
-                onClick={() => setStep(3)}
-                className={`w-full py-5 rounded-2xl font-bold text-lg transition-all active:scale-[0.98] shadow-xl ${occupants.adults > 0 ? 'bg-brand-primary text-white hover:bg-brand-terracotta' : 'bg-brand-primary/10 text-brand-primary/30 cursor-not-allowed'}`}
-              >
-                Ver Opciones de Alojamiento
-              </button>
             </motion.div>
           )}
 
@@ -603,7 +595,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="px-6 py-10 space-y-8"
+              className="px-6 py-10 space-y-8 pb-28"
             >
               <div className="flex items-center gap-4">
                 <button onClick={() => setStep(3)} className="p-2 bg-brand-primary/5 rounded-full">
@@ -711,19 +703,6 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                   </label>
                 </div>
               </div>
-
-              <button
-                disabled={!formData.nombre || !formData.apellido || !formData.ci || !formData.tlf || !formData.correo}
-                onClick={() => setStep(5)}
-                className={`w-full py-5 rounded-2xl font-bold text-lg transition-all active:scale-[0.98] shadow-xl 
-                  ${(formData.nombre && formData.apellido && formData.ci && formData.tlf && formData.correo)
-                    ? 'bg-brand-primary text-white hover:bg-brand-terracotta'
-                    : 'bg-brand-primary/10 text-brand-primary/30 cursor-not-allowed'
-                  }
-                `}
-              >
-                Continuar al Pago
-              </button>
             </motion.div>
           )}
 
@@ -1043,6 +1022,43 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
           )}
         </AnimatePresence>
       </main>
+
+      {step === 4 && (
+        <motion.div
+          initial={{ y: 100 }}
+          animate={{ y: 0 }}
+          className="absolute bottom-0 left-0 w-full bg-white p-5 px-6 shadow-2xl border-t border-brand-primary/5 z-[110] pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+        >
+          <button
+            disabled={!formData.nombre || !formData.apellido || !formData.ci || !formData.tlf || !formData.correo}
+            onClick={() => setStep(5)}
+            className={`w-full py-5 rounded-2xl font-bold text-lg transition-all active:scale-[0.98] shadow-xl
+              ${(formData.nombre && formData.apellido && formData.ci && formData.tlf && formData.correo)
+                ? 'bg-brand-primary text-white hover:bg-brand-terracotta'
+                : 'bg-brand-primary/10 text-brand-primary/30 cursor-not-allowed'
+              }
+            `}
+          >
+            Continuar al Pago
+          </button>
+        </motion.div>
+      )}
+
+      {step === 2 && (
+        <motion.div
+          initial={{ y: 100 }}
+          animate={{ y: 0 }}
+          className="absolute bottom-0 left-0 w-full bg-white p-5 px-6 shadow-2xl border-t border-brand-primary/5 z-[110] pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+        >
+          <button
+            disabled={occupants.adults === 0}
+            onClick={() => setStep(3)}
+            className={`w-full py-5 rounded-2xl font-bold text-lg transition-all active:scale-[0.98] shadow-xl ${occupants.adults > 0 ? 'bg-brand-primary text-white hover:bg-brand-terracotta' : 'bg-brand-primary/10 text-brand-primary/30 cursor-not-allowed'}`}
+          >
+            Ver Opciones de Alojamiento
+          </button>
+        </motion.div>
+      )}
 
       {step === 1 && selectedDates.start && (
         <motion.div
