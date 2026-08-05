@@ -8,9 +8,10 @@ import { mockTransactions, mockMonthlyData, categoryLabels, categoryColors } fro
 import type { Transaction, TransactionType, TransactionCategory, PaymentMethod, Booking } from '../types'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { parseLocalDate } from '../../utils/dateUtils'
 
 function getServerDateRange(filterType: string, filterDate: string): { from: string; to: string } {
-  const d = new Date(filterDate)
+  const d = parseLocalDate(filterDate)
   switch (filterType) {
     case 'dia':
       return { from: filterDate, to: filterDate }
@@ -125,7 +126,7 @@ const ReportsPage: React.FC = () => {
     
     if (filterType === 'semana') {
       // Calculate start of week (Monday)
-      const d = new Date(filterDate)
+      const d = parseLocalDate(filterDate)
       const day = d.getDay()
       const diff = d.getDate() - day + (day === 0 ? -6 : 1)
       const startOfWeek = new Date(d.setDate(diff))

@@ -362,7 +362,7 @@ export default function BookingsPage() {
       const [fromStr, toStr] = rangeSelect.startDateStr <= rangeSelect.endDateStr
         ? [rangeSelect.startDateStr, rangeSelect.endDateStr]
         : [rangeSelect.endDateStr, rangeSelect.startDateStr]
-      const checkOutStr = formatLocalDate(addDays(new Date(toStr), 1))
+      const checkOutStr = formatLocalDate(addDays(parseLocalDate(toStr), 1))
 
       openAddModal()
       setForm(f => ({ ...f, accommodationId: rangeSelect.accId, checkIn: fromStr, checkOut: checkOutStr }))
@@ -471,8 +471,8 @@ export default function BookingsPage() {
 
   const weekDays = useMemo(() => {
     if (weekViewMode === 'personalizado' && weekRangeFrom && weekRangeTo && weekRangeFrom <= weekRangeTo) {
-      const start = new Date(weekRangeFrom)
-      const dayCount = Math.min(60, Math.round((new Date(weekRangeTo).getTime() - start.getTime()) / 86400000) + 1)
+      const start = parseLocalDate(weekRangeFrom)
+      const dayCount = Math.min(60, Math.round((parseLocalDate(weekRangeTo).getTime() - start.getTime()) / 86400000) + 1)
       return Array.from({ length: dayCount }, (_, i) => {
         const d = new Date(start)
         d.setDate(start.getDate() + i)
@@ -718,7 +718,7 @@ export default function BookingsPage() {
       // Arrastrar el cuerpo permite soltarlo en otra fila: reasigna de habitación/cabaña.
       const nights = calculateNights(booking.checkIn, booking.checkOut)
       newCheckIn = dropDateStr
-      newCheckOut = formatLocalDate(addDays(new Date(dropDateStr), nights))
+      newCheckOut = formatLocalDate(addDays(parseLocalDate(dropDateStr), nights))
       newAccId = accId
     } else {
       // Estirar un borde solo cambia fechas, dentro de la misma fila.
@@ -1281,10 +1281,9 @@ export default function BookingsPage() {
                   <div className="flex-1 relative">
                     <div className="grid divide-x divide-gray-100 h-20" style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(0, 1fr))` }}>
                       {weekDays.map(day => {
+                        // No incluye el estatus de la reserva: así ella siempre ve quién sale ese día,
+                        // aunque todavía no haya marcado la limpieza, y aunque otro huésped entre ese mismo día.
                         const isOccupied = rowBookings.some(b => day.dateStr >= b.checkIn && day.dateStr < b.checkOut)
-                        const checkOutBooking = !isOccupied
-                          ? bookings.find(b => b.accommodationId === acc.id && b.checkOut === day.dateStr && b.status === 'checkout_hoy')
-                          : undefined
                         const isDragTarget = dragOverCell === `${acc.id}|${day.dateStr}`
                         const isRangeSelected = !!rangeSelect && rangeSelect.accId === acc.id &&
                           day.dateStr >= (rangeSelect.startDateStr <= rangeSelect.endDateStr ? rangeSelect.startDateStr : rangeSelect.endDateStr) &&
@@ -1296,20 +1295,7 @@ export default function BookingsPage() {
                             data-planner-cell={`${acc.id}|${day.dateStr}`}
                             className={`p-2 h-20 flex items-center justify-center relative transition-colors ${isDragTarget || isRangeSelected ? 'bg-[#C5A059]/10' : ''}`}
                           >
-                            {isOccupied ? null : checkOutBooking ? (
-                              <button
-                                onClick={() => setSelectedBooking(checkOutBooking)}
-                                className={`w-full h-full rounded-2xl p-2 text-left flex flex-col justify-between border transition-all hover:brightness-95 ${getPaymentColorClasses(checkOutBooking).bg}`}
-                              >
-                                <div className="flex items-center gap-1">
-                                  <span className={`w-1.5 h-1.5 rounded-full ${getPaymentColorClasses(checkOutBooking).bullet} shrink-0`} />
-                                  <span className="text-[10px] font-extrabold truncate block leading-none">
-                                    Sale: {checkOutBooking.guestName.split(' ')[0]}
-                                  </span>
-                                </div>
-                                <span className={`text-[8px] font-bold ${getPaymentColorClasses(checkOutBooking).text}`}>Checkout Hoy</span>
-                              </button>
-                            ) : (
+                            {!isOccupied && (
                               <button
                                 onMouseDown={() => setRangeSelect({ accId: acc.id, startDateStr: day.dateStr, endDateStr: day.dateStr })}
                                 onMouseEnter={() => {
@@ -1379,6 +1365,28 @@ export default function BookingsPage() {
                             className="w-2 shrink-0 cursor-ew-resize hover:bg-black/10 transition-colors select-none"
                           />
                         </div>
+                      )
+                    })}
+
+                    {/* Aviso de salida: se muestra encima de todo (incluso si ese mismo día entra otro
+                        huésped a la misma habitación), para que siempre se vea quién sale por la mañana
+                        aunque por la tarde llegue alguien más. */}
+                    {weekDays.map((day, i) => {
+                      const departingBooking = bookings.find(b => b.accommodationId === acc.id && b.checkOut === day.dateStr)
+                      if (!departingBooking) return null
+                      const leftPct = (i / weekDays.length) * 100
+                      const widthPct = (1 / weekDays.length) * 100
+                      return (
+                        <button
+                          key={`salida-${day.dateStr}`}
+                          onClick={() => setSelectedBooking(departingBooking)}
+                          title={`Salió: ${departingBooking.guestName}`}
+                          style={{ left: `calc(${leftPct}% + 4px)`, width: `calc(${widthPct}% - 8px)` }}
+                          className={`absolute top-1 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-left transition-all hover:brightness-95 ${getPaymentColorClasses(departingBooking).bg}`}
+                        >
+                          <LogOut size={9} className="shrink-0" />
+                          <span className="text-[8px] font-extrabold truncate leading-none">Salió: {departingBooking.guestName.split(' ')[0]}</span>
+                        </button>
                       )
                     })}
                   </div>
