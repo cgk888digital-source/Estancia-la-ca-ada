@@ -8,6 +8,7 @@ import { mockBookings } from '../data/mockBookings'
 import { supabase } from '../../lib/supabase'
 import type { Booking } from '../types'
 import PrintableReservationsReport from './PrintableReservationsReport'
+import { parseLocalDate } from '../../utils/dateUtils'
 
 // Helper to format currency
 const fmt = (n: number) =>
@@ -64,6 +65,8 @@ interface DbBooking {
   guest_name: string
   guest_phone?: string | null
   guest_email?: string | null
+  guest_ci?: string | null
+  companions?: string | null
   accommodation_id: number
   check_in: string
   check_out: string
@@ -75,6 +78,7 @@ interface DbBooking {
   amount_paid?: number | string | null
   payment_status?: string | null
   payment_method?: string | null
+  payment_reference?: string | null
   status?: string | null
   confirmed?: boolean | null
   special_notes?: string | null
@@ -118,6 +122,8 @@ const mapDbBookingToReact = (db: DbBooking): Booking => ({
   guestName: db.guest_name,
   guestPhone: db.guest_phone || '',
   guestEmail: db.guest_email || '',
+  guestCi: db.guest_ci || '',
+  companions: db.companions || '',
   accommodationId: db.accommodation_id,
   checkIn: db.check_in,
   checkOut: db.check_out,
@@ -130,7 +136,8 @@ const mapDbBookingToReact = (db: DbBooking): Booking => ({
   totalAmount: Number(db.total_amount) || 0,
   amountPaid: Number(db.amount_paid) || 0,
   paymentStatus: (db.payment_status || 'pendiente') as 'completo' | 'parcial' | 'pendiente',
-  paymentMethod: (db.payment_method || 'transferencia') as 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque',
+  paymentMethod: (db.payment_method || 'transferencia') as 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque' | 'zelle',
+  paymentReference: db.payment_reference || '',
   status: (db.status || 'confirmado') as 'checkout_hoy' | 'checkin_hoy' | 'ocupado' | 'confirmado' | 'limpieza',
   confirmed: db.confirmed ?? true,
   specialNotes: db.special_notes || '',
@@ -182,7 +189,14 @@ export default function BookingsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
   const [editingAccommodation, setEditingAccommodation] = useState(false)
+  const [editingDates, setEditingDates] = useState(false)
+  const [editDatesForm, setEditDatesForm] = useState({ checkIn: '', checkOut: '' })
   const [weekAnchor, setWeekAnchor] = useState(() => new Date(todayDate))
+  // Como en Paxer: la administradora puede elegir un rango de fechas cualquiera (no solo semanas
+  // de 7 días) y ver el planner con esas columnas exactas.
+  const [weekViewMode, setWeekViewMode] = useState<'semana' | 'personalizado'>('semana')
+  const [weekRangeFrom, setWeekRangeFrom] = useState('')
+  const [weekRangeTo, setWeekRangeTo] = useState('')
   const [monthAnchor, setMonthAnchor] = useState(() => new Date(todayDate.getFullYear(), todayDate.getMonth(), 1))
   const [mesMode, setMesMode] = useState<'mes' | 'personalizado'>('mes')
   const [customFrom, setCustomFrom] = useState('')
@@ -204,9 +218,12 @@ export default function BookingsPage() {
   
   // Form State for creating a new booking
   const [form, setForm] = useState({
-    guestName: '',
+    guestFirstName: '',
+    guestLastName: '',
     guestPhone: '',
     guestEmail: '',
+    guestCi: '',
+    companions: '',
     accommodationId: 2,
     checkIn: todayStr,
     checkOut: defaultCheckOutStr,
@@ -216,21 +233,22 @@ export default function BookingsPage() {
     pets: 0,
     totalAmount: 180,
     amountPaid: 0,
-    paymentMethod: 'transferencia' as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque',
+    paymentMethod: 'transferencia' as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' | 'zelle',
+    paymentReference: '',
     specialNotes: ''
   })
 
   // Autocomplete state
   const [guestSuggestions, setGuestSuggestions] = useState<GuestSuggestion[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
-  const shouldShowGuestSuggestions = form.guestName.length >= 3 && showSuggestions
+  const shouldShowGuestSuggestions = (form.guestFirstName.length >= 3 || form.guestLastName.length >= 3) && showSuggestions
 
   // Accommodation lookup helper
   const getAccommodation = (id: number) => accommodationOptions.find(o => o.id === id)
 
   const getStandardRate = (accId: number, checkIn: string, checkOut: string, adults: number, children: number) => {
     const nights = calculateNights(checkIn, checkOut)
-    const d = new Date(checkIn)
+    const d = parseLocalDate(checkIn)
     const isDecember = d.getMonth() === 11
     
     const dbAcc = dbAccommodations.find(o => Number(o.id) === accId)
@@ -266,9 +284,12 @@ export default function BookingsPage() {
     setLocatorCode(newLocator)
     
     setForm({
-      guestName: '',
+      guestFirstName: '',
+      guestLastName: '',
       guestPhone: '',
       guestEmail: '',
+      guestCi: '',
+      companions: '',
       accommodationId: 2,
       checkIn: todayStr,
       checkOut: defaultCheckOutStr,
@@ -279,6 +300,7 @@ export default function BookingsPage() {
       totalAmount: 180,
       amountPaid: 0,
       paymentMethod: 'transferencia',
+      paymentReference: '',
       specialNotes: ''
     })
     setShowSuggestions(false)
@@ -306,12 +328,17 @@ export default function BookingsPage() {
     if (!shouldShowGuestSuggestions) return
 
     const timer = setTimeout(async () => {
+      // Busca coincidencias tanto por nombre como por apellido, para que la administradora
+      // pueda encontrar al huésped aunque solo recuerde uno de los dos.
+      const terms = [form.guestFirstName, form.guestLastName].filter(t => t.trim().length >= 2)
+      if (terms.length === 0) return
+      const orFilter = terms.map(t => `guest_name.ilike.%${t}%`).join(',')
       const { data } = await supabase
         .from('bookings')
         .select('guest_name, guest_phone, guest_email')
-        .ilike('guest_name', `%${form.guestName}%`)
+        .or(orFilter)
         .limit(10)
-      
+
       if (data) {
         const unique = new Map<string, GuestSuggestion>()
         data.forEach(d => {
@@ -324,7 +351,7 @@ export default function BookingsPage() {
     }, 300)
 
     return () => clearTimeout(timer)
-  }, [form.guestName, shouldShowGuestSuggestions])
+  }, [form.guestFirstName, form.guestLastName, shouldShowGuestSuggestions])
 
   // Al soltar el mouse tras seleccionar un rango de días vacíos en la Semana, abre
   // "Nueva Reserva" con el check-in/check-out ya llenos según lo seleccionado.
@@ -428,30 +455,43 @@ export default function BookingsPage() {
     })
   }, [bookings])
 
-  // 2. Weekly grid calculation (7 days starting from weekAnchor, navigable)
+  // 2. Grid calculation: 7 días fijos desde weekAnchor, o un rango de fechas cualquiera elegido
+  // a mano ("Rango Personalizado", igual que el "Buscar por fecha" de Paxer).
+  const dayInfoFromDate = (d: Date) => {
+    const yr = d.getFullYear()
+    const mo = String(d.getMonth() + 1).padStart(2, '0')
+    const dy = String(d.getDate()).padStart(2, '0')
+    return {
+      dateStr: `${yr}-${mo}-${dy}`,
+      label: d.toLocaleDateString('es-ES', { weekday: 'short' }),
+      dayNum: d.getDate(),
+      monthLabel: d.toLocaleDateString('es-ES', { month: 'short' })
+    }
+  }
+
   const weekDays = useMemo(() => {
+    if (weekViewMode === 'personalizado' && weekRangeFrom && weekRangeTo && weekRangeFrom <= weekRangeTo) {
+      const start = new Date(weekRangeFrom)
+      const dayCount = Math.min(60, Math.round((new Date(weekRangeTo).getTime() - start.getTime()) / 86400000) + 1)
+      return Array.from({ length: dayCount }, (_, i) => {
+        const d = new Date(start)
+        d.setDate(start.getDate() + i)
+        return dayInfoFromDate(d)
+      })
+    }
     return Array.from({ length: 7 }, (_, i) => {
       const d = new Date(weekAnchor)
       d.setDate(weekAnchor.getDate() + i)
-      const yr = d.getFullYear()
-      const mo = String(d.getMonth() + 1).padStart(2, '0')
-      const dy = String(d.getDate()).padStart(2, '0')
-      const dateStr = `${yr}-${mo}-${dy}`
-      return {
-        dateStr,
-        label: d.toLocaleDateString('es-ES', { weekday: 'short' }),
-        dayNum: d.getDate(),
-        monthLabel: d.toLocaleDateString('es-ES', { month: 'short' })
-      }
+      return dayInfoFromDate(d)
     })
-  }, [weekAnchor])
+  }, [weekAnchor, weekViewMode, weekRangeFrom, weekRangeTo])
 
   const weekRangeLabel = useMemo(() => {
     const start = weekDays[0]
-    const end = weekDays[6]
+    const end = weekDays[weekDays.length - 1]
     if (!start || !end) return ''
-    const startD = new Date(start.dateStr)
-    const endD = new Date(end.dateStr)
+    const startD = parseLocalDate(start.dateStr)
+    const endD = parseLocalDate(end.dateStr)
     return `${startD.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} - ${endD.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}`
   }, [weekDays])
 
@@ -743,7 +783,8 @@ export default function BookingsPage() {
   }, [dragInfo])
 
   const handleAddBooking = async () => {
-    if (!form.guestName.trim()) return
+    const fullGuestName = `${form.guestFirstName.trim()} ${form.guestLastName.trim()}`.trim()
+    if (!fullGuestName) return
 
     if (form.checkOut <= form.checkIn) {
       alert('Error: La fecha de check-out debe ser posterior a la fecha de check-in.')
@@ -773,9 +814,11 @@ export default function BookingsPage() {
 
     const initialStatus = form.checkIn === todayStr ? 'checkin_hoy' : 'confirmado'
     const newBooking = {
-      guest_name: form.guestName.trim(),
+      guest_name: fullGuestName,
       guest_phone: form.guestPhone.trim() || '+58 412-000-0000',
       guest_email: form.guestEmail.trim() || 'cliente@estancialacanada.com',
+      guest_ci: form.guestCi.trim() || null,
+      companions: form.companions.trim() || null,
       accommodation_id: Number(form.accommodationId),
       check_in: form.checkIn,
       check_out: form.checkOut,
@@ -789,6 +832,7 @@ export default function BookingsPage() {
         ? 'completo' 
         : Number(form.amountPaid) > 0 ? 'parcial' : 'pendiente',
       payment_method: form.paymentMethod,
+      payment_reference: form.paymentReference.trim() || null,
       status: initialStatus,
       confirmed: true, // reserva creada directamente por el staff, no requiere revisión aparte
       special_notes: form.specialNotes.trim() || null,
@@ -1027,11 +1071,11 @@ export default function BookingsPage() {
                       <div className="grid grid-cols-2 gap-3 text-xs">
                         <div>
                           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">Entrada</p>
-                          <span className="font-semibold text-gray-600">{new Date(booking.checkIn).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}</span>
+                          <span className="font-semibold text-gray-600">{parseLocalDate(booking.checkIn).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}</span>
                         </div>
                         <div>
                           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">Salida</p>
-                          <span className="font-semibold text-gray-600">{new Date(booking.checkOut).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}</span>
+                          <span className="font-semibold text-gray-600">{parseLocalDate(booking.checkOut).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}</span>
                         </div>
                       </div>
 
@@ -1122,38 +1166,76 @@ export default function BookingsPage() {
                 </div>
               ))}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex rounded-xl overflow-hidden border border-gray-200 text-[10px] font-bold uppercase tracking-wider">
               <button
-                onClick={() => setWeekAnchor(d => { const n = new Date(d); n.setDate(n.getDate() - 7); return n })}
-                className="p-1.5 rounded-lg border border-gray-200 hover:bg-white text-gray-500"
+                onClick={() => setWeekViewMode('semana')}
+                className={`px-3 py-1.5 transition-colors ${weekViewMode === 'semana' ? 'bg-[#3D2B1F] text-white' : 'text-gray-400 hover:bg-white'}`}
               >
-                ←
-              </button>
-              <span className="text-xs font-bold text-gray-700 min-w-[140px] text-center">{weekRangeLabel}</span>
-              <button
-                onClick={() => setWeekAnchor(d => { const n = new Date(d); n.setDate(n.getDate() + 7); return n })}
-                className="p-1.5 rounded-lg border border-gray-200 hover:bg-white text-gray-500"
-              >
-                →
+                Semana
               </button>
               <button
-                onClick={() => setWeekAnchor(new Date(todayDate))}
-                className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-white text-[10px] font-bold text-gray-500 uppercase tracking-wider"
+                onClick={() => setWeekViewMode('personalizado')}
+                className={`px-3 py-1.5 transition-colors ${weekViewMode === 'personalizado' ? 'bg-[#3D2B1F] text-white' : 'text-gray-400 hover:bg-white'}`}
               >
-                Hoy
+                Rango Personalizado
               </button>
             </div>
           </div>
-          <div className="overflow-x-auto">
+          <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-3 border-b border-gray-100 bg-gray-50/40">
+            {weekViewMode === 'semana' ? (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setWeekAnchor(d => { const n = new Date(d); n.setDate(n.getDate() - 7); return n })}
+                  className="p-1.5 rounded-lg border border-gray-200 hover:bg-white text-gray-500"
+                >
+                  ←
+                </button>
+                <span className="text-xs font-bold text-gray-700 min-w-[140px] text-center">{weekRangeLabel}</span>
+                <button
+                  onClick={() => setWeekAnchor(d => { const n = new Date(d); n.setDate(n.getDate() + 7); return n })}
+                  className="p-1.5 rounded-lg border border-gray-200 hover:bg-white text-gray-500"
+                >
+                  →
+                </button>
+                <button
+                  onClick={() => setWeekAnchor(new Date(todayDate))}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-white text-[10px] font-bold text-gray-500 uppercase tracking-wider"
+                >
+                  Hoy
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Desde</label>
+                <input
+                  type="date"
+                  value={weekRangeFrom}
+                  onChange={e => setWeekRangeFrom(e.target.value)}
+                  className="border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059]"
+                />
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Hasta</label>
+                <input
+                  type="date"
+                  value={weekRangeTo}
+                  onChange={e => setWeekRangeTo(e.target.value)}
+                  className="border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059]"
+                />
+                {weekRangeFrom && weekRangeTo && weekRangeFrom <= weekRangeTo && (
+                  <span className="text-xs font-bold text-gray-700">{weekRangeLabel}</span>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="overflow-auto max-h-[70vh]">
             <div className="min-w-[800px] divide-y divide-gray-100">
-              {/* Header row (Dates) */}
-              <div className="flex bg-gray-50/50">
+              {/* Header row (Dates) — fijo arriba al hacer scroll para siempre ver a qué día corresponde cada columna */}
+              <div className="flex bg-gray-50 sticky top-0 z-20 border-b border-gray-100 shadow-sm">
                 {/* Cabin column header spacer */}
-                <div className="w-56 shrink-0 p-4 font-bold text-[10px] text-gray-400 uppercase tracking-widest flex items-center border-r border-gray-100">
+                <div className="w-56 shrink-0 p-4 font-bold text-[10px] text-gray-400 uppercase tracking-widest flex items-center border-r border-gray-100 bg-gray-50">
                   Cabaña
                 </div>
-                {/* 7 Days columns */}
-                <div className="flex-1 grid grid-cols-7 divide-x divide-gray-100">
+                {/* Columnas de días (7 en semana fija, o las que tenga el rango personalizado) */}
+                <div className="flex-1 grid divide-x divide-gray-100" style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(0, 1fr))` }}>
                   {weekDays.map(day => {
                     const isToday = day.dateStr === todayStr
                     return (
@@ -1173,7 +1255,7 @@ export default function BookingsPage() {
               {/* Rows per Cabin */}
               {activeAccommodationOptions.map(acc => {
                 const weekStartStr = weekDays[0].dateStr
-                const weekEndStr = weekDays[6].dateStr
+                const weekEndStr = weekDays[weekDays.length - 1].dateStr
                 // Reservas de este cuarto que tocan la semana visible, como una sola barra continua
                 const rowBookings = bookings.filter(b =>
                   b.accommodationId === acc.id && b.checkIn <= weekEndStr && b.checkOut > weekStartStr
@@ -1195,9 +1277,9 @@ export default function BookingsPage() {
                     </div>
                   </div>
 
-                  {/* 7 columns: fondo con zonas de drop + barras de reserva superpuestas */}
+                  {/* Columnas: fondo con zonas de drop + barras de reserva superpuestas */}
                   <div className="flex-1 relative">
-                    <div className="grid grid-cols-7 divide-x divide-gray-100 h-20">
+                    <div className="grid divide-x divide-gray-100 h-20" style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(0, 1fr))` }}>
                       {weekDays.map(day => {
                         const isOccupied = rowBookings.some(b => day.dateStr >= b.checkIn && day.dateStr < b.checkOut)
                         const checkOutBooking = !isOccupied
@@ -1254,8 +1336,8 @@ export default function BookingsPage() {
                       if (occupiedIdx.length === 0) return null
                       const startIdx = occupiedIdx[0]
                       const endIdx = occupiedIdx[occupiedIdx.length - 1]
-                      const leftPct = (startIdx / 7) * 100
-                      const widthPct = ((endIdx - startIdx + 1) / 7) * 100
+                      const leftPct = (startIdx / weekDays.length) * 100
+                      const widthPct = ((endIdx - startIdx + 1) / weekDays.length) * 100
                       const colors = getPaymentColorClasses(b)
                       const isBeingDragged = dragInfo?.bookingId === b.id
 
@@ -1455,9 +1537,9 @@ export default function BookingsPage() {
                             <span className="text-[9px] uppercase tracking-widest text-[#C5A059] font-bold block mt-0.5">{acc?.type}</span>
                           </td>
                           <td className="px-4 py-4 text-xs font-medium text-gray-600">
-                            {new Date(b.checkIn).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
+                            {parseLocalDate(b.checkIn).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
                             {' al '}
-                            {new Date(b.checkOut).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })}
+                            {parseLocalDate(b.checkOut).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })}
                           </td>
                           <td className="px-4 py-4">
                             <span className="text-xs font-medium text-gray-600 flex items-center gap-1">
@@ -1520,7 +1602,7 @@ export default function BookingsPage() {
       {selectedBooking && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-end p-0 bg-black/40 backdrop-blur-sm">
           {/* Overlay click to close */}
-          <div className="absolute inset-0" onClick={() => { setSelectedBooking(null); setEditingAccommodation(false) }} />
+          <div className="absolute inset-0" onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setEditingDates(false) }} />
           
           <div className="relative w-full max-w-md h-[90vh] sm:h-screen bg-white rounded-t-3xl sm:rounded-l-3xl sm:rounded-tr-none shadow-2xl p-6 flex flex-col justify-between overflow-y-auto animate-in slide-in-from-bottom sm:slide-in-from-right duration-300">
             <div>
@@ -1541,7 +1623,7 @@ export default function BookingsPage() {
                   </span>
                 </div>
                 <button
-                  onClick={() => { setSelectedBooking(null); setEditingAccommodation(false) }}
+                  onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setEditingDates(false) }}
                   className="p-2 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600"
                 >
                   <X size={20} />
@@ -1557,6 +1639,9 @@ export default function BookingsPage() {
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-gray-800 leading-tight">{selectedBooking.guestName}</h3>
+                    {selectedBooking.guestCi && (
+                      <span className="text-[11px] text-gray-400 font-semibold">CI {selectedBooking.guestCi}</span>
+                    )}
                     <div className="flex flex-col gap-1 mt-1.5 text-xs text-gray-500">
                       <a href={`tel:${selectedBooking.guestPhone}`} className="flex items-center gap-1 hover:text-[#C5A059]"><Phone size={12} /> {selectedBooking.guestPhone}</a>
                       <a href={`mailto:${selectedBooking.guestEmail}`} className="flex items-center gap-1 hover:text-[#C5A059]"><Mail size={12} /> {selectedBooking.guestEmail}</a>
@@ -1619,15 +1704,77 @@ export default function BookingsPage() {
                 </div>
 
                 {/* 3. Dates and Guests */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-gray-50/50 p-4 border border-gray-100 rounded-2xl">
-                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Check-In</span>
-                    <span className="text-sm font-bold text-gray-700">{new Date(selectedBooking.checkIn).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Fechas de la Estadía</span>
+                    {!editingDates && (
+                      <button
+                        onClick={() => {
+                          setEditDatesForm({ checkIn: selectedBooking.checkIn, checkOut: selectedBooking.checkOut })
+                          setEditingDates(true)
+                        }}
+                        className="text-[10px] font-bold text-[#C5A059] uppercase tracking-wider hover:underline"
+                      >
+                        Cambiar
+                      </button>
+                    )}
                   </div>
-                  <div className="bg-gray-50/50 p-4 border border-gray-100 rounded-2xl">
-                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Check-Out</span>
-                    <span className="text-sm font-bold text-gray-700">{new Date(selectedBooking.checkOut).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
-                  </div>
+                  {editingDates ? (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Check-In</label>
+                          <input
+                            type="date"
+                            value={editDatesForm.checkIn}
+                            onChange={e => setEditDatesForm(f => ({ ...f, checkIn: e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Check-Out</label>
+                          <input
+                            type="date"
+                            value={editDatesForm.checkOut}
+                            onChange={e => setEditDatesForm(f => ({ ...f, checkOut: e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => {
+                            if (editDatesForm.checkOut <= editDatesForm.checkIn) {
+                              alert('Error: la fecha de check-out debe ser posterior al check-in.')
+                              return
+                            }
+                            reassignBooking(selectedBooking.id, selectedBooking.accommodationId, editDatesForm.checkIn, editDatesForm.checkOut)
+                              .then(ok => { if (ok) setEditingDates(false) })
+                          }}
+                          className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider hover:underline"
+                        >
+                          Guardar
+                        </button>
+                        <button
+                          onClick={() => setEditingDates(false)}
+                          className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:underline"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-gray-50/50 p-4 border border-gray-100 rounded-2xl">
+                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Check-In</span>
+                        <span className="text-sm font-bold text-gray-700">{parseLocalDate(selectedBooking.checkIn).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+                      </div>
+                      <div className="bg-gray-50/50 p-4 border border-gray-100 rounded-2xl">
+                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Check-Out</span>
+                        <span className="text-sm font-bold text-gray-700">{parseLocalDate(selectedBooking.checkOut).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* 4. Guests count list */}
@@ -1648,6 +1795,12 @@ export default function BookingsPage() {
                       </div>
                     )}
                   </div>
+                  {selectedBooking.companions && (
+                    <div className="pt-2 border-t border-gray-100 text-xs text-gray-600">
+                      <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Nombres de Acompañantes</span>
+                      {selectedBooking.companions}
+                    </div>
+                  )}
                 </div>
 
                 {/* 5. Special Notes */}
@@ -1673,12 +1826,22 @@ export default function BookingsPage() {
                     <span className="text-gray-500 font-semibold">Monto Abonado</span>
                     <span className="font-bold text-emerald-600">{fmt(selectedBooking.amountPaid)}</span>
                   </div>
-                  <div className="flex justify-between text-xs py-1 font-bold">
+                  <div className="flex justify-between text-xs py-1 font-bold border-b border-gray-100/50">
                     <span className="text-gray-800">Saldo Pendiente</span>
                     <span className={selectedBooking.totalAmount - selectedBooking.amountPaid > 0 ? 'text-rose-500' : 'text-emerald-600'}>
                       {fmt(selectedBooking.totalAmount - selectedBooking.amountPaid)}
                     </span>
                   </div>
+                  <div className="flex justify-between text-xs py-1">
+                    <span className="text-gray-500 font-semibold">Método de Pago</span>
+                    <span className="font-bold text-gray-800 capitalize">{selectedBooking.paymentMethod}</span>
+                  </div>
+                  {selectedBooking.paymentReference && (
+                    <div className="flex justify-between text-xs py-1">
+                      <span className="text-gray-500 font-semibold">Código de Pago / Referencia</span>
+                      <span className="font-bold text-gray-800 select-all">{selectedBooking.paymentReference}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1762,27 +1925,53 @@ export default function BookingsPage() {
               {/* Guest details */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="col-span-1 sm:col-span-2 relative">
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Nombre Completo del Huésped</label>
-                  <input
-                    type="text"
-                    placeholder="Ej. Familia Rodríguez o Sra. Ana Peralta"
-                    value={form.guestName}
-                    onFocus={() => setShowSuggestions(true)}
-                    onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
-                    onChange={e => {
-                      setForm(f => ({ ...f, guestName: e.target.value }))
-                      setShowSuggestions(true)
-                    }}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
-                  />
-                  {/* Autocomplete Dropdown */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Nombre</label>
+                      <input
+                        type="text"
+                        placeholder="Ej. Ana"
+                        value={form.guestFirstName}
+                        onFocus={() => setShowSuggestions(true)}
+                        onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                        onChange={e => {
+                          setForm(f => ({ ...f, guestFirstName: e.target.value }))
+                          setShowSuggestions(true)
+                        }}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Apellido</label>
+                      <input
+                        type="text"
+                        placeholder="Ej. Peralta"
+                        value={form.guestLastName}
+                        onFocus={() => setShowSuggestions(true)}
+                        onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                        onChange={e => {
+                          setForm(f => ({ ...f, guestLastName: e.target.value }))
+                          setShowSuggestions(true)
+                        }}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                      />
+                    </div>
+                  </div>
+                  {/* Autocomplete Dropdown — busca coincidencias por nombre o por apellido */}
                   {shouldShowGuestSuggestions && guestSuggestions.length > 0 && (
                     <div className="absolute z-10 w-full mt-1 bg-white border border-gray-100 rounded-xl shadow-xl overflow-hidden max-h-48 custom-scrollbar">
                       {guestSuggestions.map((g, i) => (
-                        <div 
+                        <div
                           key={i}
                           onClick={() => {
-                            setForm(f => ({ ...f, guestName: g.name, guestPhone: g.phone || f.guestPhone, guestEmail: g.email || f.guestEmail }))
+                            const parts = g.name.trim().split(/\s+/)
+                            setForm(f => ({
+                              ...f,
+                              guestFirstName: parts[0] || '',
+                              guestLastName: parts.slice(1).join(' '),
+                              guestPhone: g.phone || f.guestPhone,
+                              guestEmail: g.email || f.guestEmail
+                            }))
                             setShowSuggestions(false)
                           }}
                           className="px-4 py-2 hover:bg-[#C5A059]/10 cursor-pointer flex flex-col gap-0.5 border-b border-gray-50 last:border-0"
@@ -1797,6 +1986,16 @@ export default function BookingsPage() {
                       ))}
                     </div>
                   )}
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Cédula de Identidad (CI)</label>
+                  <input
+                    type="text"
+                    placeholder="Ej. V-15395394"
+                    value={form.guestCi}
+                    onChange={e => setForm(f => ({ ...f, guestCi: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                  />
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Teléfono</label>
@@ -1815,6 +2014,16 @@ export default function BookingsPage() {
                     placeholder="email@correo.com"
                     value={form.guestEmail}
                     onChange={e => setForm(f => ({ ...f, guestEmail: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+                <div className="col-span-1 sm:col-span-2">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Acompañantes</label>
+                  <input
+                    type="text"
+                    placeholder="Nombres y apellidos de los demás huéspedes"
+                    value={form.companions}
+                    onChange={e => setForm(f => ({ ...f, companions: e.target.value }))}
                     className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
                   />
                 </div>
@@ -2028,16 +2237,33 @@ export default function BookingsPage() {
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Método</label>
                   <select
                     value={form.paymentMethod}
-                    onChange={e => setForm(f => ({ ...f, paymentMethod: e.target.value as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' }))}
+                    onChange={e => setForm(f => ({ ...f, paymentMethod: e.target.value as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' | 'zelle' }))}
                     className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white capitalize"
                   >
                     <option value="transferencia">Transferencia</option>
+                    <option value="zelle">Zelle</option>
                     <option value="efectivo">Efectivo</option>
                     <option value="tarjeta">Tarjeta</option>
                     <option value="cheque">Cheque</option>
                   </select>
                 </div>
               </div>
+
+              {/* Código de pago — solo aplica a métodos bancarios que se puedan verificar contra el banco */}
+              {(form.paymentMethod === 'transferencia' || form.paymentMethod === 'zelle') && (
+                <div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">
+                    Código de Pago / Referencia {form.paymentMethod === 'zelle' ? '(Zelle)' : '(Transferencia)'}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej. Número de confirmación o referencia bancaria"
+                    value={form.paymentReference}
+                    onChange={e => setForm(f => ({ ...f, paymentReference: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+              )}
 
               {/* Special Notes */}
               <div>
@@ -2065,7 +2291,7 @@ export default function BookingsPage() {
                 type="button"
                 onClick={handleAddBooking}
                 disabled={
-                  !form.guestName.trim() ||
+                  !(form.guestFirstName.trim() && form.guestLastName.trim()) ||
                   form.checkOut <= form.checkIn ||
                   bookings.some(b => b.accommodationId === Number(form.accommodationId) && form.checkIn < b.checkOut && form.checkOut > b.checkIn) ||
                   (getMaxCapacity(Number(form.accommodationId)) > 0 && (Number(form.adults) + Number(form.children)) > getMaxCapacity(Number(form.accommodationId)))

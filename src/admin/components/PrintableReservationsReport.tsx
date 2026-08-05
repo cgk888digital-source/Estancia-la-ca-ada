@@ -1,6 +1,7 @@
 import React from 'react'
 import type { Booking } from '../types'
 import { activeAccommodationOptions } from '../../data/accommodations'
+import { parseLocalDate } from '../../utils/dateUtils'
 
 interface Props {
   bookings: Booking[]
@@ -72,10 +73,10 @@ const PrintableReservationsReport: React.FC<Props> = ({ bookings, dateText }) =>
                   {paxText}
                 </td>
                 <td className="py-2 px-2 text-center text-gray-600 text-xs">
-                  {activeBooking ? new Date(activeBooking.checkIn).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : '-'}
+                  {activeBooking ? parseLocalDate(activeBooking.checkIn).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : '-'}
                 </td>
                 <td className="py-2 pl-2 text-center text-gray-600 text-xs">
-                  {activeBooking ? new Date(activeBooking.checkOut).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : '-'}
+                  {activeBooking ? parseLocalDate(activeBooking.checkOut).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : '-'}
                 </td>
               </tr>
             )

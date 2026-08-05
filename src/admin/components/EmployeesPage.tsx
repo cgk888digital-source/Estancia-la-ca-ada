@@ -4,6 +4,7 @@ import { mockEmployees } from '../data/mockData'
 import type { Employee } from '../types'
 import { supabase } from '../../lib/supabase'
 import { getBcvEuroRate } from '../../utils/exchangeRate'
+import { parseLocalDate } from '../../utils/dateUtils'
 import ReceiptModal from './ReceiptModal'
 
 const fmt = (n: number) =>
@@ -558,7 +559,7 @@ const EmployeesPage: React.FC = () => {
                         >
                           <Receipt size={14} className="text-gray-400 group-hover:text-[#C5A059]" />
                           <span className="text-sm text-gray-500 group-hover:text-gray-900 font-medium">
-                            {new Date(emp.lastPayment).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })}
+                            {parseLocalDate(emp.lastPayment).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })}
                           </span>
                         </button>
                       ) : (
@@ -655,7 +656,7 @@ const EmployeesPage: React.FC = () => {
                         >
                           <Receipt size={14} className="text-gray-400 group-hover:text-[#C5A059]" />
                           <span className="text-sm text-gray-500 group-hover:text-gray-900 font-medium">
-                            {new Date(emp.lastPayment).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })}
+                            {parseLocalDate(emp.lastPayment).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })}
                           </span>
                         </button>
                       ) : (

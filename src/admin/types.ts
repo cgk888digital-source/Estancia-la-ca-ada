@@ -44,6 +44,8 @@ export interface Booking {
   guestName: string
   guestPhone: string
   guestEmail: string
+  guestCi?: string
+  companions?: string
   accommodationId: number
   checkIn: string
   checkOut: string
@@ -56,7 +58,8 @@ export interface Booking {
   totalAmount: number
   amountPaid: number
   paymentStatus: 'completo' | 'parcial' | 'pendiente'
-  paymentMethod: 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque'
+  paymentMethod: 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque' | 'zelle'
+  paymentReference?: string
   status: 'checkout_hoy' | 'checkin_hoy' | 'ocupado' | 'confirmado' | 'limpieza'
   /** false = reserva recién creada por el huésped (BookingFlow), aún no revisada por el staff. */
   confirmed: boolean

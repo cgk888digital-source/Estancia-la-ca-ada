@@ -7,6 +7,7 @@ import { TrendingUp, TrendingDown, DollarSign, Users, ArrowUpRight, ArrowDownRig
 import { mockTransactions, mockMonthlyData, mockEmployees, categoryLabels, categoryColors } from '../data/mockData'
 import type { Transaction, TransactionType, TransactionCategory, PaymentMethod, Employee } from '../types'
 import { supabase } from '../../lib/supabase'
+import { parseLocalDate } from '../../utils/dateUtils'
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
@@ -320,7 +321,7 @@ const Dashboard: React.FC = () => {
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900 truncate">{tx.description}</p>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {new Date(tx.date).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}
+                  {parseLocalDate(tx.date).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}
                   {' · '}
                   <span className="capitalize">{categoryLabels[tx.category]}</span>
                 </p>

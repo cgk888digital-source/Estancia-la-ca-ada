@@ -4,6 +4,7 @@ import { mockTransactions, categoryLabels, categoryColors } from '../data/mockDa
 import type { Transaction, TransactionType, TransactionCategory, PaymentMethod, Employee } from '../types'
 import { supabase } from '../../lib/supabase'
 import ReceiptModal from './ReceiptModal'
+import { parseLocalDate } from '../../utils/dateUtils'
 
 interface Props {
   typeFilter?: TransactionType
@@ -473,7 +474,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                 paginatedItems.map(tx => (
                   <tr key={tx.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 text-sm text-gray-500 whitespace-nowrap">
-                      {new Date(tx.date).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: '2-digit' })}
+                      {parseLocalDate(tx.date).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: '2-digit' })}
                     </td>
                     <td className="px-4 py-4">
                       <p className="text-sm font-medium text-gray-900">{tx.description}</p>
