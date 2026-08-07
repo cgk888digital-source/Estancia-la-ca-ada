@@ -37,7 +37,7 @@ export async function sendBookingConfirmationEmail(supabase: SupabaseClient, par
       </div>
       <div style="padding: 28px 24px; background: #F9F7F3;">
         <p style="font-size: 16px;">Hola ${firstName},</p>
-        <p style="font-size: 14px; line-height: 1.6;">¡Gracias por tu reserva! Aquí tienes el resumen:</p>
+        <p style="font-size: 14px; line-height: 1.6;">¡Gracias por su reservación!</p>
         <div style="background: #fff; border: 1px solid #E6DCC9; border-radius: 12px; padding: 16px; margin: 16px 0;">
           <p style="margin: 4px 0; font-size: 13px;"><strong>Localizador:</strong> ${params.locator}</p>
           <p style="margin: 4px 0; font-size: 13px;"><strong>Alojamiento:</strong> ${params.accommodationTitle}</p>
@@ -48,7 +48,7 @@ export async function sendBookingConfirmationEmail(supabase: SupabaseClient, par
           <p style="margin: 4px 0; font-size: 13px;"><strong>Abonado:</strong> ${fmtMoney(params.amountPaid)}</p>
           <p style="margin: 4px 0; font-size: 13px;"><strong>Saldo Pendiente:</strong> ${fmtMoney(balance)}</p>
         </div>
-        <p style="font-size: 13px; color: #5A4C3E; line-height: 1.6;">Cualquier duda, respóndenos por WhatsApp. ¡Te esperamos en el páramo!</p>
+        <p style="font-size: 13px; color: #5A4C3E; line-height: 1.6;">Cualquier duda, respóndenos por WhatsApp. ¡Los esperamos en el páramo!</p>
       </div>
     </div>
   `
