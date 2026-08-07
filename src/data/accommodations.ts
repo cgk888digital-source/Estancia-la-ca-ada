@@ -13,8 +13,9 @@ export interface AccommodationOption {
   description: string;
   rooms: string[];
   amenities: string[];
-  /** Physical room number as used internally (housekeeping, tarifa sheet). Only set for individually-rented rooms. */
-  roomNumber?: number;
+  /** Physical room number as used internally (housekeeping, tarifa sheet). Only set for individually-rented
+   *  rooms; suites spanning two connected rooms use a "13/14" style string. */
+  roomNumber?: number | string;
   /**
    * false = kept only so historical bookings (accommodation_id referencing this option) still
    * resolve a title/image. No longer offered for new bookings. See La Manita / Llano Grande split below.
@@ -213,6 +214,7 @@ export const accommodationOptions: AccommodationOption[] = [
   // ── GALERÍA SUITE LA VEGA — 5 suites reales (2 de 6 pax, 2 de 5 pax, 1 de 4 pax) ──
   {
     id: 50,
+    roomNumber: "13/14",
     title: "Galería Suite La Vega — Habitación 13/14",
     type: "Suite Comunicante",
     price: 137,
@@ -233,6 +235,7 @@ export const accommodationOptions: AccommodationOption[] = [
   },
   {
     id: 51,
+    roomNumber: "15/16",
     title: "Galería Suite La Vega — Habitación 15/16",
     type: "Suite Comunicante",
     price: 137,
@@ -253,6 +256,7 @@ export const accommodationOptions: AccommodationOption[] = [
   },
   {
     id: 6,
+    roomNumber: "17/18",
     title: "Galería Suite La Vega — Habitación 17/18",
     type: "Suite Comunicante",
     price: 137,
@@ -297,6 +301,7 @@ export const accommodationOptions: AccommodationOption[] = [
   },
   {
     id: 52,
+    roomNumber: "19/20",
     title: "Galería Suite La Vega — Habitación 19/20",
     type: "Suite Comunicante",
     price: 137,
@@ -317,6 +322,7 @@ export const accommodationOptions: AccommodationOption[] = [
   },
   {
     id: 7,
+    roomNumber: 21,
     title: "Galería Suite La Vega — Habitación 21",
     type: "Suite Comunicante",
     price: 137,

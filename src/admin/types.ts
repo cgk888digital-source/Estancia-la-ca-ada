@@ -67,6 +67,17 @@ export interface Booking {
   locator?: string
 }
 
+export interface BookingPayment {
+  id: string
+  bookingId: string
+  paymentDate: string
+  amount: number
+  currency: string
+  method: 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque' | 'zelle'
+  reference?: string
+  status: 'verificado' | 'pendiente'
+}
+
 export type CustomerStatus = 'subscribed' | 'unsubscribed' | 'prospect' | 'vip'
 export type CampaignStatus = 'draft' | 'scheduled' | 'sent' | 'paused'
 export type CampaignSegment = 'all' | 'subscribed' | 'vip' | 'prospect' | 'recent_guests' | 'no_recent_stay'

@@ -1,14 +1,16 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import {
   Calendar, Users, Check, LogIn, LogOut, Trash2, Search, Plus, X, Phone, Mail,
-  Info, DollarSign, Baby, Sparkles, RefreshCw, Printer
+  Info, Baby, Sparkles, RefreshCw, Printer
 } from 'lucide-react'
 import { accommodationOptions, activeAccommodationOptions, getMaxCapacity } from '../../data/accommodations'
 import { mockBookings } from '../data/mockBookings'
 import { supabase } from '../../lib/supabase'
-import type { Booking } from '../types'
+import type { Booking, BookingPayment } from '../types'
 import PrintableReservationsReport from './PrintableReservationsReport'
 import { parseLocalDate } from '../../utils/dateUtils'
+import { syncMarketingCustomer } from '../../utils/syncMarketingCustomer'
+import { sendBookingConfirmationEmail } from '../../utils/sendBookingConfirmationEmail'
 
 // Helper to format currency
 const fmt = (n: number) =>
@@ -84,6 +86,28 @@ interface DbBooking {
   special_notes?: string | null
   locator?: string | null
 }
+
+interface DbBookingPayment {
+  id: string
+  booking_id: string
+  payment_date: string
+  amount: number | string
+  currency: string
+  method: string
+  reference?: string | null
+  status: string
+}
+
+const mapDbPaymentToReact = (db: DbBookingPayment): BookingPayment => ({
+  id: db.id,
+  bookingId: db.booking_id,
+  paymentDate: db.payment_date,
+  amount: Number(db.amount) || 0,
+  currency: db.currency || 'USD',
+  method: (db.method || 'transferencia') as BookingPayment['method'],
+  reference: db.reference || '',
+  status: (db.status || 'verificado') as BookingPayment['status']
+})
 
 interface DbAccommodation {
   id: number | string
@@ -191,6 +215,17 @@ export default function BookingsPage() {
   const [editingAccommodation, setEditingAccommodation] = useState(false)
   const [editingDates, setEditingDates] = useState(false)
   const [editDatesForm, setEditDatesForm] = useState({ checkIn: '', checkOut: '' })
+  // Historial de abonos de la reserva abierta (como en Paxer): cada pago con su fecha,
+  // monto, método y número de operación, en vez de un solo monto acumulado.
+  const [bookingPayments, setBookingPayments] = useState<BookingPayment[]>([])
+  const [loadingPayments, setLoadingPayments] = useState(false)
+  const [addingPayment, setAddingPayment] = useState(false)
+  const [paymentForm, setPaymentForm] = useState({
+    amount: '',
+    date: todayStr,
+    method: 'transferencia' as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' | 'zelle',
+    reference: ''
+  })
   const [weekAnchor, setWeekAnchor] = useState(() => new Date(todayDate))
   // Como en Paxer: la administradora puede elegir un rango de fechas cualquiera (no solo semanas
   // de 7 días) y ver el planner con esas columnas exactas.
@@ -373,7 +408,43 @@ export default function BookingsPage() {
     return () => window.removeEventListener('mouseup', handleMouseUp)
   }, [rangeSelect])
 
+  // Carga el historial de abonos cada vez que se abre la ficha de una reserva.
+  useEffect(() => {
+    let active = true
+
+    const loadPayments = async () => {
+      if (!selectedBooking) {
+        setBookingPayments([])
+        return
+      }
+      setLoadingPayments(true)
+      const { data, error } = await supabase
+        .from('booking_payments')
+        .select('*')
+        .eq('booking_id', selectedBooking.id)
+        .order('payment_date', { ascending: true })
+
+      if (!active) return
+      if (error) {
+        console.error('Error fetching booking payments:', error)
+        setBookingPayments([])
+      } else {
+        setBookingPayments((data || []).map(mapDbPaymentToReact))
+      }
+      setLoadingPayments(false)
+    }
+
+    loadPayments()
+    return () => { active = false }
+  }, [selectedBooking?.id])
+
   const dragOverCellRef = useRef<string | null>(null)
+  // Un simple click siempre dispara mousedown + mouseup, casi nunca con el mouse 100%
+  // quieto — sin este umbral, ese jitter mínimo se leía como "mover la reserva a la celda
+  // vecina" y corría las fechas al abrir la ficha con solo hacer click.
+  const dragStartPosRef = useRef<{ x: number; y: number } | null>(null)
+  const hasDraggedRef = useRef(false)
+  const DRAG_THRESHOLD_PX = 6
 
   useEffect(() => {
     let active = true
@@ -479,7 +550,8 @@ export default function BookingsPage() {
         return dayInfoFromDate(d)
       })
     }
-    return Array.from({ length: 7 }, (_, i) => {
+    // Como en Paxer: se ven varias semanas de un vistazo (21 días) en vez de solo 7.
+    return Array.from({ length: 21 }, (_, i) => {
       const d = new Date(weekAnchor)
       d.setDate(weekAnchor.getDate() + i)
       return dayInfoFromDate(d)
@@ -629,18 +701,82 @@ export default function BookingsPage() {
     }
   }
 
-  const handleRegisterPayment = async (bookingId: string, totalAmount: number) => {
+  // Suma todos los abonos de una reserva y actualiza el monto/estatus de pago de la reserva
+  // para que "Monto Abonado" siempre refleje la suma real del historial de pagos.
+  const syncBookingPaidAmount = async (booking: Booking, payments: BookingPayment[]) => {
+    const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0)
+    const paymentStatus = totalPaid >= booking.totalAmount ? 'completo' : totalPaid > 0 ? 'parcial' : 'pendiente'
+
     const { error } = await supabase
       .from('bookings')
-      .update({ amount_paid: totalAmount, payment_status: 'completo' })
-      .eq('id', bookingId)
+      .update({ amount_paid: totalPaid, payment_status: paymentStatus })
+      .eq('id', booking.id)
 
     if (error) {
-      console.error('Error registering payment:', error)
-    } else {
-      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, amountPaid: totalAmount, paymentStatus: 'completo' } : b))
+      console.error('Error syncing booking paid amount:', error)
+      return
     }
-    setSelectedBooking(null)
+
+    setBookings(prev => prev.map(b => b.id === booking.id ? { ...b, amountPaid: totalPaid, paymentStatus } : b))
+    setSelectedBooking(prev => prev && prev.id === booking.id ? { ...prev, amountPaid: totalPaid, paymentStatus } : prev)
+  }
+
+  const handleAddPayment = async () => {
+    if (!selectedBooking) return
+    const amount = Number(paymentForm.amount)
+    if (!amount || amount <= 0) {
+      alert('Error: ingresa un monto de abono válido.')
+      return
+    }
+
+    const newPayment = {
+      booking_id: selectedBooking.id,
+      payment_date: paymentForm.date,
+      amount,
+      currency: 'USD',
+      method: paymentForm.method,
+      reference: paymentForm.reference.trim() || null,
+      status: 'verificado'
+    }
+
+    const { data, error } = await supabase
+      .from('booking_payments')
+      .insert([newPayment])
+      .select('*')
+
+    if (error || !data) {
+      console.error('Error adding payment:', error)
+      alert('Error al registrar el abono. Intenta de nuevo.')
+      return
+    }
+
+    const updatedPayments = [...bookingPayments, mapDbPaymentToReact(data[0])]
+      .sort((a, b) => a.paymentDate.localeCompare(b.paymentDate))
+    setBookingPayments(updatedPayments)
+    await syncBookingPaidAmount(selectedBooking, updatedPayments)
+
+    setAddingPayment(false)
+    setPaymentForm({ amount: '', date: todayStr, method: 'transferencia', reference: '' })
+  }
+
+  const handleDeletePayment = async (payment: BookingPayment) => {
+    if (!selectedBooking) return
+    if (!confirm(`¿Eliminar el abono de ${fmt(payment.amount)} del ${payment.paymentDate}?`)) return
+
+    const { error } = await supabase
+      .from('booking_payments')
+      .delete()
+      .eq('id', payment.id)
+
+    if (error) {
+      console.error('Error deleting payment:', error)
+      alert('Error al eliminar el abono. Intenta de nuevo.')
+      return
+    }
+
+    const updatedPayments = bookingPayments.filter(p => p.id !== payment.id)
+    setBookingPayments(updatedPayments)
+    await syncBookingPaidAmount(selectedBooking, updatedPayments)
   }
 
   const handleConfirmBooking = async (bookingId: string) => {
@@ -750,8 +886,18 @@ export default function BookingsPage() {
   // adentro) no soltaba sobre nada porque el mouse quedaba sobre la barra, no la celda.
   useEffect(() => {
     if (!dragInfo) return
+    hasDraggedRef.current = false
 
     const handleMouseMove = (e: MouseEvent) => {
+      // Ignora el jitter de un simple click: solo cuenta como arrastre real una vez que
+      // el mouse se aleja más de unos pocos píxeles del punto donde se hizo mousedown.
+      if (!hasDraggedRef.current) {
+        const start = dragStartPosRef.current
+        const movedEnough = !start || Math.hypot(e.clientX - start.x, e.clientY - start.y) >= DRAG_THRESHOLD_PX
+        if (!movedEnough) return
+        hasDraggedRef.current = true
+      }
+
       const stack = document.elementsFromPoint(e.clientX, e.clientY)
       const cellEl = stack.find((el): el is HTMLElement => el instanceof HTMLElement && !!el.dataset.plannerCell)
       const key = cellEl?.dataset.plannerCell ?? null
@@ -763,12 +909,15 @@ export default function BookingsPage() {
 
     const handleMouseUp = () => {
       const key = dragOverCellRef.current
+      const wasRealDrag = hasDraggedRef.current
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
       dragOverCellRef.current = null
+      dragStartPosRef.current = null
+      hasDraggedRef.current = false
       setDragInfo(null)
       setDragOverCell(null)
-      if (key) {
+      if (wasRealDrag && key) {
         const [accIdStr, dateStr] = key.split('|')
         handleDropOnCell(Number(accIdStr), dateStr)
       }
@@ -848,6 +997,44 @@ export default function BookingsPage() {
       console.error('Error adding booking:', error)
     } else if (data && data[0]) {
       setBookings(prev => [mapDbBookingToReact(data[0]), ...prev])
+
+      // Si se registró un abono inicial, queda como el primer pago del historial.
+      if (Number(form.amountPaid) > 0) {
+        const { error: paymentError } = await supabase.from('booking_payments').insert([{
+          booking_id: data[0].id,
+          payment_date: todayStr,
+          amount: Number(form.amountPaid),
+          currency: 'USD',
+          method: form.paymentMethod,
+          reference: form.paymentReference.trim() || null,
+          status: 'verificado'
+        }])
+        if (paymentError) console.error('Error adding initial payment:', paymentError)
+      }
+
+      // Que el huésped de una reserva manual también quede disponible para Email Marketing,
+      // igual que cuando reserva por su cuenta desde la app.
+      if (form.guestEmail.trim()) {
+        syncMarketingCustomer(supabase, {
+          fullName: fullGuestName,
+          email: form.guestEmail.trim(),
+          phone: form.guestPhone.trim(),
+          bookingAmount: finalTotal,
+          stayDate: form.checkIn
+        }).catch(err => console.error('Error sincronizando cliente de marketing:', err))
+
+        // Correo automático de confirmación para reservas creadas manualmente por el staff.
+        sendBookingConfirmationEmail(supabase, {
+          email: form.guestEmail.trim(),
+          guestName: fullGuestName,
+          locator: locatorCode,
+          accommodationTitle: getAccommodation(Number(form.accommodationId))?.title || '',
+          checkIn: form.checkIn,
+          checkOut: form.checkOut,
+          totalAmount: finalTotal,
+          amountPaid: Number(form.amountPaid)
+        })
+      }
     }
 
     closeAddModal()
@@ -1227,25 +1414,25 @@ export default function BookingsPage() {
             )}
           </div>
           <div className="overflow-auto max-h-[70vh]">
-            <div className="min-w-[800px] divide-y divide-gray-100">
+            <div className="min-w-fit divide-y divide-gray-100">
               {/* Header row (Dates) — fijo arriba al hacer scroll para siempre ver a qué día corresponde cada columna */}
               <div className="flex bg-gray-50 sticky top-0 z-20 border-b border-gray-100 shadow-sm">
                 {/* Cabin column header spacer */}
-                <div className="w-56 shrink-0 p-4 font-bold text-[10px] text-gray-400 uppercase tracking-widest flex items-center border-r border-gray-100 bg-gray-50">
+                <div className="w-24 shrink-0 p-2 font-bold text-[9px] text-gray-400 uppercase tracking-widest flex items-center justify-center border-r border-gray-100 bg-gray-50">
                   Cabaña
                 </div>
-                {/* Columnas de días (7 en semana fija, o las que tenga el rango personalizado) */}
-                <div className="flex-1 grid divide-x divide-gray-100" style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(0, 1fr))` }}>
+                {/* Columnas de días (21 en la vista amplia, o las que tenga el rango personalizado) */}
+                <div className="flex-1 grid divide-x divide-gray-100" style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(40px, 1fr))` }}>
                   {weekDays.map(day => {
                     const isToday = day.dateStr === todayStr
                     return (
                       <div
                         key={day.dateStr}
-                        className={`p-3 text-center flex flex-col items-center justify-center ${isToday ? 'bg-amber-500/10 text-amber-800' : 'text-gray-500'}`}
+                        className={`py-1.5 text-center flex flex-col items-center justify-center ${isToday ? 'bg-amber-500/10 text-amber-800' : 'text-gray-500'}`}
                       >
-                        <span className="text-[10px] font-bold uppercase tracking-wider opacity-60">{day.label}</span>
-                        <span className="text-lg font-extrabold leading-none mt-1">{day.dayNum}</span>
-                        <span className="text-[9px] font-medium uppercase tracking-widest opacity-60 mt-0.5">{day.monthLabel}</span>
+                        <span className="text-[8px] font-bold uppercase tracking-wider opacity-60 leading-none">{day.label}</span>
+                        <span className="text-xs font-extrabold leading-none mt-0.5">{day.dayNum}</span>
+                        <span className="text-[7px] font-medium uppercase tracking-widest opacity-60 leading-none mt-0.5">{day.monthLabel}</span>
                       </div>
                     )
                   })}
@@ -1263,23 +1450,22 @@ export default function BookingsPage() {
 
                 return (
                 <div key={acc.id} className="flex hover:bg-gray-50/40 transition-colors">
-                  {/* Cabin Details Info */}
-                  <div className="w-56 shrink-0 p-4 border-r border-gray-100 flex items-center gap-3">
-                    <img
-                      src={acc.image}
-                      alt={acc.title}
-                      className="w-12 h-12 object-cover rounded-xl bg-gray-100 shrink-0"
-                    />
-                    <div className="min-w-0">
-                      <h4 className="text-sm font-bold text-gray-800 truncate leading-tight">{acc.title}</h4>
-                      <span className="text-[9px] uppercase tracking-widest text-[#C5A059] font-bold block mt-0.5">{acc.type}</span>
-                      <span className="text-[10px] text-gray-400 font-semibold block mt-0.5">({acc.maxCapacity} pax) - (1 Habs)</span>
-                    </div>
+                  {/* Cabin Details Info — nombre de la galería arriba, número de habitación abajo */}
+                  <div className="w-24 shrink-0 p-2 border-r border-gray-100 flex flex-col justify-center gap-0.5">
+                    <span className="text-[8px] uppercase tracking-wider text-[#C5A059] font-bold leading-tight truncate">
+                      {acc.title.replace('Galería ', '').split(' — ')[0]}
+                    </span>
+                    <span className="text-[11px] font-extrabold text-gray-800 leading-none">
+                      Hab. {acc.roomNumber ?? '—'}
+                    </span>
+                    <span className="text-[10px] text-gray-400 font-semibold leading-none">
+                      {acc.maxCapacity} pax
+                    </span>
                   </div>
 
                   {/* Columnas: fondo con zonas de drop + barras de reserva superpuestas */}
                   <div className="flex-1 relative">
-                    <div className="grid divide-x divide-gray-100 h-20" style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(0, 1fr))` }}>
+                    <div className="grid divide-x divide-gray-100 h-10" style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(40px, 1fr))` }}>
                       {weekDays.map(day => {
                         // No incluye el estatus de la reserva: así ella siempre ve quién sale ese día,
                         // aunque todavía no haya marcado la limpieza, y aunque otro huésped entre ese mismo día.
@@ -1293,7 +1479,7 @@ export default function BookingsPage() {
                           <div
                             key={day.dateStr}
                             data-planner-cell={`${acc.id}|${day.dateStr}`}
-                            className={`p-2 h-20 flex items-center justify-center relative transition-colors ${isDragTarget || isRangeSelected ? 'bg-[#C5A059]/10' : ''}`}
+                            className={`p-0.5 h-10 flex items-center justify-center relative transition-colors ${isDragTarget || isRangeSelected ? 'bg-[#C5A059]/10' : ''}`}
                           >
                             {!isOccupied && (
                               <button
@@ -1302,10 +1488,10 @@ export default function BookingsPage() {
                                   setRangeSelect(prev => (prev && prev.accId === acc.id) ? { ...prev, endDateStr: day.dateStr } : prev)
                                 }}
                                 title="Clic para un día, o arrastra hasta el día de salida"
-                                className={`w-full h-full rounded-2xl border-2 border-dashed transition-all flex items-center justify-center group select-none
-                                  ${isRangeSelected ? 'border-[#C5A059] bg-[#C5A059]/10 text-[#C5A059]' : 'border-gray-100 hover:border-[#C5A059]/40 hover:bg-[#C5A059]/5 text-gray-300 hover:text-[#C5A059]'}`}
+                                className={`w-full h-full rounded-lg border transition-all flex items-center justify-center group select-none
+                                  ${isRangeSelected ? 'border-[#C5A059] bg-[#C5A059]/10 text-[#C5A059]' : 'border-dashed border-gray-100 hover:border-[#C5A059]/40 hover:bg-[#C5A059]/5 text-gray-300 hover:text-[#C5A059]'}`}
                               >
-                                <Plus size={16} className="group-hover:scale-110 transition-transform" />
+                                <Plus size={11} className="group-hover:scale-110 transition-transform" />
                               </button>
                             )}
                           </div>
@@ -1322,71 +1508,56 @@ export default function BookingsPage() {
                       if (occupiedIdx.length === 0) return null
                       const startIdx = occupiedIdx[0]
                       const endIdx = occupiedIdx[occupiedIdx.length - 1]
-                      const leftPct = (startIdx / weekDays.length) * 100
-                      const widthPct = ((endIdx - startIdx + 1) / weekDays.length) * 100
+                      // Como en un hotel real: el check-in es de tarde y el check-out de mañana. Si el
+                      // día de llegada o de salida está dentro de la semana visible, la barra empieza o
+                      // termina a la MITAD de esa columna (no en el borde completo), para que dos
+                      // reservas de la misma habitación el mismo día (una sale, otra entra) se vean
+                      // como dos mitades que se juntan, en vez de un cuadrito de aviso aparte.
+                      const checkInVisible = b.checkIn >= weekDays[0].dateStr
+                      const checkOutVisible = b.checkOut <= weekDays[weekDays.length - 1].dateStr
+                      const leftEdgeIdx = checkInVisible ? startIdx + 0.5 : startIdx
+                      const rightEdgeIdx = checkOutVisible ? endIdx + 1.5 : endIdx + 1
+                      const leftPct = (leftEdgeIdx / weekDays.length) * 100
+                      const widthPct = ((rightEdgeIdx - leftEdgeIdx) / weekDays.length) * 100
                       const colors = getPaymentColorClasses(b)
                       const isBeingDragged = dragInfo?.bookingId === b.id
 
                       return (
                         <div
                           key={b.id}
-                          style={{ left: `calc(${leftPct}% + 4px)`, width: `calc(${widthPct}% - 8px)` }}
-                          className={`absolute top-2 bottom-2 rounded-2xl border flex items-stretch overflow-hidden ${colors.bg} ${isBeingDragged ? 'opacity-40' : ''}`}
+                          style={{ left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)` }}
+                          className={`absolute top-1 bottom-1 rounded-lg border flex items-stretch overflow-hidden ${colors.bg} ${isBeingDragged ? 'opacity-40' : ''}`}
                         >
                           {/* Borde izquierdo: arrastrar para cambiar solo el check-in */}
                           <div
-                            onMouseDown={e => { e.preventDefault(); setDragInfo({ bookingId: b.id, mode: 'resize-left' }) }}
+                            onMouseDown={e => { e.preventDefault(); dragStartPosRef.current = { x: e.clientX, y: e.clientY }; setDragInfo({ bookingId: b.id, mode: 'resize-left' }) }}
                             title="Arrastra para cambiar el check-in"
-                            className="w-2 shrink-0 cursor-ew-resize hover:bg-black/10 transition-colors select-none"
+                            className="w-1.5 shrink-0 cursor-ew-resize hover:bg-black/10 transition-colors select-none"
                           />
 
                           {/* Cuerpo: arrastrar para mover toda la reserva, click (sin arrastrar) para ver detalle */}
                           <button
-                            onMouseDown={() => setDragInfo({ bookingId: b.id, mode: 'move' })}
+                            onMouseDown={e => { dragStartPosRef.current = { x: e.clientX, y: e.clientY }; setDragInfo({ bookingId: b.id, mode: 'move' }) }}
                             onClick={() => setSelectedBooking(b)}
                             title="Arrastra para mover la reserva"
-                            className="flex-1 min-w-0 p-2 text-left flex flex-col justify-between cursor-grab active:cursor-grabbing hover:brightness-95 transition-all select-none"
+                            className="flex-1 min-w-0 px-1.5 text-left flex items-center gap-1 cursor-grab active:cursor-grabbing hover:brightness-95 transition-all select-none"
                           >
-                            <div className="flex items-center gap-1">
-                              <span className={`w-1.5 h-1.5 rounded-full ${colors.bullet} shrink-0`} />
-                              <span className="text-[10px] font-extrabold truncate max-w-full block leading-none">
-                                {b.guestName.split(' ')[0]}
-                              </span>
-                            </div>
-                            <span className="text-[8px] font-bold text-gray-400 tracking-wider">
-                              {b.guestsCount.adults} Huésp.
+                            <span className={`w-1.5 h-1.5 rounded-full ${colors.bullet} shrink-0`} />
+                            <span className="text-[9px] font-extrabold truncate max-w-full block leading-none">
+                              {b.guestName.split(' ')[0]}
+                            </span>
+                            <span className="text-[10px] font-bold opacity-60 shrink-0 leading-none">
+                              · {b.guestsCount.adults + b.guestsCount.children}p
                             </span>
                           </button>
 
                           {/* Borde derecho: arrastrar para cambiar solo el check-out */}
                           <div
-                            onMouseDown={e => { e.preventDefault(); setDragInfo({ bookingId: b.id, mode: 'resize-right' }) }}
+                            onMouseDown={e => { e.preventDefault(); dragStartPosRef.current = { x: e.clientX, y: e.clientY }; setDragInfo({ bookingId: b.id, mode: 'resize-right' }) }}
                             title="Arrastra para cambiar el check-out"
-                            className="w-2 shrink-0 cursor-ew-resize hover:bg-black/10 transition-colors select-none"
+                            className="w-1.5 shrink-0 cursor-ew-resize hover:bg-black/10 transition-colors select-none"
                           />
                         </div>
-                      )
-                    })}
-
-                    {/* Aviso de salida: se muestra encima de todo (incluso si ese mismo día entra otro
-                        huésped a la misma habitación), para que siempre se vea quién sale por la mañana
-                        aunque por la tarde llegue alguien más. */}
-                    {weekDays.map((day, i) => {
-                      const departingBooking = bookings.find(b => b.accommodationId === acc.id && b.checkOut === day.dateStr)
-                      if (!departingBooking) return null
-                      const leftPct = (i / weekDays.length) * 100
-                      const widthPct = (1 / weekDays.length) * 100
-                      return (
-                        <button
-                          key={`salida-${day.dateStr}`}
-                          onClick={() => setSelectedBooking(departingBooking)}
-                          title={`Salió: ${departingBooking.guestName}`}
-                          style={{ left: `calc(${leftPct}% + 4px)`, width: `calc(${widthPct}% - 8px)` }}
-                          className={`absolute top-1 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-left transition-all hover:brightness-95 ${getPaymentColorClasses(departingBooking).bg}`}
-                        >
-                          <LogOut size={9} className="shrink-0" />
-                          <span className="text-[8px] font-extrabold truncate leading-none">Salió: {departingBooking.guestName.split(' ')[0]}</span>
-                        </button>
                       )
                     })}
                   </div>
@@ -1610,7 +1781,7 @@ export default function BookingsPage() {
       {selectedBooking && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-end p-0 bg-black/40 backdrop-blur-sm">
           {/* Overlay click to close */}
-          <div className="absolute inset-0" onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setEditingDates(false) }} />
+          <div className="absolute inset-0" onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setEditingDates(false); setAddingPayment(false) }} />
           
           <div className="relative w-full max-w-md h-[90vh] sm:h-screen bg-white rounded-t-3xl sm:rounded-l-3xl sm:rounded-tr-none shadow-2xl p-6 flex flex-col justify-between overflow-y-auto animate-in slide-in-from-bottom sm:slide-in-from-right duration-300">
             <div>
@@ -1631,7 +1802,7 @@ export default function BookingsPage() {
                   </span>
                 </div>
                 <button
-                  onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setEditingDates(false) }}
+                  onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setEditingDates(false); setAddingPayment(false) }}
                   className="p-2 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600"
                 >
                   <X size={20} />
@@ -1834,20 +2005,122 @@ export default function BookingsPage() {
                     <span className="text-gray-500 font-semibold">Monto Abonado</span>
                     <span className="font-bold text-emerald-600">{fmt(selectedBooking.amountPaid)}</span>
                   </div>
-                  <div className="flex justify-between text-xs py-1 font-bold border-b border-gray-100/50">
+                  <div className="flex justify-between text-xs py-1 font-bold">
                     <span className="text-gray-800">Saldo Pendiente</span>
                     <span className={selectedBooking.totalAmount - selectedBooking.amountPaid > 0 ? 'text-rose-500' : 'text-emerald-600'}>
                       {fmt(selectedBooking.totalAmount - selectedBooking.amountPaid)}
                     </span>
                   </div>
-                  <div className="flex justify-between text-xs py-1">
-                    <span className="text-gray-500 font-semibold">Método de Pago</span>
-                    <span className="font-bold text-gray-800 capitalize">{selectedBooking.paymentMethod}</span>
+                </div>
+
+                {/* 7. Historial de Pagos: cada abono con su fecha, método y número de operación */}
+                <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Historial de Pagos</span>
+                    {!addingPayment && (
+                      <button
+                        onClick={() => setAddingPayment(true)}
+                        className="text-[10px] font-bold text-[#C5A059] uppercase tracking-wider hover:underline flex items-center gap-1"
+                      >
+                        <Plus size={12} /> Agregar Pago
+                      </button>
+                    )}
                   </div>
-                  {selectedBooking.paymentReference && (
-                    <div className="flex justify-between text-xs py-1">
-                      <span className="text-gray-500 font-semibold">Código de Pago / Referencia</span>
-                      <span className="font-bold text-gray-800 select-all">{selectedBooking.paymentReference}</span>
+
+                  {loadingPayments ? (
+                    <p className="text-xs text-gray-400 text-center py-2">Cargando...</p>
+                  ) : bookingPayments.length === 0 && !addingPayment ? (
+                    <p className="text-xs text-gray-400 text-center py-2">Todavía no hay abonos registrados.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {bookingPayments.map(p => (
+                        <div key={p.id} className="flex items-center justify-between gap-2 bg-gray-50/50 border border-gray-100 rounded-xl px-3 py-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-gray-800">{fmt(p.amount)}</span>
+                              <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-full px-1.5 py-0.5">
+                                {p.status === 'verificado' ? 'Verificado' : 'Pendiente'}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-gray-400 mt-0.5 truncate">
+                              {parseLocalDate(p.paymentDate).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
+                              {' · '}<span className="capitalize">{p.method}</span>
+                              {p.reference && <> · <span className="select-all">{p.reference}</span></>}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleDeletePayment(p)}
+                            className="p-1.5 text-gray-300 hover:text-rose-500 transition-colors shrink-0"
+                            title="Eliminar abono"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {addingPayment && (
+                    <div className="space-y-2 pt-2 border-t border-gray-100">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Monto ($)</label>
+                          <input
+                            type="number"
+                            min={0}
+                            value={paymentForm.amount}
+                            onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))}
+                            placeholder="0"
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Fecha</label>
+                          <input
+                            type="date"
+                            value={paymentForm.date}
+                            onChange={e => setPaymentForm(f => ({ ...f, date: e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059]"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Método</label>
+                          <select
+                            value={paymentForm.method}
+                            onChange={e => setPaymentForm(f => ({ ...f, method: e.target.value as typeof paymentForm.method }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white capitalize"
+                          >
+                            <option value="transferencia">Transferencia</option>
+                            <option value="zelle">Zelle</option>
+                            <option value="efectivo">Efectivo</option>
+                            <option value="tarjeta">Tarjeta</option>
+                            <option value="cheque">Cheque</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">N° de Operación</label>
+                          <input
+                            type="text"
+                            value={paymentForm.reference}
+                            onChange={e => setPaymentForm(f => ({ ...f, reference: e.target.value }))}
+                            placeholder="Ej. 30226263971"
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059]"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 pt-1">
+                        <button onClick={handleAddPayment} className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider hover:underline">
+                          Guardar Abono
+                        </button>
+                        <button
+                          onClick={() => { setAddingPayment(false); setPaymentForm({ amount: '', date: todayStr, method: 'transferencia', reference: '' }) }}
+                          className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:underline"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1884,14 +2157,6 @@ export default function BookingsPage() {
               )}
 
               <div className="flex gap-2">
-                {selectedBooking.amountPaid < selectedBooking.totalAmount && (
-                  <button
-                    onClick={() => handleRegisterPayment(selectedBooking.id, selectedBooking.totalAmount)}
-                    className="flex-1 py-3 border border-emerald-500/30 hover:bg-emerald-50 text-emerald-700 font-bold rounded-2xl text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5"
-                  >
-                    <DollarSign size={14} /> Registrar Pago
-                  </button>
-                )}
                 <button
                   onClick={() => handleDeleteBooking(selectedBooking.id)}
                   className="flex-1 py-3 border border-rose-100 hover:bg-rose-50 text-rose-500 font-bold rounded-2xl text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5"

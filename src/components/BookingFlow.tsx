@@ -5,6 +5,8 @@ import { activeAccommodationOptions, getMaxCapacity } from '../data/accommodatio
 import { supabase } from '../lib/supabase';
 import { getBcvEuroRate } from '../utils/exchangeRate';
 import { useHotelSettings } from '../utils/useHotelSettings';
+import { syncMarketingCustomer } from '../utils/syncMarketingCustomer';
+import { sendBookingConfirmationEmail } from '../utils/sendBookingConfirmationEmail';
 
 export interface BookingFlowData {
   unitName: string;
@@ -1266,7 +1268,29 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
                 supabase.from('bookings').insert(insertRows).then(({ error }) => {
                   if (error) {
                     console.error('Error guardando la reserva en Supabase:', error);
+                    return;
                   }
+                  // Que el huésped que reserva quede disponible para Email Marketing sin
+                  // tener que cargarlo a mano después.
+                  syncMarketingCustomer(supabase, {
+                    fullName: `${formData.nombre} ${formData.apellido}`,
+                    email: formData.correo,
+                    phone: formData.tlf,
+                    bookingAmount: totalStayPrice,
+                    stayDate: checkInStr
+                  }).catch(err => console.error('Error sincronizando cliente de marketing:', err));
+
+                  // Correo automático de confirmación (respaldo del mensaje de WhatsApp).
+                  sendBookingConfirmationEmail(supabase, {
+                    email: formData.correo,
+                    guestName: `${formData.nombre} ${formData.apellido}`,
+                    locator: bookingCode,
+                    accommodationTitle: selectedData.map(d => d.title).join(' + '),
+                    checkIn: checkInStr,
+                    checkOut: checkOutStr,
+                    totalAmount: totalStayPrice,
+                    amountPaid: depositAmount
+                  });
                 });
 
                 onComplete({
