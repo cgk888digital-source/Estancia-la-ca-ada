@@ -143,7 +143,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
       const discount = Number(dbAcc.discount_percent || 0);
       return discount > 0 ? Math.round(basePrice * (1 - discount / 100)) : basePrice;
     }
-    // Fallback to static defaults
+    // Fallback to static defaults (tarifas base derivadas de Paxer: precio 1 pasajero - $56 de alimentación)
     switch (roomId) {
       case 1:
       case 6:
@@ -151,14 +151,17 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
       case 50:
       case 51:
       case 52:
-        return isDecember ? 158 : 137;
+        return isDecember ? 158 : 140;
       case 2:
+        return isDecember ? 337 : 297; // Cabaña La Lomita
       case 4:
-        return isDecember ? 337 : 297;
+        return isDecember ? 337 : 300; // Cabaña Mitibibó
       case 30: case 31: case 32: case 33: case 34: case 35:
-        return isDecember ? 70 : 60; // Galería La Manita (habitaciones 1-6)
-      case 36: case 37: case 38: case 39: case 40: case 41:
-        return isDecember ? 76 : 64; // Galería Llano Grande (habitaciones 7-12)
+        return isDecember ? 70 : 62; // Galería La Manita (habitaciones 1-6)
+      case 36:
+        return isDecember ? 76 : 66; // Galería Llano Grande — Habitación 7 (2 pax)
+      case 37: case 38: case 39: case 40: case 41:
+        return isDecember ? 76 : 64; // Galería Llano Grande (habitaciones 8-12)
       default:
         return 0;
     }
