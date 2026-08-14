@@ -284,8 +284,9 @@ export default function BookingsPage() {
   const getStandardRate = (accId: number, checkIn: string, checkOut: string, adults: number, children: number) => {
     const nights = calculateNights(checkIn, checkOut)
     const d = parseLocalDate(checkIn)
-    const isDecember = d.getMonth() === 11
-    
+    // Temporada navideña Dic 21 - Ene 07 (mismo criterio que la app del huésped, verificado en Paxer).
+    const isDecember = (d.getMonth() === 11 && d.getDate() >= 21) || (d.getMonth() === 0 && d.getDate() <= 7)
+
     const dbAcc = dbAccommodations.find(o => Number(o.id) === accId)
     let roomPrice: number
     if (dbAcc) {
@@ -293,15 +294,15 @@ export default function BookingsPage() {
       const discount = Number(dbAcc.discount_percent || 0)
       roomPrice = discount > 0 ? Math.round(basePrice * (1 - discount / 100)) : basePrice
     } else {
-      // Fallback
+      // Fallback con las tarifas navideñas del grid de Paxer.
       const acc = accommodationOptions.find(o => o.id === accId)
       if (!acc) return 0
       roomPrice = acc.price
       if (isDecember) {
-        if (accId === 1 || accId === 6 || accId === 7 || accId === 50 || accId === 51 || accId === 52) roomPrice = 158
-        else if (accId === 2 || accId === 4) roomPrice = 337
-        else if (accId >= 30 && accId <= 35) roomPrice = 70 // Galería La Manita (habitaciones 1-6)
-        else if (accId >= 36 && accId <= 41) roomPrice = 76 // Galería Llano Grande (habitaciones 7-12)
+        if (accId === 1 || accId === 6 || accId === 7 || accId === 50 || accId === 51 || accId === 52) roomPrice = 196
+        else if (accId === 2 || accId === 4) roomPrice = 350
+        else if (accId >= 30 && accId <= 35) roomPrice = 84 // Galería La Manita
+        else if (accId >= 36 && accId <= 41) roomPrice = 92 // Galería Llano Grande
       }
     }
     

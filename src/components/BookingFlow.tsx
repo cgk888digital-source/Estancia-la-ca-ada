@@ -119,15 +119,16 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
     const month = date.getMonth();
     const day = date.getDate();
     
-    // Diciembre (Dic 20 - Ene 06)
-    if ((month === 11 && day >= 20) || (month === 0 && day <= 6)) {
+    // Temporada navideña (Dic 21 - Ene 07), verificada contra el grid de Paxer:
+    // el 20 dic aún cobra tarifa normal y el 8 ene ya vuelve a la normal.
+    if ((month === 11 && day >= 21) || (month === 0 && day <= 7)) {
       return 'dec';
     }
-    
-    // Temporada Alta: Dic 15 - Dic 19, Ene 7 - Ene 15, Jun 15 - Sep 15
+
+    // Temporada Alta: Dic 15 - Dic 20, Ene 8 - Ene 15, Jun 15 - Sep 15
     if (
-      (month === 11 && day >= 15 && day <= 19) ||
-      (month === 0 && day >= 7 && day <= 15) ||
+      (month === 11 && day >= 15 && day <= 20) ||
+      (month === 0 && day >= 8 && day <= 15) ||
       ((month === 5 && day >= 15) || month === 6 || month === 7 || (month === 8 && day <= 15))
     ) {
       return 'high';
@@ -143,7 +144,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
       const discount = Number(dbAcc.discount_percent || 0);
       return discount > 0 ? Math.round(basePrice * (1 - discount / 100)) : basePrice;
     }
-    // Fallback to static defaults (tarifas base derivadas de Paxer: precio 1 pasajero - $56 de alimentación)
+    // Fallback to static defaults (tarifas base derivadas de Paxer: precio 1 pasajero - $56 de
+    // alimentación). "isDecember" = temporada navideña del 21 dic al 7 ene.
     switch (roomId) {
       case 1:
       case 6:
@@ -151,17 +153,17 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
       case 50:
       case 51:
       case 52:
-        return isDecember ? 158 : 140;
+        return isDecember ? 196 : 140;
       case 2:
-        return isDecember ? 337 : 297; // Cabaña La Lomita
+        return isDecember ? 350 : 297; // Cabaña La Lomita
       case 4:
-        return isDecember ? 337 : 300; // Cabaña Mitibibó
+        return isDecember ? 350 : 300; // Cabaña Mitibibó
       case 30: case 31: case 32: case 33: case 34: case 35:
-        return isDecember ? 70 : 62; // Galería La Manita (habitaciones 1-6)
+        return isDecember ? 84 : 62; // Galería La Manita (habitaciones 1-6)
       case 36:
-        return isDecember ? 76 : 66; // Galería Llano Grande — Habitación 7 (2 pax)
+        return isDecember ? 92 : 66; // Galería Llano Grande — Habitación 7 (2 pax)
       case 37: case 38: case 39: case 40: case 41:
-        return isDecember ? 76 : 64; // Galería Llano Grande (habitaciones 8-12)
+        return isDecember ? 92 : 64; // Galería Llano Grande (habitaciones 8-12)
       default:
         return 0;
     }

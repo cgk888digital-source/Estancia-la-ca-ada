@@ -27,7 +27,7 @@ export interface AccommodationOption {
 // para que el planner se vea igual a lo que la clienta ya conoce: La Manita, Llano Grande,
 // Suite La Vega, Cabañas. Los legacy quedan al final, no aparecen en ninguna vista nueva.
 export const accommodationOptions: AccommodationOption[] = [
-  // ── GALERÍA LA MANITA — 6 habitaciones individuales (tarifa: $60 / $70 Dic.) ──
+  // ── GALERÍA LA MANITA — 6 habitaciones individuales (tarifa: $62 / $84 navidad 21dic-7ene) ──
   {
     id: 30,
     roomNumber: 1,
@@ -119,7 +119,7 @@ export const accommodationOptions: AccommodationOption[] = [
     amenities: ["Baño Privado", "Techos de Madera", "Vistas a la Montaña"]
   },
 
-  // ── GALERÍA LLANO GRANDE — 6 habitaciones individuales (tarifa: $64 / $76 Dic.) ──
+  // ── GALERÍA LLANO GRANDE — 6 habitaciones individuales (tarifa: $66 la de 2 pax, $64 las de 4 pax / $92 navidad 21dic-7ene) ──
   {
     id: 36,
     roomNumber: 7,
