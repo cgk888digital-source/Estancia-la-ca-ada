@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, X, Users, Dog, Calendar as CalendarIcon, Awa
 import { activeAccommodationOptions, getMaxCapacity } from '../data/accommodations';
 import { supabase } from '../lib/supabase';
 import { getBcvEuroRate } from '../utils/exchangeRate';
-import { useHotelSettings } from '../utils/useHotelSettings';
+import { useHotelSettings, getMealRates } from '../utils/useHotelSettings';
 import { syncMarketingCustomer } from '../utils/syncMarketingCustomer';
 import { sendBookingConfirmationEmail } from '../utils/sendBookingConfirmationEmail';
 
@@ -61,6 +61,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
   const [loadingRate, setLoadingRate] = useState(false);
   const [dbAccommodations, setDbAccommodations] = useState<DbAccommodation[]>([]);
   const { settings: hotelSettings } = useHotelSettings();
+  // Desayuno + cena por noche, configurables desde Tarifas y Descuentos.
+  const mealRates = getMealRates(hotelSettings);
 
   React.useEffect(() => {
     let active = true;
@@ -171,8 +173,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
 
   const calculateStayPrice = (roomId: number, adults: number, children: number, nights: number, isDecember: boolean) => {
     const roomNightlyRate = getRoomPrice(roomId, isDecember);
-    // Alimentos: $56 por adulto, $48 por niño (3-12 años)
-    const mealsNightlyRate = (adults * 56) + (children * 48);
+    // Alimentación (desayuno + cena) por noche, según lo configurado en Tarifas y Descuentos.
+    const mealsNightlyRate = (adults * mealRates.perAdult) + (children * mealRates.perChild);
     const totalNightlyRate = roomNightlyRate + mealsNightlyRate;
     return {
       roomNightly: roomNightlyRate,
@@ -296,7 +298,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
     selectedUnits.forEach(id => {
       totalRoomNightly += getRoomPrice(id, isDecember);
     });
-    const mealsNightlyRate = (occupants.adults * 56) + (occupants.children * 48);
+    const mealsNightlyRate = (occupants.adults * mealRates.perAdult) + (occupants.children * mealRates.perChild);
     const nightlyRate = totalRoomNightly + mealsNightlyRate;
     return {
       roomNightly: totalRoomNightly,

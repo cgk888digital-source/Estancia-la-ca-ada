@@ -17,6 +17,27 @@ interface HotelTimes {
   checkout_time: string
 }
 
+interface MealPrices {
+  meal_breakfast_adult: string
+  meal_dinner_adult: string
+  meal_breakfast_child: string
+  meal_dinner_child: string
+}
+
+const MEAL_KEYS: (keyof MealPrices)[] = [
+  'meal_breakfast_adult',
+  'meal_dinner_adult',
+  'meal_breakfast_child',
+  'meal_dinner_child',
+]
+
+const MEAL_LABELS: Record<keyof MealPrices, string> = {
+  meal_breakfast_adult: 'Desayuno Adulto',
+  meal_dinner_adult: 'Cena Adulto',
+  meal_breakfast_child: 'Desayuno Niño',
+  meal_dinner_child: 'Cena Niño',
+}
+
 export default function RatesPage() {
   const [rates, setRates] = useState<DbAccommodation[]>([])
   const [loading, setLoading] = useState(true)
@@ -35,6 +56,20 @@ export default function RatesPage() {
   const [savingTableCount, setSavingTableCount] = useState(false)
   const [successTableCount, setSuccessTableCount] = useState(false)
   const [errorTableCount, setErrorTableCount] = useState('')
+
+  // Desayuno y cena incluidos: se suman a la tarifa de la habitación por cada huésped/noche.
+  const [meals, setMeals] = useState<MealPrices>({
+    meal_breakfast_adult: '22',
+    meal_dinner_adult: '34',
+    meal_breakfast_child: '20',
+    meal_dinner_child: '28',
+  })
+  const [savingMeals, setSavingMeals] = useState(false)
+  const [successMeals, setSuccessMeals] = useState(false)
+  const [errorMeals, setErrorMeals] = useState('')
+
+  const mealTotalAdult = Number(meals.meal_breakfast_adult || 0) + Number(meals.meal_dinner_adult || 0)
+  const mealTotalChild = Number(meals.meal_breakfast_child || 0) + Number(meals.meal_dinner_child || 0)
 
   async function fetchAll() {
     setLoading(true)
@@ -60,6 +95,7 @@ export default function RatesPage() {
 
     if (!settingsRes.error && settingsRes.data) {
       const map: Partial<HotelTimes> = {}
+      const mealMap: Partial<MealPrices> = {}
       settingsRes.data.forEach((row: { key: string; value: string }) => {
         if (row.key === 'checkin_time' || row.key === 'checkout_time') {
           map[row.key] = row.value
@@ -67,8 +103,12 @@ export default function RatesPage() {
         if (row.key === 'table_count') {
           setTableCount(row.value)
         }
+        if ((MEAL_KEYS as string[]).includes(row.key)) {
+          mealMap[row.key as keyof MealPrices] = row.value
+        }
       })
       setHotelTimes(prev => ({ ...prev, ...map }))
+      setMeals(prev => ({ ...prev, ...mealMap }))
     }
 
     setLoading(false)
@@ -142,6 +182,42 @@ export default function RatesPage() {
       setErrorTimes('Error al guardar los horarios.')
     } finally {
       setSavingTimes(false)
+    }
+  }
+
+  const handleSaveMeals = async () => {
+    const invalid = MEAL_KEYS.find(k => {
+      const n = Number(meals[k])
+      return !Number.isFinite(n) || n < 0
+    })
+    if (invalid) {
+      setErrorMeals('Todos los precios de comidas deben ser números iguales o mayores a 0.')
+      return
+    }
+
+    setSavingMeals(true)
+    setErrorMeals('')
+
+    try {
+      const upserts = MEAL_KEYS.map(k => ({
+        key: k,
+        value: String(Number(meals[k])),
+        label: MEAL_LABELS[k],
+        updated_at: new Date().toISOString(),
+      }))
+
+      const { error } = await supabase
+        .from('hotel_settings')
+        .upsert(upserts, { onConflict: 'key' })
+
+      if (error) throw error
+
+      setSuccessMeals(true)
+      setTimeout(() => setSuccessMeals(false), 3000)
+    } catch {
+      setErrorMeals('Error al guardar los precios de comidas.')
+    } finally {
+      setSavingMeals(false)
     }
   }
 
@@ -273,6 +349,130 @@ export default function RatesPage() {
             <div className="text-center">
               <p className="text-[8px] uppercase tracking-widest text-white/40 font-bold mb-1">Vista previa Check-out</p>
               <p className="text-sm font-bold text-[#C5A059]">🕚 {hotelTimes.checkout_time || '—'}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── SECCIÓN 1.2: Comidas incluidas en la tarifa ── */}
+      <div className="bg-white border border-gray-200/60 rounded-[2rem] overflow-hidden shadow-sm">
+        <div className="px-6 pt-6 pb-4 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <h2 className="text-lg font-bold font-serif text-gray-800 flex items-center gap-2">
+              <UtensilsCrossed size={18} className="text-[#C5A059]" />
+              Comidas Incluidas en la Tarifa
+            </h2>
+            <p className="text-xs text-gray-400 mt-1">
+              Se suman a la tarifa de la habitación por cada huésped y por cada noche. Al guardar, todas las reservas nuevas se calculan con estos montos.
+            </p>
+          </div>
+          <button
+            onClick={handleSaveMeals}
+            disabled={savingMeals}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-[#3D2B1F] hover:bg-[#2e1f14] text-white rounded-2xl text-xs uppercase tracking-wider font-extrabold transition-all active:scale-95 disabled:opacity-50 shrink-0"
+          >
+            {savingMeals ? (
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <Check size={14} />
+            )}
+            Guardar Comidas
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          {successMeals && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-2xl text-xs font-semibold flex items-center gap-2">
+              <Sparkles size={15} className="text-emerald-600" />
+              ¡Precios de comidas actualizados! Las reservas nuevas ya usan estos montos.
+            </div>
+          )}
+          {errorMeals && (
+            <div className="bg-rose-50 border border-rose-200 text-rose-800 px-4 py-3 rounded-2xl text-xs font-semibold flex items-center gap-2">
+              <AlertCircle size={15} className="text-rose-600" />
+              {errorMeals}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            {/* Adultos */}
+            <div className="bg-[#C5A059]/5 border border-[#C5A059]/20 rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold text-gray-700">Adulto <span className="text-gray-400 font-medium">(15+)</span></p>
+                <span className="text-[10px] font-mono font-bold text-[#C5A059] bg-white px-2 py-1 rounded-lg border border-[#C5A059]/20">
+                  ${mealTotalAdult} / noche
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1 block">Desayuno ($)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={meals.meal_breakfast_adult}
+                    onChange={e => setMeals(prev => ({ ...prev, meal_breakfast_adult: e.target.value }))}
+                    className="w-full border border-gray-200 bg-white rounded-xl px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:border-[#C5A059] focus:ring-1 focus:ring-[#C5A059]/30 transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1 block">Cena ($)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={meals.meal_dinner_adult}
+                    onChange={e => setMeals(prev => ({ ...prev, meal_dinner_adult: e.target.value }))}
+                    className="w-full border border-gray-200 bg-white rounded-xl px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:border-[#C5A059] focus:ring-1 focus:ring-[#C5A059]/30 transition-all"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Niños */}
+            <div className="bg-sky-50/60 border border-sky-100 rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold text-gray-700">Niño <span className="text-gray-400 font-medium">(3 a 12 años)</span></p>
+                <span className="text-[10px] font-mono font-bold text-sky-700 bg-white px-2 py-1 rounded-lg border border-sky-200">
+                  ${mealTotalChild} / noche
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1 block">Desayuno ($)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={meals.meal_breakfast_child}
+                    onChange={e => setMeals(prev => ({ ...prev, meal_breakfast_child: e.target.value }))}
+                    className="w-full border border-sky-200 bg-white rounded-xl px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-300/40 transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1 block">Cena ($)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={meals.meal_dinner_child}
+                    onChange={e => setMeals(prev => ({ ...prev, meal_dinner_child: e.target.value }))}
+                    className="w-full border border-sky-200 bg-white rounded-xl px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-300/40 transition-all"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Ejemplo en vivo para que se vea el efecto antes de guardar */}
+          <div className="p-4 bg-[#121212] rounded-2xl">
+            <p className="text-[8px] uppercase tracking-widest text-white/40 font-bold mb-2">Ejemplo: 1 noche, 2 adultos + 1 niño</p>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+              <span className="text-white/60">Habitación</span>
+              <span className="text-white/30">+</span>
+              <span className="text-[#C5A059] font-bold">${mealTotalAdult * 2}</span>
+              <span className="text-white/40 text-xs">(2 adultos)</span>
+              <span className="text-white/30">+</span>
+              <span className="text-sky-300 font-bold">${mealTotalChild}</span>
+              <span className="text-white/40 text-xs">(1 niño)</span>
+              <span className="text-white/30">=</span>
+              <span className="text-white font-bold">Habitación + ${mealTotalAdult * 2 + mealTotalChild}</span>
             </div>
           </div>
         </div>

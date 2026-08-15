@@ -10,6 +10,7 @@ import type { Booking, BookingPayment } from '../types'
 import PrintableReservationsReport from './PrintableReservationsReport'
 import { parseLocalDate } from '../../utils/dateUtils'
 import { syncMarketingCustomer } from '../../utils/syncMarketingCustomer'
+import { useHotelSettings, getMealRates } from '../../utils/useHotelSettings'
 import { sendBookingConfirmationEmail } from '../../utils/sendBookingConfirmationEmail'
 
 // Helper to format currency
@@ -281,6 +282,10 @@ export default function BookingsPage() {
   // Accommodation lookup helper
   const getAccommodation = (id: number) => accommodationOptions.find(o => o.id === id)
 
+  // Desayuno + cena por noche, configurables desde Tarifas y Descuentos.
+  const { settings: hotelSettings } = useHotelSettings()
+  const mealRates = getMealRates(hotelSettings)
+
   const getStandardRate = (accId: number, checkIn: string, checkOut: string, adults: number, children: number) => {
     const nights = calculateNights(checkIn, checkOut)
     const d = parseLocalDate(checkIn)
@@ -306,7 +311,7 @@ export default function BookingsPage() {
       }
     }
     
-    const mealsPrice = (adults * 56) + (children * 48)
+    const mealsPrice = (adults * mealRates.perAdult) + (children * mealRates.perChild)
     return (roomPrice + mealsPrice) * nights
   }
 
