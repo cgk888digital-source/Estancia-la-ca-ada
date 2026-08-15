@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import './index.css'
 import { registerSW } from 'virtual:pwa-register'
 import { AuthProvider } from './admin/context/AuthContext.tsx'
+import InstallPrompt from './components/InstallPrompt.tsx'
 
 const App = lazy(() => import('./App.tsx'))
 const AdminLayout = lazy(() => import('./admin/components/AdminLayout.tsx'))
@@ -56,6 +57,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/*" element={<App />} />
         </Routes>
       </Suspense>
+      <InstallPrompt />
     </BrowserRouter>
   </StrictMode>,
 )
