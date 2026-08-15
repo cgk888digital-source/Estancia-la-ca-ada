@@ -2318,9 +2318,14 @@ export default function BookingsPage() {
                     }}
                     className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white"
                   >
-                    {activeAccommodationOptions.map(acc => (
-                      <option key={acc.id} value={acc.id}>{acc.title} ({acc.type} - ${acc.price}/noche) — Máx. {acc.maxCapacity} pax</option>
-                    ))}
+                    {activeAccommodationOptions.map(acc => {
+                      // Muestra el precio vigente de la base de datos (lo que edita "Tarifas y
+                      // Descuentos"), no el del catálogo en código — antes quedaba desactualizado.
+                      const dbPrice = dbAccommodations.find(o => Number(o.id) === acc.id)?.price
+                      return (
+                        <option key={acc.id} value={acc.id}>{acc.title} ({acc.type} - ${Number(dbPrice ?? acc.price)}/noche) — Máx. {acc.maxCapacity} pax</option>
+                      )
+                    })}
                   </select>
                 </div>
                 <div>
