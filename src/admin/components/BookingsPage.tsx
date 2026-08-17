@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import {
   Calendar, Users, Check, LogIn, LogOut, Trash2, Search, Plus, X, Phone, Mail,
-  Info, Baby, Sparkles, RefreshCw, Printer
+  Info, Baby, Sparkles, RefreshCw, Printer, Maximize2, Minimize2
 } from 'lucide-react'
 import { accommodationOptions, activeAccommodationOptions, getMaxCapacity } from '../../data/accommodations'
 import { mockBookings } from '../data/mockBookings'
@@ -248,6 +248,8 @@ export default function BookingsPage() {
   const [rangeSelect, setRangeSelect] = useState<{ accId: number; startDateStr: string; endDateStr: string } | null>(null)
   // Modo "dos toques" del planner en táctil: día de entrada ya elegido, esperando el de salida.
   const [pendingCheckIn, setPendingCheckIn] = useState<{ accId: number; dateStr: string } | null>(null)
+  // El planner ocupando toda la pantalla, para poder recorrerlo con el dedo desde el móvil.
+  const [plannerFullscreen, setPlannerFullscreen] = useState(false)
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false)
@@ -1470,8 +1472,12 @@ export default function BookingsPage() {
 
       {/* TAB B: SEMANA VIEW (Highly intuitive visual board / Gantt-like) */}
       {activeTab === 'semana' && (
-        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-3 border-b border-gray-100 bg-gray-50/40">
+        <div className={plannerFullscreen
+          ? 'fixed inset-0 z-[120] bg-white flex flex-col'
+          : 'bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden'}>
+          {/* En pantalla completa la leyenda y el resto de controles sobran: lo que hace
+              falta en el teléfono es que el calendario ocupe todo el alto disponible. */}
+          <div className={`flex flex-wrap items-center justify-between gap-4 px-5 py-3 border-b border-gray-100 bg-gray-50/40 ${plannerFullscreen ? 'hidden' : ''}`}>
             <div className="flex flex-wrap items-center gap-4">
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Estatus de reserva</span>
               {(['reservado', 'sin_pago', 'parcial', 'pagado'] as const).map(state => (
@@ -1496,25 +1502,25 @@ export default function BookingsPage() {
               </button>
             </div>
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-3 border-b border-gray-100 bg-gray-50/40">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-3 sm:px-5 py-3 border-b border-gray-100 bg-gray-50/40 shrink-0">
             {weekViewMode === 'semana' ? (
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setWeekAnchor(d => { const n = new Date(d); n.setDate(n.getDate() - 7); return n })}
-                  className="p-1.5 rounded-lg border border-gray-200 hover:bg-white text-gray-500"
+                  className="p-2 rounded-lg border border-gray-200 hover:bg-white text-gray-500 active:scale-95"
                 >
                   ←
                 </button>
-                <span className="text-xs font-bold text-gray-700 min-w-[140px] text-center">{weekRangeLabel}</span>
+                <span className="text-xs font-bold text-gray-700 min-w-[120px] sm:min-w-[140px] text-center">{weekRangeLabel}</span>
                 <button
                   onClick={() => setWeekAnchor(d => { const n = new Date(d); n.setDate(n.getDate() + 7); return n })}
-                  className="p-1.5 rounded-lg border border-gray-200 hover:bg-white text-gray-500"
+                  className="p-2 rounded-lg border border-gray-200 hover:bg-white text-gray-500 active:scale-95"
                 >
                   →
                 </button>
                 <button
                   onClick={() => setWeekAnchor(new Date(todayDate))}
-                  className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-white text-[10px] font-bold text-gray-500 uppercase tracking-wider"
+                  className="px-3 py-2 rounded-lg border border-gray-200 hover:bg-white text-[10px] font-bold text-gray-500 uppercase tracking-wider active:scale-95"
                 >
                   Hoy
                 </button>
@@ -1540,6 +1546,18 @@ export default function BookingsPage() {
                 )}
               </div>
             )}
+
+            {/* Pantalla completa: en el teléfono el calendario cabía en 465px de una
+                pantalla de 844px, así que se veían 8 habitaciones y el recuadro peleaba
+                con el scroll de la página. Así ocupa todo y se desliza en las 4 direcciones. */}
+            <button
+              onClick={() => setPlannerFullscreen(v => !v)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 bg-white text-[10px] font-bold uppercase tracking-wider text-gray-600 active:scale-95"
+            >
+              {plannerFullscreen
+                ? <><Minimize2 size={14} /> Salir</>
+                : <><Maximize2 size={14} /> Pantalla completa</>}
+            </button>
           </div>
           {/* Guía del modo de dos toques: sin esto no hay forma de saber que el planner
               está esperando el segundo toque. Solo aparece cuando se usó el dedo. */}
@@ -1567,7 +1585,12 @@ export default function BookingsPage() {
             )
           })()}
 
-          <div className="overflow-auto max-h-[70dvh]">
+          {/* overscroll-contain: sin esto, al llegar al final de la rejilla el gesto se
+              lo lleva la página y parece que el calendario "se traba". */}
+          <div
+            className={plannerFullscreen ? 'overflow-auto flex-1 min-h-0' : 'overflow-auto max-h-[70dvh]'}
+            style={{ overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch' }}
+          >
             <div className="min-w-fit divide-y divide-gray-100">
               {/* Header row (Dates) — fijo arriba al hacer scroll para siempre ver a qué día corresponde cada columna */}
               <div className="flex bg-gray-50 sticky top-0 z-20 border-b border-gray-100 shadow-sm">
@@ -1956,7 +1979,7 @@ export default function BookingsPage() {
 
       {/* 5. SIDE DRAWER MODAL: Detailed Booking Information Card */}
       {selectedBooking && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-end p-0 bg-black/40 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-end p-0 bg-black/40 backdrop-blur-sm">
           {/* Overlay click to close */}
           <div className="absolute inset-0" onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setEditingDates(false); setAddingPayment(false) }} />
           
@@ -2348,7 +2371,7 @@ export default function BookingsPage() {
 
       {/* 6. CREATE BOOKING MODAL (Administrador Form) */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
           {/* Overlay click to close */}
           <div className="absolute inset-0" onClick={() => closeAddModal()} />
           
