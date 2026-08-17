@@ -487,13 +487,22 @@ export default function BookingsPage() {
       setPendingCheckIn({ accId, dateStr: startDateStr })
     }
 
+    // El navegador cancela el puntero cuando decide que el gesto era un desplazamiento
+    // de la rejilla. Eso NO es un toque: si se tratara como tal, cada vez que ella
+    // deslizara para ver más días quedaría marcado un día de entrada sin querer.
+    const handlePointerCancel = () => {
+      rangeStartPosRef.current = null
+      rangeDraggedRef.current = false
+      setRangeSelect(null)
+    }
+
     window.addEventListener('pointermove', handlePointerMove)
     window.addEventListener('pointerup', handlePointerUp)
-    window.addEventListener('pointercancel', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerCancel)
     return () => {
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
-      window.removeEventListener('pointercancel', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerCancel)
     }
   }, [rangeSelect, pendingCheckIn])
 
@@ -653,15 +662,15 @@ export default function BookingsPage() {
       })
     }
     // Como en Paxer: se ven varias semanas de un vistazo (21 días) en vez de solo 7.
-    // En el teléfono se muestran 7: con 21 columnas cada día quedaría en ~15px y habría
-    // que hacer scroll horizontal constante para leer una sola habitación.
-    const dayCount = isMobile ? 7 : 21
-    return Array.from({ length: dayCount }, (_, i) => {
+    // Son 21 también en el teléfono: recortarlo a 7 escondía las reservas que sí se ven
+    // en la computadora. En pantalla chica las columnas se mantienen legibles y la
+    // rejilla se desplaza de lado, con la columna de habitaciones fija a la izquierda.
+    return Array.from({ length: 21 }, (_, i) => {
       const d = new Date(weekAnchor)
       d.setDate(weekAnchor.getDate() + i)
       return dayInfoFromDate(d)
     })
-  }, [weekAnchor, weekViewMode, weekRangeFrom, weekRangeTo, isMobile])
+  }, [weekAnchor, weekViewMode, weekRangeFrom, weekRangeTo])
 
   const weekRangeLabel = useMemo(() => {
     const start = weekDays[0]
@@ -1030,13 +1039,23 @@ export default function BookingsPage() {
       }
     }
 
+    // Un puntero cancelado (el navegador se llevó el gesto) no debe guardar nada:
+    // se descarta el arrastre y la reserva se queda donde estaba.
+    const handlePointerCancel = () => {
+      dragOverCellRef.current = null
+      dragStartPosRef.current = null
+      hasDraggedRef.current = false
+      setDragInfo(null)
+      setDragOverCell(null)
+    }
+
     window.addEventListener('pointermove', handlePointerMove)
     window.addEventListener('pointerup', handlePointerUp)
-    window.addEventListener('pointercancel', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerCancel)
     return () => {
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
-      window.removeEventListener('pointercancel', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerCancel)
     }
   }, [dragInfo])
 
@@ -1553,11 +1572,11 @@ export default function BookingsPage() {
               {/* Header row (Dates) — fijo arriba al hacer scroll para siempre ver a qué día corresponde cada columna */}
               <div className="flex bg-gray-50 sticky top-0 z-20 border-b border-gray-100 shadow-sm">
                 {/* Cabin column header spacer */}
-                <div className="w-20 sm:w-24 shrink-0 p-2 font-bold text-[9px] text-gray-400 uppercase tracking-widest flex items-center justify-center border-r border-gray-100 bg-gray-50">
+                <div className="w-20 sm:w-24 shrink-0 sticky left-0 z-30 p-2 font-bold text-[9px] text-gray-400 uppercase tracking-widest flex items-center justify-center border-r border-gray-100 bg-gray-50">
                   Cabaña
                 </div>
                 {/* Columnas de días (21 en la vista amplia, o las que tenga el rango personalizado) */}
-                <div className="flex-1 grid divide-x divide-gray-100" style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(${isMobile ? 38 : 40}px, 1fr))` }}>
+                <div className="flex-1 grid divide-x divide-gray-100" style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(${isMobile ? 44 : 40}px, 1fr))` }}>
                   {weekDays.map(day => {
                     const isToday = day.dateStr === todayStr
                     return (
@@ -1586,7 +1605,7 @@ export default function BookingsPage() {
                 return (
                 <div key={acc.id} className="flex hover:bg-gray-50/40 transition-colors">
                   {/* Cabin Details Info — nombre de la galería arriba, número de habitación abajo */}
-                  <div className="w-20 sm:w-24 shrink-0 p-2 border-r border-gray-100 flex flex-col justify-center gap-0.5">
+                  <div className="w-20 sm:w-24 shrink-0 sticky left-0 z-10 bg-white p-2 border-r border-gray-100 flex flex-col justify-center gap-0.5">
                     <span className="text-[8px] uppercase tracking-wider text-[#C5A059] font-bold leading-tight truncate">
                       {acc.title.replace('Galería ', '').split(' — ')[0]}
                     </span>
@@ -1600,7 +1619,7 @@ export default function BookingsPage() {
 
                   {/* Columnas: fondo con zonas de drop + barras de reserva superpuestas */}
                   <div className="flex-1 relative">
-                    <div className="grid divide-x divide-gray-100 h-12 sm:h-10" style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(${isMobile ? 38 : 40}px, 1fr))` }}>
+                    <div className="grid divide-x divide-gray-100 h-12 sm:h-10" style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(${isMobile ? 44 : 40}px, 1fr))` }}>
                       {weekDays.map(day => {
                         // No incluye el estatus de la reserva: así ella siempre ve quién sale ese día,
                         // aunque todavía no haya marcado la limpieza, y aunque otro huésped entre ese mismo día.
@@ -1630,8 +1649,10 @@ export default function BookingsPage() {
                                   rangePointerTypeRef.current = e.pointerType
                                   setRangeSelect({ accId: acc.id, startDateStr: day.dateStr, endDateStr: day.dateStr })
                                 }}
+                                // Sin touch-action: none, para que el dedo pueda deslizar
+                                // la rejilla de lado y ver los 21 días. En táctil la reserva
+                                // se crea con dos toques (entrada y salida), no arrastrando.
                                 title="Toca el día de entrada y luego el de salida, o arrastra sobre las noches"
-                                style={{ touchAction: 'none' }}
                                 className={`w-full h-full rounded-lg border transition-all flex items-center justify-center group select-none
                                   ${isPendingCheckIn
                                     ? 'border-[#C5A059] border-solid bg-[#C5A059] text-white shadow-sm'
