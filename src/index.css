@@ -39,4 +39,21 @@
     -ms-overflow-style: none;  /* IE and Edge */
     scrollbar-width: none;  /* Firefox */
   }
+
+}
+
+/* Safari en iOS hace zoom automatico al enfocar un campo cuya letra mide menos de
+   16px, y despues no vuelve al tamano original: el panel de administracion queda
+   descuadrado. Los formularios del admin usan text-xs (12px), asi que en pantallas
+   de telefono se fuerzan a 16px. La alternativa (maximum-scale=1 en el viewport)
+   desactivaria el zoom con dos dedos, que hace falta para accesibilidad.
+
+   Va FUERA de @layer para que gane a las utilidades de Tailwind (text-xs): en la
+   cascada de CSS, lo que no esta en ninguna capa tiene prioridad sobre lo que si. */
+@media (max-width: 639px) {
+  input:not([type='checkbox']):not([type='radio']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
 }

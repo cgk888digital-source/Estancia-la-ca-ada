@@ -12,6 +12,7 @@ import { parseLocalDate } from '../../utils/dateUtils'
 import { syncMarketingCustomer } from '../../utils/syncMarketingCustomer'
 import { useHotelSettings, getMealRates } from '../../utils/useHotelSettings'
 import { sendBookingConfirmationEmail } from '../../utils/sendBookingConfirmationEmail'
+import { useIsMobile } from '../../utils/useMediaQuery'
 
 // Helper to format currency
 const fmt = (n: number) =>
@@ -197,6 +198,9 @@ const paymentStateLabels: Record<EffectivePaymentState, string> = {
   pagado: 'Pagado'
 }
 
+/** Píxeles que hay que recorrer para que un gesto cuente como arrastre y no como un toque. */
+const DRAG_THRESHOLD_PX = 6
+
 const getPaymentColorClasses = (booking: Pick<Booking, 'confirmed' | 'paymentStatus'>) => {
   const state = getEffectivePaymentState(booking)
   if (state === 'pagado') return { bg: 'bg-emerald-500/10 border-emerald-300 text-emerald-900', bullet: 'bg-emerald-500', text: 'text-emerald-600', badge: 'bg-emerald-100 border-emerald-300 text-emerald-800' }
@@ -242,6 +246,8 @@ export default function BookingsPage() {
   // Seleccionar un rango vacío arrastrando (mousedown en un día + hasta soltar en otro) para
   // abrir "Nueva Reserva" con check-in/check-out ya llenos, igual que en Paxer.
   const [rangeSelect, setRangeSelect] = useState<{ accId: number; startDateStr: string; endDateStr: string } | null>(null)
+  // Modo "dos toques" del planner en táctil: día de entrada ya elegido, esperando el de salida.
+  const [pendingCheckIn, setPendingCheckIn] = useState<{ accId: number; dateStr: string } | null>(null)
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false)
@@ -285,6 +291,8 @@ export default function BookingsPage() {
   // Desayuno + cena por noche, configurables desde Tarifas y Descuentos.
   const { settings: hotelSettings } = useHotelSettings()
   const mealRates = getMealRates(hotelSettings)
+
+  const isMobile = useIsMobile()
 
   const getStandardRate = (accId: number, checkIn: string, checkOut: string, adults: number, children: number) => {
     const nights = calculateNights(checkIn, checkOut)
@@ -394,25 +402,100 @@ export default function BookingsPage() {
     return () => clearTimeout(timer)
   }, [form.guestFirstName, form.guestLastName, shouldShowGuestSuggestions])
 
-  // Al soltar el mouse tras seleccionar un rango de días vacíos en la Semana, abre
-  // "Nueva Reserva" con el check-in/check-out ya llenos según lo seleccionado.
+  // Seleccionar días libres en la Semana para abrir "Nueva Reserva" ya con las fechas
+  // puestas. Conviven dos gestos, según cómo se use el planner:
+  //
+  //   ARRASTRAR (dedo o mouse) — se recorren las noches ocupadas y al soltar se abre el
+  //   formulario. El último día arrastrado es la última NOCHE, así que el check-out es
+  //   el día siguiente.
+  //
+  //   TOCAR CON EL DEDO — dos toques, como en Paxer: el primero fija el día de entrada
+  //   y el segundo el día de SALIDA (ese mismo día es el check-out, no el siguiente).
+  //   Arrastrar en un teléfono compite con el scroll de la página, así que este es el
+  //   camino cómodo cuando la dueña está en la calle.
+  //
+  //   HACER CLIC CON EL MOUSE — un solo clic sigue abriendo una reserva de una noche,
+  //   como funcionaba antes; no se le cambia el flujo a quien ya usa la computadora.
+  //
+  // Se usan pointer events (no mouse) para que el mismo código sirva con dedo y mouse. En
+  // táctil el navegador captura el puntero en el elemento donde empezó el gesto, así que
+  // `pointerenter` nunca llega a las demás celdas: hay que ubicar la celda de debajo con
+  // elementsFromPoint.
   useEffect(() => {
     if (!rangeSelect) return
 
-    const handleMouseUp = () => {
-      const [fromStr, toStr] = rangeSelect.startDateStr <= rangeSelect.endDateStr
-        ? [rangeSelect.startDateStr, rangeSelect.endDateStr]
-        : [rangeSelect.endDateStr, rangeSelect.startDateStr]
-      const checkOutStr = formatLocalDate(addDays(parseLocalDate(toStr), 1))
+    const handlePointerMove = (e: PointerEvent) => {
+      // Igual que al mover una reserva: unos pocos píxeles de temblor no son un arrastre.
+      if (!rangeDraggedRef.current) {
+        const start = rangeStartPosRef.current
+        if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) < DRAG_THRESHOLD_PX) return
+        rangeDraggedRef.current = true
+      }
 
-      openAddModal()
-      setForm(f => ({ ...f, accommodationId: rangeSelect.accId, checkIn: fromStr, checkOut: checkOutStr }))
-      setRangeSelect(null)
+      const stack = document.elementsFromPoint(e.clientX, e.clientY)
+      const cellEl = stack.find((el): el is HTMLElement => el instanceof HTMLElement && !!el.dataset.plannerCell)
+      const key = cellEl?.dataset.plannerCell
+      if (!key) return
+      const [accIdStr, dateStr] = key.split('|')
+      setRangeSelect(prev =>
+        prev && prev.accId === Number(accIdStr) && prev.endDateStr !== dateStr
+          ? { ...prev, endDateStr: dateStr }
+          : prev
+      )
     }
 
-    window.addEventListener('mouseup', handleMouseUp)
-    return () => window.removeEventListener('mouseup', handleMouseUp)
-  }, [rangeSelect])
+    const handlePointerUp = () => {
+      const { accId, startDateStr, endDateStr } = rangeSelect
+      const wasDrag = rangeDraggedRef.current
+      const wasTouch = rangePointerTypeRef.current === 'touch'
+      rangeStartPosRef.current = null
+      rangeDraggedRef.current = false
+      setRangeSelect(null)
+
+      // `checkOutStr` es la fecha de salida real que se guarda en la reserva.
+      const openWith = (checkInStr: string, checkOutStr: string) => {
+        openAddModal()
+        setForm(f => ({ ...f, accommodationId: accId, checkIn: checkInStr, checkOut: checkOutStr }))
+        setPendingCheckIn(null)
+      }
+
+      if (wasDrag) {
+        const [fromStr, toStr] = startDateStr <= endDateStr
+          ? [startDateStr, endDateStr]
+          : [endDateStr, startDateStr]
+        openWith(fromStr, formatLocalDate(addDays(parseLocalDate(toStr), 1)))
+        return
+      }
+
+      if (!wasTouch) {
+        openWith(startDateStr, formatLocalDate(addDays(parseLocalDate(startDateStr), 1)))
+        return
+      }
+
+      // Toque con el dedo: primer toque marca la entrada, segundo marca la salida.
+      if (pendingCheckIn && pendingCheckIn.accId === accId) {
+        if (startDateStr === pendingCheckIn.dateStr) {
+          setPendingCheckIn(null) // tocar otra vez el mismo día cancela la selección
+          return
+        }
+        if (startDateStr > pendingCheckIn.dateStr) {
+          openWith(pendingCheckIn.dateStr, startDateStr)
+          return
+        }
+      }
+      // Primer toque, otra cabaña, o un día anterior: se reinicia desde aquí.
+      setPendingCheckIn({ accId, dateStr: startDateStr })
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerUp)
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerUp)
+    }
+  }, [rangeSelect, pendingCheckIn])
 
   // Carga el historial de abonos cada vez que se abre la ficha de una reserva.
   useEffect(() => {
@@ -450,7 +533,12 @@ export default function BookingsPage() {
   // vecina" y corría las fechas al abrir la ficha con solo hacer click.
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null)
   const hasDraggedRef = useRef(false)
-  const DRAG_THRESHOLD_PX = 6
+
+  // Equivalentes para la selección de días libres: distinguen arrastrar de tocar, y con
+  // qué se hizo el gesto (el dedo abre el modo de dos toques, el mouse no).
+  const rangeStartPosRef = useRef<{ x: number; y: number } | null>(null)
+  const rangeDraggedRef = useRef(false)
+  const rangePointerTypeRef = useRef<string>('mouse')
 
   useEffect(() => {
     let active = true
@@ -463,9 +551,13 @@ export default function BookingsPage() {
 
       // Run both queries in parallel for faster loading
       const [accommodationsResult, bookingsResult] = await Promise.all([
+        // Solo las columnas que existen de verdad en la tabla. Pedir columnas
+        // inexistentes (name, capacity, type) hacía que PostgREST rechazara la consulta
+        // entera con 400 y dbAccommodations quedara siempre vacío: el planner terminaba
+        // usando los precios del catálogo en código en vez de los que edita la clienta.
         supabase
           .from('accommodations')
-          .select('id, name, price, december_price, discount_percent, capacity, type'),
+          .select('id, price, december_price, discount_percent'),
         supabase
           .from('bookings')
           .select('*')
@@ -475,6 +567,10 @@ export default function BookingsPage() {
 
       if (active && accommodationsResult.data) {
         setDbAccommodations(accommodationsResult.data)
+      } else if (accommodationsResult.error) {
+        // Si esto falla, las tarifas mostradas son las del código y no las de la base:
+        // conviene que quede rastro en consola en vez de fallar en silencio.
+        console.error('No se pudieron cargar las tarifas de accommodations:', accommodationsResult.error)
       }
 
       const { data, error } = bookingsResult
@@ -557,12 +653,15 @@ export default function BookingsPage() {
       })
     }
     // Como en Paxer: se ven varias semanas de un vistazo (21 días) en vez de solo 7.
-    return Array.from({ length: 21 }, (_, i) => {
+    // En el teléfono se muestran 7: con 21 columnas cada día quedaría en ~15px y habría
+    // que hacer scroll horizontal constante para leer una sola habitación.
+    const dayCount = isMobile ? 7 : 21
+    return Array.from({ length: dayCount }, (_, i) => {
       const d = new Date(weekAnchor)
       d.setDate(weekAnchor.getDate() + i)
       return dayInfoFromDate(d)
     })
-  }, [weekAnchor, weekViewMode, weekRangeFrom, weekRangeTo])
+  }, [weekAnchor, weekViewMode, weekRangeFrom, weekRangeTo, isMobile])
 
   const weekRangeLabel = useMemo(() => {
     const start = weekDays[0]
@@ -885,18 +984,22 @@ export default function BookingsPage() {
     await reassignBooking(booking.id, newAccId, newCheckIn, newCheckOut)
   }
 
-  // Mover/estirar una reserva existente en la Semana. Usa la posición real del mouse
+  // Mover/estirar una reserva existente en la Semana. Usa la posición real del puntero
   // (document.elementsFromPoint) en vez de los eventos nativos de drag&drop de HTML5:
   // así detecta la celda de fecha que está DEBAJO aunque la propia barra la tape
   // visualmente — con drag&drop nativo, encoger una reserva (arrastrar el borde hacia
   // adentro) no soltaba sobre nada porque el mouse quedaba sobre la barra, no la celda.
+  //
+  // Son pointer events, no mouse: el mismo código sirve para dedo, mouse y lápiz. El
+  // drag&drop de HTML5 no existe en móvil, y `mousemove` no se dispara al arrastrar con
+  // el dedo, por lo que antes el planner solo se podía usar desde una computadora.
   useEffect(() => {
     if (!dragInfo) return
     hasDraggedRef.current = false
 
-    const handleMouseMove = (e: MouseEvent) => {
-      // Ignora el jitter de un simple click: solo cuenta como arrastre real una vez que
-      // el mouse se aleja más de unos pocos píxeles del punto donde se hizo mousedown.
+    const handlePointerMove = (e: PointerEvent) => {
+      // Ignora el jitter de un simple toque/click: solo cuenta como arrastre real una vez
+      // que el puntero se aleja más de unos pocos píxeles del punto donde empezó.
       if (!hasDraggedRef.current) {
         const start = dragStartPosRef.current
         const movedEnough = !start || Math.hypot(e.clientX - start.x, e.clientY - start.y) >= DRAG_THRESHOLD_PX
@@ -913,11 +1016,9 @@ export default function BookingsPage() {
       }
     }
 
-    const handleMouseUp = () => {
+    const handlePointerUp = () => {
       const key = dragOverCellRef.current
       const wasRealDrag = hasDraggedRef.current
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
       dragOverCellRef.current = null
       dragStartPosRef.current = null
       hasDraggedRef.current = false
@@ -929,11 +1030,13 @@ export default function BookingsPage() {
       }
     }
 
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerUp)
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerUp)
     }
   }, [dragInfo])
 
@@ -1419,16 +1522,42 @@ export default function BookingsPage() {
               </div>
             )}
           </div>
-          <div className="overflow-auto max-h-[70vh]">
+          {/* Guía del modo de dos toques: sin esto no hay forma de saber que el planner
+              está esperando el segundo toque. Solo aparece cuando se usó el dedo. */}
+          {pendingCheckIn && (() => {
+            const acc = activeAccommodationOptions.find(o => o.id === pendingCheckIn.accId)
+            const d = parseLocalDate(pendingCheckIn.dateStr)
+            return (
+              <div className="flex items-center gap-3 px-5 py-3 bg-[#C5A059]/10 border-b border-[#C5A059]/20">
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#C5A059]">
+                    Entrada · {acc ? `Hab. ${acc.roomNumber ?? '—'}` : ''}
+                  </p>
+                  <p className="text-xs font-bold text-gray-700 leading-tight">
+                    {d.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}
+                    <span className="font-medium text-gray-500"> — ahora toca el día de salida</span>
+                  </p>
+                </div>
+                <button
+                  onClick={() => setPendingCheckIn(null)}
+                  className="shrink-0 px-3 py-2 rounded-xl border border-gray-200 bg-white text-[10px] font-bold uppercase tracking-wider text-gray-500 active:scale-95"
+                >
+                  Cancelar
+                </button>
+              </div>
+            )
+          })()}
+
+          <div className="overflow-auto max-h-[70dvh]">
             <div className="min-w-fit divide-y divide-gray-100">
               {/* Header row (Dates) — fijo arriba al hacer scroll para siempre ver a qué día corresponde cada columna */}
               <div className="flex bg-gray-50 sticky top-0 z-20 border-b border-gray-100 shadow-sm">
                 {/* Cabin column header spacer */}
-                <div className="w-24 shrink-0 p-2 font-bold text-[9px] text-gray-400 uppercase tracking-widest flex items-center justify-center border-r border-gray-100 bg-gray-50">
+                <div className="w-20 sm:w-24 shrink-0 p-2 font-bold text-[9px] text-gray-400 uppercase tracking-widest flex items-center justify-center border-r border-gray-100 bg-gray-50">
                   Cabaña
                 </div>
                 {/* Columnas de días (21 en la vista amplia, o las que tenga el rango personalizado) */}
-                <div className="flex-1 grid divide-x divide-gray-100" style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(40px, 1fr))` }}>
+                <div className="flex-1 grid divide-x divide-gray-100" style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(${isMobile ? 38 : 40}px, 1fr))` }}>
                   {weekDays.map(day => {
                     const isToday = day.dateStr === todayStr
                     return (
@@ -1457,7 +1586,7 @@ export default function BookingsPage() {
                 return (
                 <div key={acc.id} className="flex hover:bg-gray-50/40 transition-colors">
                   {/* Cabin Details Info — nombre de la galería arriba, número de habitación abajo */}
-                  <div className="w-24 shrink-0 p-2 border-r border-gray-100 flex flex-col justify-center gap-0.5">
+                  <div className="w-20 sm:w-24 shrink-0 p-2 border-r border-gray-100 flex flex-col justify-center gap-0.5">
                     <span className="text-[8px] uppercase tracking-wider text-[#C5A059] font-bold leading-tight truncate">
                       {acc.title.replace('Galería ', '').split(' — ')[0]}
                     </span>
@@ -1471,7 +1600,7 @@ export default function BookingsPage() {
 
                   {/* Columnas: fondo con zonas de drop + barras de reserva superpuestas */}
                   <div className="flex-1 relative">
-                    <div className="grid divide-x divide-gray-100 h-10" style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(40px, 1fr))` }}>
+                    <div className="grid divide-x divide-gray-100 h-12 sm:h-10" style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(${isMobile ? 38 : 40}px, 1fr))` }}>
                       {weekDays.map(day => {
                         // No incluye el estatus de la reserva: así ella siempre ve quién sale ese día,
                         // aunque todavía no haya marcado la limpieza, y aunque otro huésped entre ese mismo día.
@@ -1480,24 +1609,41 @@ export default function BookingsPage() {
                         const isRangeSelected = !!rangeSelect && rangeSelect.accId === acc.id &&
                           day.dateStr >= (rangeSelect.startDateStr <= rangeSelect.endDateStr ? rangeSelect.startDateStr : rangeSelect.endDateStr) &&
                           day.dateStr <= (rangeSelect.startDateStr <= rangeSelect.endDateStr ? rangeSelect.endDateStr : rangeSelect.startDateStr)
+                        // Modo dos toques: el día de entrada ya elegido, y los días posteriores
+                        // de esa misma cabaña que se pueden tocar como día de salida.
+                        const isPendingCheckIn = !!pendingCheckIn && pendingCheckIn.accId === acc.id &&
+                          pendingCheckIn.dateStr === day.dateStr
+                        const isPendingCheckOutCandidate = !!pendingCheckIn && pendingCheckIn.accId === acc.id &&
+                          day.dateStr > pendingCheckIn.dateStr
 
                         return (
                           <div
                             key={day.dateStr}
                             data-planner-cell={`${acc.id}|${day.dateStr}`}
-                            className={`p-0.5 h-10 flex items-center justify-center relative transition-colors ${isDragTarget || isRangeSelected ? 'bg-[#C5A059]/10' : ''}`}
+                            className={`p-0.5 h-12 sm:h-10 flex items-center justify-center relative transition-colors ${isDragTarget || isRangeSelected ? 'bg-[#C5A059]/10' : ''}`}
                           >
                             {!isOccupied && (
                               <button
-                                onMouseDown={() => setRangeSelect({ accId: acc.id, startDateStr: day.dateStr, endDateStr: day.dateStr })}
-                                onMouseEnter={() => {
-                                  setRangeSelect(prev => (prev && prev.accId === acc.id) ? { ...prev, endDateStr: day.dateStr } : prev)
+                                onPointerDown={e => {
+                                  rangeStartPosRef.current = { x: e.clientX, y: e.clientY }
+                                  rangeDraggedRef.current = false
+                                  rangePointerTypeRef.current = e.pointerType
+                                  setRangeSelect({ accId: acc.id, startDateStr: day.dateStr, endDateStr: day.dateStr })
                                 }}
-                                title="Clic para un día, o arrastra hasta el día de salida"
+                                title="Toca el día de entrada y luego el de salida, o arrastra sobre las noches"
+                                style={{ touchAction: 'none' }}
                                 className={`w-full h-full rounded-lg border transition-all flex items-center justify-center group select-none
-                                  ${isRangeSelected ? 'border-[#C5A059] bg-[#C5A059]/10 text-[#C5A059]' : 'border-dashed border-gray-100 hover:border-[#C5A059]/40 hover:bg-[#C5A059]/5 text-gray-300 hover:text-[#C5A059]'}`}
+                                  ${isPendingCheckIn
+                                    ? 'border-[#C5A059] border-solid bg-[#C5A059] text-white shadow-sm'
+                                    : isPendingCheckOutCandidate
+                                      ? 'border-[#C5A059]/50 bg-[#C5A059]/10 text-[#C5A059]'
+                                      : isRangeSelected
+                                        ? 'border-[#C5A059] bg-[#C5A059]/10 text-[#C5A059]'
+                                        : 'border-dashed border-gray-100 hover:border-[#C5A059]/40 hover:bg-[#C5A059]/5 text-gray-300 hover:text-[#C5A059]'}`}
                               >
-                                <Plus size={11} className="group-hover:scale-110 transition-transform" />
+                                {isPendingCheckIn
+                                  ? <span className="text-[8px] font-extrabold uppercase tracking-wider leading-none">Entra</span>
+                                  : <Plus size={11} className="group-hover:scale-110 transition-transform" />}
                               </button>
                             )}
                           </div>
@@ -1534,18 +1680,21 @@ export default function BookingsPage() {
                           style={{ left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)` }}
                           className={`absolute top-1 bottom-1 rounded-lg border flex items-stretch overflow-hidden ${colors.bg} ${isBeingDragged ? 'opacity-40' : ''}`}
                         >
-                          {/* Borde izquierdo: arrastrar para cambiar solo el check-in */}
+                          {/* Borde izquierdo: arrastrar para cambiar solo el check-in.
+                              Más ancho en táctil: 6px no se puede agarrar con el dedo. */}
                           <div
-                            onMouseDown={e => { e.preventDefault(); dragStartPosRef.current = { x: e.clientX, y: e.clientY }; setDragInfo({ bookingId: b.id, mode: 'resize-left' }) }}
+                            onPointerDown={e => { e.preventDefault(); dragStartPosRef.current = { x: e.clientX, y: e.clientY }; setDragInfo({ bookingId: b.id, mode: 'resize-left' }) }}
                             title="Arrastra para cambiar el check-in"
-                            className="w-1.5 shrink-0 cursor-ew-resize hover:bg-black/10 transition-colors select-none"
+                            style={{ touchAction: 'none' }}
+                            className="w-3 sm:w-1.5 shrink-0 cursor-ew-resize hover:bg-black/10 active:bg-black/15 transition-colors select-none"
                           />
 
-                          {/* Cuerpo: arrastrar para mover toda la reserva, click (sin arrastrar) para ver detalle */}
+                          {/* Cuerpo: arrastrar para mover toda la reserva, toque simple para ver detalle */}
                           <button
-                            onMouseDown={e => { dragStartPosRef.current = { x: e.clientX, y: e.clientY }; setDragInfo({ bookingId: b.id, mode: 'move' }) }}
+                            onPointerDown={e => { dragStartPosRef.current = { x: e.clientX, y: e.clientY }; setDragInfo({ bookingId: b.id, mode: 'move' }) }}
                             onClick={() => setSelectedBooking(b)}
                             title="Arrastra para mover la reserva"
+                            style={{ touchAction: 'none' }}
                             className="flex-1 min-w-0 px-1.5 text-left flex items-center gap-1 cursor-grab active:cursor-grabbing hover:brightness-95 transition-all select-none"
                           >
                             <span className={`w-1.5 h-1.5 rounded-full ${colors.bullet} shrink-0`} />
@@ -1559,9 +1708,10 @@ export default function BookingsPage() {
 
                           {/* Borde derecho: arrastrar para cambiar solo el check-out */}
                           <div
-                            onMouseDown={e => { e.preventDefault(); dragStartPosRef.current = { x: e.clientX, y: e.clientY }; setDragInfo({ bookingId: b.id, mode: 'resize-right' }) }}
+                            onPointerDown={e => { e.preventDefault(); dragStartPosRef.current = { x: e.clientX, y: e.clientY }; setDragInfo({ bookingId: b.id, mode: 'resize-right' }) }}
                             title="Arrastra para cambiar el check-out"
-                            className="w-1.5 shrink-0 cursor-ew-resize hover:bg-black/10 transition-colors select-none"
+                            style={{ touchAction: 'none' }}
+                            className="w-3 sm:w-1.5 shrink-0 cursor-ew-resize hover:bg-black/10 active:bg-black/15 transition-colors select-none"
                           />
                         </div>
                       )
@@ -1789,7 +1939,7 @@ export default function BookingsPage() {
           {/* Overlay click to close */}
           <div className="absolute inset-0" onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setEditingDates(false); setAddingPayment(false) }} />
           
-          <div className="relative w-full max-w-md h-[90vh] sm:h-screen bg-white rounded-t-3xl sm:rounded-l-3xl sm:rounded-tr-none shadow-2xl p-6 flex flex-col justify-between overflow-y-auto animate-in slide-in-from-bottom sm:slide-in-from-right duration-300">
+          <div className="relative w-full max-w-md h-[90dvh] sm:h-screen bg-white rounded-t-3xl sm:rounded-l-3xl sm:rounded-tr-none shadow-2xl p-5 sm:p-6 flex flex-col justify-between overflow-y-auto animate-in slide-in-from-bottom sm:slide-in-from-right duration-300">
             <div>
               <div className="flex items-center justify-between pb-4 border-b border-gray-100">
                 <div>
@@ -2181,7 +2331,9 @@ export default function BookingsPage() {
           {/* Overlay click to close */}
           <div className="absolute inset-0" onClick={() => closeAddModal()} />
           
-          <div className="relative bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg p-6 space-y-5 overflow-y-auto max-h-[90vh] z-10 animate-in zoom-in-95 duration-200">
+          {/* dvh, no vh: con el teclado del telefono abierto, 90vh deja los botones de
+              Cancelar/Registrar fuera de la pantalla y no se puede guardar la reserva. */}
+          <div className="relative bg-white rounded-t-[2rem] sm:rounded-[2.5rem] shadow-2xl w-full max-w-lg p-5 sm:p-6 space-y-5 overflow-y-auto max-h-[92dvh] sm:max-h-[90dvh] z-10 animate-in slide-in-from-bottom sm:zoom-in-95 duration-200">
             <div className="flex items-center justify-between pb-3 border-b border-gray-100">
               <h2 className="text-xl font-bold font-serif text-gray-800">Registrar Nueva Reserva</h2>
               <button
