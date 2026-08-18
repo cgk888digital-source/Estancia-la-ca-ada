@@ -11,43 +11,29 @@ interface SyncParams {
 
 /**
  * Cada vez que se crea una reserva (desde la app del huésped o desde el Planner del admin),
- * el huésped debe aparecer automáticamente en Clientes / Email Marketing — sin esto, cada
- * reserva quedaba aislada y había que cargar los contactos a mano o por Excel.
+ * el huésped debe aparecer automáticamente en Clientes / Email Marketing.
+ *
+ * Va por la función `sync_marketing_customer` de la base y no escribiendo en la tabla:
+ *
+ * 1. Desde la app del huésped la sesión es anónima, y el rol anónimo no tiene privilegios
+ *    sobre `marketing_customers`. Escribiendo directo fallaba en silencio y esos clientes
+ *    nunca entraban en la lista.
+ * 2. Darle esos privilegios habría dejado la lista completa de clientes —nombres, correos
+ *    y teléfonos— legible por cualquiera con la clave pública del sitio. La función solo
+ *    se puede ejecutar: hace el alta por dentro y no devuelve datos.
  */
 export async function syncMarketingCustomer(supabase: SupabaseClient, params: SyncParams) {
   const email = params.email.trim().toLowerCase()
   if (!email) return
 
-  const { data: existing } = await supabase
-    .from('marketing_customers')
-    .select('id, total_bookings, total_spent, last_stay_date')
-    .eq('email', email)
-    .maybeSingle()
+  const { error } = await supabase.rpc('sync_marketing_customer', {
+    p_full_name: params.fullName,
+    p_email: email,
+    p_phone: params.phone,
+    p_booking_amount: params.bookingAmount,
+    p_stay_date: params.stayDate,
+  })
 
-  if (existing) {
-    await supabase
-      .from('marketing_customers')
-      .update({
-        full_name: params.fullName,
-        phone: params.phone,
-        total_bookings: (existing.total_bookings || 0) + 1,
-        total_spent: (Number(existing.total_spent) || 0) + params.bookingAmount,
-        last_stay_date: !existing.last_stay_date || params.stayDate > existing.last_stay_date
-          ? params.stayDate
-          : existing.last_stay_date
-      })
-      .eq('id', existing.id)
-  } else {
-    await supabase.from('marketing_customers').insert([{
-      full_name: params.fullName,
-      email,
-      phone: params.phone,
-      source: 'reserva',
-      status: 'subscribed',
-      consent_email: true,
-      last_stay_date: params.stayDate,
-      total_bookings: 1,
-      total_spent: params.bookingAmount
-    }])
-  }
+  // No debe tumbar la reserva, pero tampoco puede desaparecer sin dejar rastro.
+  if (error) console.error('No se pudo registrar al huésped en Email Marketing:', error)
 }
