@@ -1296,7 +1296,11 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
                     checkIn: checkInStr,
                     checkOut: checkOutStr,
                     totalAmount: totalStayPrice,
-                    amountPaid: depositAmount
+                    // El huésped todavía no ha pagado nada: el 50% es lo que DEBE pagar,
+                    // no dinero recibido. El comprobante sale después, al verificar el pago.
+                    amountPaid: 0,
+                    depositDue: depositAmount,
+                    depositPercent
                   });
                 });
 

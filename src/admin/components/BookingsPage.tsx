@@ -12,6 +12,7 @@ import { parseLocalDate } from '../../utils/dateUtils'
 import { syncMarketingCustomer } from '../../utils/syncMarketingCustomer'
 import { useHotelSettings, getMealRates } from '../../utils/useHotelSettings'
 import { sendBookingConfirmationEmail } from '../../utils/sendBookingConfirmationEmail'
+import { sendBookingVoucherEmail } from '../../utils/sendBookingVoucherEmail'
 import { useIsMobile } from '../../utils/useMediaQuery'
 
 // Helper to format currency
@@ -250,6 +251,9 @@ export default function BookingsPage() {
   const [pendingCheckIn, setPendingCheckIn] = useState<{ accId: number; dateStr: string } | null>(null)
   // El planner ocupando toda la pantalla, para poder recorrerlo con el dedo desde el móvil.
   const [plannerFullscreen, setPlannerFullscreen] = useState(false)
+  // Envío del comprobante de reserva por correo desde la ficha.
+  const [sendingVoucher, setSendingVoucher] = useState(false)
+  const [voucherSentFor, setVoucherSentFor] = useState<string | null>(null)
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false)
@@ -873,6 +877,12 @@ export default function BookingsPage() {
 
     setAddingPayment(false)
     setPaymentForm({ amount: '', date: todayStr, method: 'transferencia', reference: '' })
+
+    // El abono queda verificado en este momento: es cuando corresponde mandar el
+    // comprobante. La función relee los pagos de la base, así que sale con el abono
+    // recién cargado y su número de operación ya incluidos.
+    sendVoucherForBooking(selectedBooking)
+      .catch(err => console.error('Error enviando el comprobante:', err))
   }
 
   const handleDeletePayment = async (payment: BookingPayment) => {
@@ -1153,7 +1163,7 @@ export default function BookingsPage() {
           stayDate: form.checkIn
         }).catch(err => console.error('Error sincronizando cliente de marketing:', err))
 
-        // Correo automático de confirmación para reservas creadas manualmente por el staff.
+        // Correo de "gracias por su reservación" (no es comprobante de pago).
         sendBookingConfirmationEmail(supabase, {
           email: form.guestEmail.trim(),
           guestName: fullGuestName,
@@ -1165,9 +1175,85 @@ export default function BookingsPage() {
           amountPaid: Number(form.amountPaid)
         })
       }
+
+      // Si el staff cargó un abono al crear la reserva, ese dinero ya está verificado:
+      // ahí sí corresponde mandar el comprobante.
+      if (Number(form.amountPaid) > 0 && form.guestEmail.trim()) {
+        sendVoucherForBooking(mapDbBookingToReact(data[0]))
+      }
     }
 
     closeAddModal()
+  }
+
+  /**
+   * Envía el comprobante de pago de una reserva. Los abonos se leen SIEMPRE de
+   * `booking_payments`, nunca del monto que trae la reserva en pantalla: el voucher solo
+   * puede declarar dinero efectivamente registrado. Si no hay ningún pago, no se envía.
+   */
+  const sendVoucherForBooking = async (booking: Booking) => {
+    const email = booking.guestEmail?.trim()
+    if (!email) return { sent: false, reason: 'sin-correo' as const }
+
+    const { data: paymentRows } = await supabase
+      .from('booking_payments')
+      .select('*')
+      .eq('booking_id', booking.id)
+      .order('payment_date', { ascending: true })
+
+    const verified = (paymentRows ?? []).filter(p => p.status === 'verificado')
+    if (verified.length === 0) return { sent: false, reason: 'sin-pagos' as const }
+
+    const paidVerified = verified.reduce((sum, p) => sum + Number(p.amount), 0)
+    const acc = getAccommodation(booking.accommodationId)
+    const nights = calculateNights(booking.checkIn, booking.checkOut)
+
+    await sendBookingVoucherEmail(supabase, {
+      locator: booking.locator || booking.id.slice(0, 6).toUpperCase(),
+      guestName: booking.guestName,
+      guestEmail: email,
+      guestPhone: booking.guestPhone,
+      guestCi: booking.guestCi,
+      companions: booking.companions,
+      channel: booking.confirmed ? 'Local' : 'App web',
+      checkIn: booking.checkIn,
+      checkOut: booking.checkOut,
+      nights,
+      guestsCount: booking.guestsCount.adults + booking.guestsCount.children,
+      paymentMethod: booking.paymentMethod,
+      totalAmount: booking.totalAmount,
+      amountPaid: paidVerified,
+      rooms: [{
+        title: acc?.title || '',
+        capacity: acc?.maxCapacity,
+        nights,
+        adults: booking.guestsCount.adults,
+        children: booking.guestsCount.children,
+        plan: 'Temporadas',
+        cost: booking.totalAmount,
+      }],
+      payments: verified.map(p => ({
+        date: p.payment_date,
+        amount: Number(p.amount),
+        method: p.method,
+        status: 'Verificado',
+        reference: p.reference || undefined,
+      })),
+    })
+    return { sent: true as const, reason: null }
+  }
+
+  /** Botón "Enviar comprobante" de la ficha, con su estado de carga y su aviso. */
+  const handleSendVoucher = async (booking: Booking) => {
+    if (sendingVoucher) return
+    setSendingVoucher(true)
+    const result = await sendVoucherForBooking(booking)
+    setSendingVoucher(false)
+    if (result.sent) {
+      setVoucherSentFor(booking.id)
+    } else if (result.reason === 'sin-pagos') {
+      alert('Esta reserva todavía no tiene ningún abono registrado. Registre el pago en "Historial de Pagos" y el comprobante se enviará solo.')
+    }
   }
 
   if (loading) {
@@ -2329,6 +2415,22 @@ export default function BookingsPage() {
 
             {/* Quick Actions Drawer Footer */}
             <div className="border-t border-gray-100 pt-4 space-y-2">
+              {/* Reenviar el comprobante: sirve tanto si el huésped lo perdió como para
+                  las reservas viejas, que se crearon antes de que existiera el voucher. */}
+              <button
+                onClick={() => handleSendVoucher(selectedBooking)}
+                disabled={sendingVoucher || !selectedBooking.guestEmail?.trim()}
+                title={selectedBooking.guestEmail?.trim() ? '' : 'Esta reserva no tiene correo cargado'}
+                className="w-full flex items-center justify-center gap-1.5 py-3.5 border border-[#C5A059]/40 bg-[#C5A059]/10 hover:bg-[#C5A059]/20 text-[#8A6D33] font-bold rounded-2xl text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
+              >
+                <Mail size={15} />
+                {sendingVoucher
+                  ? 'Enviando…'
+                  : voucherSentFor === selectedBooking.id
+                    ? '✓ Comprobante enviado'
+                    : 'Enviar comprobante por correo'}
+              </button>
+
               {!selectedBooking.confirmed && (
                 <button
                   onClick={() => handleConfirmBooking(selectedBooking.id)}
