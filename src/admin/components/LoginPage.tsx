@@ -8,7 +8,7 @@ const LoginPage: React.FC = () => {
   const [pin, setPin] = useState('')
   const [error, setError] = useState(false)
   const [loading, setLoading] = useState(false)
-  const { login } = useAuth()
+  const { login, sessionExpired } = useAuth()
   const navigate = useNavigate()
 
   const handleKeyPress = (num: string) => {
@@ -75,6 +75,18 @@ const LoginPage: React.FC = () => {
           <h1 className="text-2xl font-serif text-[#3D2B1F] mb-1">Acceso Restringido</h1>
           <p className="text-sm text-gray-500">Ingrese su PIN de seguridad</p>
         </div>
+
+        {/* Sin esto, volver a pedir el PIN parece un fallo. Y es importante que lo vea:
+            trabajar con la sesión caída era justo lo que hacía que no se guardara nada. */}
+        {sessionExpired && (
+          <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-center">
+            <p className="text-sm font-bold text-amber-900">Su sesión se cerró</p>
+            <p className="mt-1 text-xs leading-relaxed text-amber-800">
+              Vuelva a ingresar su PIN. Es necesario para que los cambios que haga
+              queden guardados de verdad.
+            </p>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit}>
           {/* PIN Display */}

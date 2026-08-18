@@ -6,6 +6,8 @@ export type Role = 'propiedad' | 'administracion' | 'restaurante'
 interface AuthContextType {
   role: Role | null
   sessionReady: boolean
+  /** La sesión con la base de datos se perdió y hubo que volver a pedir el PIN. */
+  sessionExpired: boolean
   login: (pin: string) => Promise<boolean>
   logout: () => Promise<void>
 }
@@ -24,7 +26,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const saved = localStorage.getItem('adminRole')
       return (saved as Role) || null
-    } catch (e) {
+    } catch {
       return null
     }
   })
@@ -35,32 +37,71 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [sessionReady, setSessionReady] = useState(() => {
     try {
       return !localStorage.getItem('adminPin')
-    } catch (e) {
+    } catch {
       return true
     }
   })
 
-  // On mount, restore the real Supabase session BEFORE letting protected pages query RLS-protected tables.
-  // supabase-js already persists the session in localStorage, so we only need to check it (fast, no network
-  // round trip for password hashing) and fall back to signInWithPassword only if there's truly no session left.
+  const [sessionExpired, setSessionExpired] = useState(false)
+
+  const clearStored = () => {
+    try {
+      localStorage.removeItem('adminRole')
+      localStorage.removeItem('adminPin')
+    } catch { /* modo privado del navegador */ }
+  }
+
+  // Al abrir, restaura la sesión real de Supabase ANTES de dejar que las páginas
+  // protegidas consulten tablas con RLS.
+  //
+  // Antes esto se tragaba el fallo con .catch(() => {}) y ponía sessionReady = true
+  // igualmente: el panel se abría sin pedir PIN, con la apariencia normal, pero el
+  // cliente de Supabase quedaba ANÓNIMO. Como anónimo solo tiene permiso de lectura,
+  // todo se veía bien y ningún guardado entraba — así se perdió un día de trabajo.
+  // Sin sesión real es preferible volver a pedir el PIN que dejar trabajar en vano.
   useEffect(() => {
     let active = true
     const restoreSession = async () => {
       const savedPin = localStorage.getItem('adminPin')
+      const savedRole = localStorage.getItem('adminRole')
+
       if (savedPin && PINS[savedPin]) {
         const { data: { session } } = await supabase.auth.getSession()
         if (!session) {
           const user = PINS[savedPin]
-          await supabase.auth.signInWithPassword({
+          const { error } = await supabase.auth.signInWithPassword({
             email: user.email,
             password: user.pass,
-          }).catch(() => {})
+          })
+          if (error && active) {
+            clearStored()
+            setRole(null)
+            setSessionExpired(true)
+          }
         }
+      } else if (savedRole && active) {
+        // Hay rol guardado pero no PIN: no hay manera de recuperar la sesión.
+        clearStored()
+        setRole(null)
+        setSessionExpired(true)
       }
       if (active) setSessionReady(true)
     }
     restoreSession()
     return () => { active = false }
+  }, [])
+
+  // Si la sesión se cae mientras trabaja (el token deja de renovarse), el panel no
+  // puede seguir aparentando que todo va bien: se pide el PIN de nuevo.
+  useEffect(() => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || (event === 'TOKEN_REFRESHED' && !session)) {
+        clearStored()
+        setRole(null)
+        setSessionExpired(true)
+      }
+    })
+    return () => sub.subscription.unsubscribe()
   }, [])
 
   const login = useCallback(async (pin: string): Promise<boolean> => {
@@ -79,10 +120,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setRole(user.role)
     setSessionReady(true)
+    setSessionExpired(false)
     try {
       localStorage.setItem('adminRole', user.role)
       localStorage.setItem('adminPin', pin)
-    } catch (e) {}
+    } catch { /* modo privado del navegador */ }
 
     return true
   }, [])
@@ -92,11 +134,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       localStorage.removeItem('adminRole')
       localStorage.removeItem('adminPin')
-    } catch (e) {}
+    } catch { /* modo privado del navegador */ }
     await supabase.auth.signOut().catch(() => {})
   }, [])
 
-  const value = useMemo(() => ({ role, sessionReady, login, logout }), [role, sessionReady, login, logout])
+  const value = useMemo(
+    () => ({ role, sessionReady, sessionExpired, login, logout }),
+    [role, sessionReady, sessionExpired, login, logout]
+  )
 
   return (
     <AuthContext.Provider value={value}>

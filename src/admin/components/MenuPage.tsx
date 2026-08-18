@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Pencil, Trash2, X, Check, ImageOff, Upload } from 'lucide-react'
+import { Plus, Pencil, Trash2, X, Check, ImageOff, Upload, AlertTriangle } from 'lucide-react'
 import { getMenu, saveMenu } from '../../utils/menuStore'
 import type { MenuSection, DishItem } from '../../data/weeklyMenu'
 
@@ -42,6 +42,8 @@ export default function MenuPage() {
   const [menu, setMenu] = useState<MenuSection[]>([])
   const [activeTab, setActiveTab] = useState('desayuno')
   const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // Modal state
   const [modal, setModal] = useState<{ open: boolean; sectionId: string; dishIndex: number | null }>({
@@ -74,9 +76,19 @@ export default function MenuPage() {
   }
 
   async function handleSave() {
-    await saveMenu(menu)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2500)
+    setSaveError(null)
+    setSaving(true)
+    try {
+      await saveMenu(menu)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch (err) {
+      // Nunca dar por guardado algo que la base de datos rechazó: antes se mostraba
+      // "Guardado" pasara lo que pasara y se perdía el trabajo sin que nadie se enterara.
+      setSaveError(err instanceof Error ? err.message : 'No se pudieron guardar los cambios.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   function openAdd(sectionId: string) {
@@ -129,13 +141,27 @@ export default function MenuPage() {
         </div>
         <button
           onClick={handleSave}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-all ${
+          disabled={saving}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-all disabled:opacity-50 ${
             saved ? 'bg-green-500 text-white' : 'bg-[#C5A059] text-white hover:bg-[#b8904a]'
           }`}
         >
-          {saved ? <><Check size={16} /> Guardado</> : 'Guardar cambios'}
+          {saving ? 'Guardando...' : saved ? <><Check size={16} /> Guardado</> : 'Guardar cambios'}
         </button>
       </div>
+
+      {saveError && (
+        <div className="mb-6 flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4">
+          <AlertTriangle size={18} className="mt-0.5 shrink-0 text-rose-500" />
+          <div>
+            <p className="text-sm font-bold text-rose-800">No se guardaron los cambios</p>
+            <p className="mt-1 text-xs leading-relaxed text-rose-700">{saveError}</p>
+            <p className="mt-2 text-xs text-rose-600">
+              No cierres esta pantalla: lo que escribiste sigue aquí y puedes reintentar.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex bg-gray-100 p-1 rounded-xl mb-6 gap-1">
