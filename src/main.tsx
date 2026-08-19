@@ -1,10 +1,11 @@
-import { StrictMode, Suspense, lazy } from 'react'
+import { StrictMode, Suspense, lazy, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import './index.css'
 import { registerSW } from 'virtual:pwa-register'
 import { AuthProvider } from './admin/context/AuthContext.tsx'
 import InstallPrompt from './components/InstallPrompt.tsx'
+import { applyAppIdentity } from './utils/applyAppIdentity.ts'
 
 const App = lazy(() => import('./App.tsx'))
 const AdminLayout = lazy(() => import('./admin/components/AdminLayout.tsx'))
@@ -21,6 +22,17 @@ const EmailMarketingPage = lazy(() => import('./admin/components/EmailMarketingP
 
 registerSW({ immediate: true })
 
+// Antes de montar React: el navegador lee el <head> muy pronto para decidir qué app
+// ofrece instalar. Si se entra directo a /admin, tiene que ver ya la identidad del panel.
+applyAppIdentity()
+
+/** Mantiene la identidad al navegar dentro de la app (el <head> no cambia solo). */
+function AppIdentitySync() {
+  const { pathname } = useLocation()
+  useEffect(() => { applyAppIdentity(pathname) }, [pathname])
+  return null
+}
+
 const LoadingFallback = () => (
   <div className="flex h-screen w-full items-center justify-center bg-[#121212] text-[#C5A059]">
     <div className="animate-pulse flex flex-col items-center gap-4">
@@ -33,6 +45,7 @@ const LoadingFallback = () => (
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
+      <AppIdentitySync />
       <Suspense fallback={<LoadingFallback />}>
         <Routes>
           {/* Admin panel — AuthProvider solo aquí */}

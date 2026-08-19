@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
+import { useLocation } from 'react-router-dom'
+import { isAdminPath } from '../utils/applyAppIdentity'
 import { X, Share, Plus, Download } from 'lucide-react'
 
 /** Evento propietario de Chromium; todavia no esta en las definiciones estandar de TS. */
@@ -8,7 +10,10 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
 }
 
+// Clave por app: descartar el aviso del huésped no debe ocultar el del panel, que son
+// dos instalaciones distintas.
 const DISMISS_KEY = 'estancia_install_dismissed_at'
+const DISMISS_KEY_ADMIN = 'estancia_install_dismissed_at_admin'
 const DISMISS_DAYS = 14
 const IOS_HELP_DELAY_MS = 3000
 
@@ -22,8 +27,8 @@ const isIOS = () => {
   return /iphone|ipod|ipad/i.test(ua) || (/macintosh/i.test(ua) && navigator.maxTouchPoints > 1)
 }
 
-const wasRecentlyDismissed = () => {
-  const raw = localStorage.getItem(DISMISS_KEY)
+const wasRecentlyDismissed = (key: string) => {
+  const raw = localStorage.getItem(key)
   if (!raw) return false
   return Date.now() - Number(raw) < DISMISS_DAYS * 24 * 60 * 60 * 1000
 }
@@ -36,18 +41,22 @@ const wasRecentlyDismissed = () => {
  * ahi se muestran las instrucciones de Compartir > Anadir a pantalla de inicio.
  */
 export default function InstallPrompt() {
+  const { pathname } = useLocation()
+  const admin = isAdminPath(pathname)
+  const dismissKey = admin ? DISMISS_KEY_ADMIN : DISMISS_KEY
+
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null)
   const [showIOSHelp, setShowIOSHelp] = useState(false)
 
   useEffect(() => {
-    if (isStandalone() || wasRecentlyDismissed()) return
+    if (isStandalone() || wasRecentlyDismissed(dismissKey)) return
 
     const onBeforeInstall = (e: Event) => {
       e.preventDefault()
       setDeferred(e as BeforeInstallPromptEvent)
     }
     const onInstalled = () => {
-      localStorage.setItem(DISMISS_KEY, String(Date.now()))
+      localStorage.setItem(dismissKey, String(Date.now()))
       setDeferred(null)
       setShowIOSHelp(false)
     }
@@ -63,10 +72,10 @@ export default function InstallPrompt() {
       window.removeEventListener('appinstalled', onInstalled)
       if (timer !== undefined) clearTimeout(timer)
     }
-  }, [])
+  }, [dismissKey])
 
   const dismiss = () => {
-    localStorage.setItem(DISMISS_KEY, String(Date.now()))
+    localStorage.setItem(dismissKey, String(Date.now()))
     setDeferred(null)
     setShowIOSHelp(false)
   }
@@ -101,16 +110,18 @@ export default function InstallPrompt() {
 
             <div className="flex items-center gap-3 pr-6">
               <img
-                src="/pwa-192x192.png"
-                alt="Estancia La Cañada"
+                src={admin ? '/admin-pwa-192x192.png' : '/pwa-192x192.png'}
+                alt={admin ? 'Panel de Administración' : 'Estancia La Cañada'}
                 className="w-14 h-14 rounded-xl shadow-md shrink-0"
               />
               <div className="min-w-0">
                 <h3 className="font-serif text-lg leading-tight text-brand-primary">
-                  Instala Estancia La Cañada
+                  {admin ? 'Instala el Panel de Administración' : 'Instala Estancia La Cañada'}
                 </h3>
                 <p className="text-xs text-brand-primary/60 leading-snug mt-0.5">
-                  Añádela a tu pantalla de inicio y ábrela como una app, sin buscar el enlace.
+                  {admin
+                    ? 'Queda como una app aparte en tu pantalla de inicio y abre directo en el panel.'
+                    : 'Añádela a tu pantalla de inicio y ábrela como una app, sin buscar el enlace.'}
                 </p>
               </div>
             </div>
@@ -121,7 +132,7 @@ export default function InstallPrompt() {
                 className="mt-4 w-full flex items-center justify-center gap-2 rounded-xl bg-brand-terracotta py-3 text-white font-bold text-sm uppercase tracking-widest active:scale-95 transition"
               >
                 <Download size={18} />
-                Instalar app
+                {admin ? 'Instalar el panel' : 'Instalar app'}
               </button>
             ) : (
               <div className="mt-4 rounded-xl bg-brand-primary/5 p-3 space-y-2">
