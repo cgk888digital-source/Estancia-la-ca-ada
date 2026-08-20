@@ -4,13 +4,31 @@ import {
   PieChart, Pie, Cell, Legend
 } from 'recharts'
 import { TrendingUp, TrendingDown, DollarSign, Users, ArrowUpRight, ArrowDownRight, Loader2 } from 'lucide-react'
-import { mockTransactions, mockMonthlyData, mockEmployees, categoryLabels, categoryColors } from '../data/mockData'
+import { mockTransactions, mockEmployees, categoryLabels, categoryColors } from '../data/mockData'
 import type { Transaction, TransactionType, TransactionCategory, PaymentMethod, Employee } from '../types'
 import { supabase } from '../../lib/supabase'
 import { parseLocalDate } from '../../utils/dateUtils'
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
+
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
+
+/** '2026-08' — la clave con la que se comparan las fechas de las transacciones. */
+const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+
+/** 'Agosto' / 'Ago' — el nombre que ve la dueña. Antes estaba escrito a mano como
+ *  "Mayo" y no cambiaba nunca, asi que las cifras del mes en curso salian con el
+ *  nombre de otro mes. */
+const monthName = (d: Date, style: 'long' | 'short' = 'long') =>
+  cap(d.toLocaleDateString('es-VE', { month: style }).replace('.', ''))
+
+const shiftMonth = (d: Date, delta: number) => new Date(d.getFullYear(), d.getMonth() + delta, 1)
+
+/** Suma los ingresos o los egresos de un mes concreto. Pura, para que las dependencias
+ *  de los useMemo sigan siendo solo los datos y no la funcion. */
+const sumMonth = (list: Transaction[], prefix: string, type: TransactionType) =>
+  list.filter(t => t.date.startsWith(prefix) && t.type === type).reduce((s, t) => s + t.amount, 0)
 
 interface DbTransaction {
   id: string
@@ -128,18 +146,37 @@ const Dashboard: React.FC = () => {
   const txList = transactions.length > 0 ? transactions : mockTransactions
   const empList = employees.length > 0 ? employees : mockEmployees
 
-  // Mes actual dinámico para KPIs
-  const currentMonthPrefix = useMemo(() => {
-    const now = new Date()
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  }, [])
+  // El mes en curso, recalculado en cada carga: nada de nombres escritos a mano.
+  const thisMonth = useMemo(() => new Date(), [])
+  const prevMonth = useMemo(() => shiftMonth(thisMonth, -1), [thisMonth])
+  const currentMonthPrefix = useMemo(() => monthKey(thisMonth), [thisMonth])
+  const prevMonthPrefix = useMemo(() => monthKey(prevMonth), [prevMonth])
 
-  const { mayTx, totalIngresos, totalEgresos, balance } = useMemo(() => {
-    const mayTx = txList.filter(t => t.date.startsWith(currentMonthPrefix))
-    const totalIngresos = mayTx.filter(t => t.type === 'ingreso').reduce((s, t) => s + t.amount, 0)
-    const totalEgresos = mayTx.filter(t => t.type === 'egreso').reduce((s, t) => s + t.amount, 0)
-    return { mayTx, totalIngresos, totalEgresos, balance: totalIngresos - totalEgresos }
+  const { monthTx, totalIngresos, totalEgresos, balance } = useMemo(() => {
+    const monthTx = txList.filter(t => t.date.startsWith(currentMonthPrefix))
+    const totalIngresos = sumMonth(txList, currentMonthPrefix, 'ingreso')
+    const totalEgresos = sumMonth(txList, currentMonthPrefix, 'egreso')
+    return { monthTx, totalIngresos, totalEgresos, balance: totalIngresos - totalEgresos }
   }, [txList, currentMonthPrefix])
+
+  /**
+   * Variacion real contra el mes anterior. Antes aqui habia un "+12% vs Abril" escrito
+   * a mano que no se calculaba con nada: decia lo mismo subieran o bajaran las ventas.
+   * Si no hay con que comparar se dice, no se inventa un porcentaje.
+   */
+  const variacion = useMemo(() => {
+    const etiqueta = monthName(prevMonth)
+    const calc = (actual: number, type: TransactionType) => {
+      const anterior = sumMonth(txList, prevMonthPrefix, type)
+      if (anterior === 0) {
+        return { texto: actual === 0 ? `Sin datos de ${etiqueta}` : `Nada en ${etiqueta}`, sube: actual > 0 }
+      }
+      const pct = ((actual - anterior) / anterior) * 100
+      const signo = pct > 0 ? '+' : ''
+      return { texto: `${signo}${pct.toFixed(0)}% vs ${etiqueta}`, sube: pct >= 0 }
+    }
+    return { ingresos: calc(totalIngresos, 'ingreso'), egresos: calc(totalEgresos, 'egreso') }
+  }, [txList, prevMonthPrefix, prevMonth, totalIngresos, totalEgresos])
 
   const pendingPayroll = useMemo(() =>
     empList.filter(e => e.pendingPayment && e.status === 'activo').reduce((s, e) => s + e.salary, 0)
@@ -149,37 +186,26 @@ const Dashboard: React.FC = () => {
     empList.filter(e => e.pendingPayment && e.status === 'activo').length
   , [empList])
 
-  // Dynamic monthly data calculation merging mock history with live DB updates
-  const monthlyData = useMemo(() => {
-    const monthMappings: Record<string, string> = {
-      'Nov': '2025-11',
-      'Dic': '2025-12',
-      'Ene': '2026-01',
-      'Feb': '2026-02',
-      'Mar': '2026-03',
-      'Abr': '2026-04',
-      'May': '2026-05'
-    }
-
-    return mockMonthlyData.map(item => {
-      const prefix = monthMappings[item.month]
-      if (!prefix) return item
-
-      const monthTxs = txList.filter(t => t.date.startsWith(prefix))
-      if (monthTxs.length === 0) return item // fallback to mock if no real transactions
-
-      const ingresos = monthTxs.filter(t => t.type === 'ingreso').reduce((s, t) => s + t.amount, 0)
-      const egresos = monthTxs.filter(t => t.type === 'egreso').reduce((s, t) => s + t.amount, 0)
+  /**
+   * Los siete meses que terminan en el actual, calculados de las transacciones reales.
+   * Antes los meses estaban fijados a Nov-2025..May-2026 y, cuando un mes no tenia
+   * movimientos, la grafica rellenaba con cifras de demostracion: la dueña veia
+   * ingresos que nunca existieron. Un mes sin datos ahora vale cero.
+   */
+  const monthlyData = useMemo(() =>
+    Array.from({ length: 7 }, (_, i) => {
+      const d = shiftMonth(thisMonth, i - 6)
+      const prefix = monthKey(d)
       return {
-        month: item.month,
-        ingresos,
-        egresos
+        month: monthName(d, 'short'),
+        ingresos: sumMonth(txList, prefix, 'ingreso'),
+        egresos: sumMonth(txList, prefix, 'egreso'),
       }
     })
-  }, [txList])
+  , [txList, thisMonth])
 
   // Pie data — income breakdown (memoized)
-  const incomePie = useMemo(() => mayTx
+  const incomePie = useMemo(() => monthTx
     .filter(t => t.type === 'ingreso')
     .reduce((acc, t) => {
       const existing = acc.find(a => a.name === categoryLabels[t.category])
@@ -187,7 +213,7 @@ const Dashboard: React.FC = () => {
       else acc.push({ name: categoryLabels[t.category], value: t.amount, color: categoryColors[t.category] })
       return acc
     }, [] as { name: string; value: number; color: string }[])
-  , [mayTx])
+  , [monthTx])
 
   const recent = useMemo(() =>
     [...txList].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6)
@@ -195,22 +221,25 @@ const Dashboard: React.FC = () => {
 
   const kpis = [
     {
-      label: 'Ingresos Mayo',
+      label: `Ingresos ${monthName(thisMonth)}`,
       value: fmt(totalIngresos),
       icon: <TrendingUp size={20} />,
       color: 'text-emerald-600',
       bg: 'bg-emerald-50',
-      trend: '+12% vs Abril',
-      trendUp: true,
+      trend: variacion.ingresos.texto,
+      trendUp: variacion.ingresos.sube,
+      trendGood: variacion.ingresos.sube,
     },
     {
-      label: 'Egresos Mayo',
+      label: `Egresos ${monthName(thisMonth)}`,
       value: fmt(totalEgresos),
       icon: <TrendingDown size={20} />,
       color: 'text-red-500',
       bg: 'bg-red-50',
-      trend: '-8% vs Abril',
-      trendUp: false,
+      trend: variacion.egresos.texto,
+      trendUp: variacion.egresos.sube,
+      // Gastar mas es la mala noticia: aqui el color va al reves que la flecha.
+      trendGood: !variacion.egresos.sube,
     },
     {
       label: 'Balance Neto',
@@ -218,8 +247,9 @@ const Dashboard: React.FC = () => {
       icon: <DollarSign size={20} />,
       color: balance >= 0 ? 'text-[#C5A059]' : 'text-red-500',
       bg: 'bg-[#C5A059]/10',
-      trend: 'Mayo 2026',
+      trend: `${monthName(thisMonth)} ${thisMonth.getFullYear()}`,
       trendUp: balance >= 0,
+      trendGood: balance >= 0,
     },
     {
       label: 'Sueldos Pendientes',
@@ -229,6 +259,7 @@ const Dashboard: React.FC = () => {
       bg: 'bg-violet-50',
       trend: `${pendingCount} empleados`,
       trendUp: false,
+      trendGood: false,
     },
   ]
 
@@ -245,7 +276,7 @@ const Dashboard: React.FC = () => {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-sm text-gray-500 mt-1">Mayo 2026 — resumen general</p>
+        <p className="text-sm text-gray-500 mt-1">{monthName(thisMonth)} {thisMonth.getFullYear()} — resumen general</p>
       </div>
 
       {/* KPIs */}
@@ -256,7 +287,7 @@ const Dashboard: React.FC = () => {
               <div className={`w-10 h-10 rounded-xl ${kpi.bg} ${kpi.color} flex items-center justify-center`}>
                 {kpi.icon}
               </div>
-              <span className={`flex items-center gap-1 text-xs font-medium ${kpi.trendUp ? 'text-emerald-600' : 'text-red-500'}`}>
+              <span className={`flex items-center gap-1 text-xs font-medium ${kpi.trendGood ? 'text-emerald-600' : 'text-red-500'}`}>
                 {kpi.trendUp ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
                 {kpi.trend}
               </span>
