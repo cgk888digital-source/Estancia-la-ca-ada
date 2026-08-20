@@ -62,7 +62,7 @@ const AdminLayout: React.FC = () => {
   }
 
   return (
-    <div className="flex h-screen bg-gray-100 font-sans overflow-hidden print:h-auto print:overflow-visible">
+    <div className="flex h-[100dvh] bg-gray-100 font-sans overflow-hidden print:h-auto print:overflow-visible">
       {/* Sidebar overlay mobile */}
       {sidebarOpen && (
         <div
@@ -77,7 +77,7 @@ const AdminLayout: React.FC = () => {
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
       >
         {/* Logo */}
-        <div className="flex items-center gap-3 px-6 py-6 border-b border-white/10">
+        <div className="flex items-center gap-3 px-6 pb-6 pt-[max(1.5rem,env(safe-area-inset-top))] border-b border-white/10">
           <img 
             src="/assets/logo-nuevo.png" 
             alt="Logo Estancia La Cañada" 
@@ -117,7 +117,7 @@ const AdminLayout: React.FC = () => {
         </nav>
 
         {/* Footer */}
-        <div className="px-3 pb-6 border-t border-white/10 pt-4 flex flex-col gap-2">
+        <div className="px-3 pb-[max(1.5rem,env(safe-area-inset-bottom))] border-t border-white/10 pt-4 flex flex-col gap-2">
           <button
             onClick={() => {
               logout()
@@ -138,12 +138,16 @@ const AdminLayout: React.FC = () => {
       </aside>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden print:overflow-visible">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden pb-[env(safe-area-inset-bottom)] print:overflow-visible print:pb-0">
         {/* Topbar */}
-        <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-4 shrink-0 print:hidden">
+        {/* pt con el inset: instalada en iPhone la pagina llega hasta el borde superior de la
+            pantalla (viewport-fit=cover), y sin esto el boton del menu queda tapado por la
+            barra de estado — el toque se lo lleva el sistema y el menu no abre nunca. */}
+        <header className="bg-white border-b border-gray-200 px-6 pb-4 pt-[max(1rem,env(safe-area-inset-top))] flex items-center gap-4 shrink-0 print:hidden">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="lg:hidden p-2 rounded-lg hover:bg-gray-100 text-gray-600"
+            aria-label="Abrir menú"
+            className="lg:hidden -ml-2 w-11 h-11 flex items-center justify-center rounded-lg hover:bg-gray-100 active:bg-gray-200 text-gray-600"
           >
             <Menu size={20} />
           </button>
