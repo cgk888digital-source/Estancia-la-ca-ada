@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#3D2B1F" />
+    <meta name="description" content="Panel de administración de Estancia La Cañada" />
+    <meta name="robots" content="noindex" />
+
+    <!--
+      Documento propio del panel. Existe porque Safari lee estas etiquetas al parsear el
+      HTML y NO las vuelve a leer si JavaScript las cambia después: si /admin se sirviera
+      con el index del huésped, el iPhone instalaría la app del huésped aunque el JS
+      corrigiera el <head> milisegundos más tarde.
+    -->
+    <link rel="manifest" href="/admin.webmanifest" />
+    <link rel="apple-touch-icon" href="/admin-apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Admin" />
+
+    <title>Administración · La Cañada</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

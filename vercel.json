@@ -1,7 +1,7 @@
 {
   "headers": [
     {
-      "source": "/(index.html|sw.js)",
+      "source": "/(index.html|admin.html|sw.js)",
       "headers": [
         {
           "key": "Cache-Control",
@@ -11,6 +11,8 @@
     }
   ],
   "rewrites": [
+    { "source": "/admin", "destination": "/admin.html" },
+    { "source": "/admin/(.*)", "destination": "/admin.html" },
     { "source": "/((?!assets/).*)", "destination": "/index.html" }
   ]
 }

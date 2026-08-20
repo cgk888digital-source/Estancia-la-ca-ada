@@ -1,15 +1,16 @@
 /**
- * La app del huésped y el panel de administración comparten un solo index.html, pero
- * deben poder instalarse en el teléfono como DOS aplicaciones separadas: al tocar el
- * icono del panel tiene que abrir directo en /admin, no en la app del huésped.
+ * La app del huésped y el panel de administración se instalan como DOS aplicaciones
+ * separadas: al tocar el icono del panel tiene que abrir directo en /admin.
  *
- * Lo que decide qué se instala son las etiquetas del <head>. Como el HTML es único, hay
- * que reescribirlas según la ruta:
+ * Lo que decide qué se instala son las etiquetas del <head>, y cada sección tiene su
+ * propio documento con ellas ya escritas: index.html para el huésped, admin.html para el
+ * panel (ver vite.config.ts y las rewrites de vercel.json). Es obligatorio que sean
+ * estáticas porque Safari lee el <head> al parsear y NO lo relee si JavaScript lo cambia
+ * después: con un solo html, el iPhone instalaba siempre la app del huésped.
  *
- *  - Android/Chrome se guía por el `manifest`. Dos manifests con `id` distinto ('/' y
- *    '/admin') cuentan como dos apps y se pueden instalar las dos a la vez.
- *  - iOS ignora el manifest: usa `apple-touch-icon` y `apple-mobile-web-app-title`, y
- *    toma como punto de arranque la URL que esté abierta al añadir a pantalla de inicio.
+ * Esta función es el respaldo para la navegación interna, donde no hay recarga y el
+ * documento no cambia. Hoy el huésped nunca enlaza a /admin, así que en la práctica solo
+ * confirma lo que el html ya declara.
  */
 
 interface Identity {
