@@ -283,6 +283,10 @@ export default function BookingsPage() {
     pets: 0,
     totalAmount: 180,
     amountPaid: 0,
+    // Cuando se carga una reserva vieja (una migracion, un cobro de la semana pasada) el
+    // dinero NO entro hoy. Sin este campo todos los abonos caian con la fecha de carga y
+    // el mes en que se hizo la migracion aparecia inflado en Ingresos.
+    paymentDate: todayStr,
     paymentMethod: 'transferencia' as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' | 'zelle',
     paymentReference: '',
     specialNotes: ''
@@ -356,6 +360,7 @@ export default function BookingsPage() {
       pets: 0,
       totalAmount: 180,
       amountPaid: 0,
+      paymentDate: todayStr,
       paymentMethod: 'transferencia',
       paymentReference: '',
       specialNotes: ''
@@ -1171,7 +1176,7 @@ export default function BookingsPage() {
           .from('booking_payments')
           .insert([{
             booking_id: data[0].id,
-            payment_date: todayStr,
+            payment_date: form.paymentDate || todayStr,
             amount: Number(form.amountPaid),
             currency: 'USD',
             method: form.paymentMethod,
@@ -1191,7 +1196,7 @@ export default function BookingsPage() {
             locator: locatorCode,
             accommodationTitle: getAccommodation(Number(form.accommodationId))?.title,
             amount: Number(form.amountPaid),
-            date: todayStr,
+            date: form.paymentDate || todayStr,
             method: form.paymentMethod,
             reference: form.paymentReference.trim() || null,
           })
@@ -2863,6 +2868,18 @@ export default function BookingsPage() {
                     value={form.amountPaid}
                     onChange={e => setForm(f => ({ ...f, amountPaid: Number(e.target.value) }))}
                     className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">
+                    Fecha del abono
+                  </label>
+                  <input
+                    type="date"
+                    value={form.paymentDate}
+                    onChange={e => setForm(f => ({ ...f, paymentDate: e.target.value }))}
+                    disabled={Number(form.amountPaid) <= 0}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] disabled:bg-gray-50 disabled:text-gray-400"
                   />
                 </div>
                 <div>

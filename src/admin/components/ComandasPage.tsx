@@ -278,41 +278,59 @@ const ComandasPage: React.FC = () => {
     const tableOrders = comandas.filter(c => c.table_id === activeCheckoutTable)
     const totalToPay = tableOrders.reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0)
 
-    // 1. Instant local UI update
-    setComandas(prev => prev.filter(c => c.table_id !== activeCheckoutTable))
-    setShowCheckout(false)
     const targetTable = activeCheckoutTable
+
+    // Se cobra PRIMERO y se celebra despues. Antes se limpiaba la pantalla y salia el
+    // confeti antes de guardar nada, y como Supabase devuelve el error en el resultado
+    // en vez de lanzarlo, el try/catch no saltaba nunca: si el ingreso no se guardaba,
+    // la venta desaparecia sin que nadie se enterara.
+    const cobro = await supabase
+      .from('comandas')
+      .update({ payment_status: 'pagado', updated_at: new Date().toISOString() })
+      .eq('table_id', targetTable)
+      .eq('payment_status', 'pendiente')
+
+    if (cobro.error) {
+      console.error('No se pudo cerrar la mesa:', cobro.error)
+      alert('No se pudo cerrar la mesa. La cuenta sigue abierta; vuelva a intentarlo.')
+      setSavingCheckout(false)
+      return
+    }
+
+    const ingreso = await supabase
+      .from('transactions')
+      .insert({
+        type: 'ingreso',
+        category: 'restaurante',
+        description: `Consumo Restaurante - ${targetTable}`,
+        amount: totalToPay,
+        payment_method: checkoutPaymentMethod,
+        date: new Date().toISOString().substring(0, 10)
+      })
+
+    if (ingreso.error) {
+      // La mesa ya quedo cobrada, asi que no se puede deshacer sin mas: lo que no
+      // puede pasar es que el dinero se pierda en silencio.
+      console.error('La mesa se cobro pero el ingreso no se registro:', ingreso.error)
+      alert(
+        `La mesa se cerro, pero el ingreso de ${totalToPay} NO quedo registrado en la contabilidad.
+
+` +
+        'Anotelo a mano en Ingresos antes de cerrar la caja.'
+      )
+    }
+
+    // 2. Ya esta guardado: ahora si se limpia la pantalla y se celebra.
+    setComandas(prev => prev.filter(c => c.table_id !== targetTable))
+    setShowCheckout(false)
     setActiveCheckoutTable(null)
+    setSavingCheckout(false)
 
     confetti({
       particleCount: 80,
       spread: 60,
       origin: { y: 0.8 }
     })
-
-    // 2. Sync to Supabase in background
-    try {
-      await supabase
-        .from('comandas')
-        .update({ payment_status: 'pagado', updated_at: new Date().toISOString() })
-        .eq('table_id', targetTable)
-        .eq('payment_status', 'pendiente')
-
-      await supabase
-        .from('transactions')
-        .insert({
-          type: 'ingreso',
-          category: 'restaurante',
-          description: `Consumo Restaurante - ${targetTable}`,
-          amount: totalToPay,
-          payment_method: checkoutPaymentMethod,
-          date: new Date().toISOString().substring(0, 10)
-        })
-    } catch (err: any) {
-      console.warn('Supabase checkout notice:', err)
-    } finally {
-      setSavingCheckout(false)
-    }
   }
 
   // Columns data filtering
