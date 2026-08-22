@@ -2,6 +2,10 @@ import React, { useState, useMemo, useEffect } from 'react'
 import { Plus, Search, X, Check, CalendarDays, ChevronDown, Loader2, Receipt } from 'lucide-react'
 import { categoryLabels, categoryColors } from '../data/mockData'
 import LoadErrorBanner from './LoadErrorBanner'
+
+/** Cuantos movimientos se traen de una vez. Al superarlo se avisa en pantalla en vez
+ *  de recortar en silencio, que era lo que hacia antes. */
+const TOPE_MOVIMIENTOS = 500
 import type { Transaction, TransactionType, TransactionCategory, PaymentMethod, Employee } from '../types'
 import { supabase } from '../../lib/supabase'
 import ReceiptModal from './ReceiptModal'
@@ -83,6 +87,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [hayMas, setHayMas] = useState(false)
   const [viewReceipt, setViewReceipt] = useState<{emp: Employee, amountUsd: number, period: string, bcvRate: number} | null>(null)
   const [search, setSearch] = useState('')
 
@@ -129,7 +134,10 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
         query = query.lt('date', toDate.toISOString().substring(0, 10))
       }
       
-      query = query.limit(500)
+      // Se pide una fila mas que el tope: si vuelve, es que el periodo tiene mas
+      // movimientos de los que caben y hay que decirlo. Antes se cortaba en 500 sin
+      // avisar, y los mas antiguos desaparecian de la pantalla en silencio.
+      query = query.limit(TOPE_MOVIMIENTOS + 1)
 
       const { data, error } = await query
 
@@ -141,7 +149,9 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
         setLoadError(error.message)
       } else {
         setLoadError(null)
-        setTransactions((data || []).map(mapDbTransactionToReact))
+        const filas = data || []
+        setHayMas(filas.length > TOPE_MOVIMIENTOS)
+        setTransactions(filas.slice(0, TOPE_MOVIMIENTOS).map(mapDbTransactionToReact))
       }
       setLoading(false)
     }
@@ -275,6 +285,16 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   return (
     <div className="space-y-5">
       <LoadErrorBanner message={loadError} />
+
+      {hayMas && (
+        <div role="status" className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-xs leading-relaxed text-amber-900">
+            <strong className="font-bold">Hay más movimientos de los que caben en pantalla.</strong>{' '}
+            Se muestran los {TOPE_MOVIMIENTOS} más recientes del periodo. Acote las fechas
+            para ver el resto; los totales de abajo solo suman lo que se ve.
+          </p>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
