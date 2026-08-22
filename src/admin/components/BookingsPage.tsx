@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { accommodationOptions, activeAccommodationOptions, getMaxCapacity } from '../../data/accommodations'
 import LoadErrorBanner from './LoadErrorBanner'
+import { registrarIngresoDeAbono, retirarIngresoDeAbono } from '../../utils/bookingIncome'
 import { supabase } from '../../lib/supabase'
 import type { Booking, BookingPayment } from '../types'
 import PrintableReservationsReport from './PrintableReservationsReport'
@@ -876,6 +877,24 @@ export default function BookingsPage() {
     setBookingPayments(updatedPayments)
     await syncBookingPaidAmount(selectedBooking, updatedPayments)
 
+    // El dinero cobrado tiene que aparecer en Ingresos. Si esto falla hay que decirlo:
+    // un abono que no llega a la contabilidad es dinero que desaparece de los reportes.
+    const ingreso = await registrarIngresoDeAbono(supabase, {
+      paymentId: data[0].id,
+      bookingId: selectedBooking.id,
+      guestName: selectedBooking.guestName,
+      locator: selectedBooking.locator,
+      accommodationTitle: getAccommodation(selectedBooking.accommodationId)?.title,
+      amount,
+      date: paymentForm.date,
+      method: paymentForm.method,
+      reference: paymentForm.reference.trim() || null,
+    })
+    if (ingreso.error) {
+      console.error('El abono se guardó pero no llegó a Ingresos:', ingreso.error)
+      alert('El abono quedó registrado, pero NO se pudo anotar en Ingresos. Avise a soporte antes de cerrar la caja.')
+    }
+
     setAddingPayment(false)
     setPaymentForm({ amount: '', date: todayStr, method: 'transferencia', reference: '' })
 
@@ -899,6 +918,13 @@ export default function BookingsPage() {
       console.error('Error deleting payment:', error)
       alert('Error al eliminar el abono. Intenta de nuevo.')
       return
+    }
+
+    // Si el abono desaparece, su ingreso también: si no, la caja cuadraría de más.
+    const retirado = await retirarIngresoDeAbono(supabase, payment.id)
+    if (retirado.error) {
+      console.error('No se pudo retirar el ingreso del abono eliminado:', retirado.error)
+      alert('El abono se eliminó, pero su ingreso sigue en la contabilidad. Avise a soporte.')
     }
 
     const updatedPayments = bookingPayments.filter(p => p.id !== payment.id)
@@ -1141,16 +1167,38 @@ export default function BookingsPage() {
 
       // Si se registró un abono inicial, queda como el primer pago del historial.
       if (Number(form.amountPaid) > 0) {
-        const { error: paymentError } = await supabase.from('booking_payments').insert([{
-          booking_id: data[0].id,
-          payment_date: todayStr,
-          amount: Number(form.amountPaid),
-          currency: 'USD',
-          method: form.paymentMethod,
-          reference: form.paymentReference.trim() || null,
-          status: 'verificado'
-        }])
-        if (paymentError) console.error('Error adding initial payment:', paymentError)
+        const { data: pagoInicial, error: paymentError } = await supabase
+          .from('booking_payments')
+          .insert([{
+            booking_id: data[0].id,
+            payment_date: todayStr,
+            amount: Number(form.amountPaid),
+            currency: 'USD',
+            method: form.paymentMethod,
+            reference: form.paymentReference.trim() || null,
+            status: 'verificado'
+          }])
+          .select('id')
+
+        if (paymentError) {
+          console.error('Error adding initial payment:', paymentError)
+        } else if (pagoInicial && pagoInicial[0]) {
+          // Ese abono es dinero recibido: va a Ingresos como el del restaurante.
+          const ingreso = await registrarIngresoDeAbono(supabase, {
+            paymentId: pagoInicial[0].id,
+            bookingId: data[0].id,
+            guestName: fullGuestName,
+            locator: locatorCode,
+            accommodationTitle: getAccommodation(Number(form.accommodationId))?.title,
+            amount: Number(form.amountPaid),
+            date: todayStr,
+            method: form.paymentMethod,
+            reference: form.paymentReference.trim() || null,
+          })
+          if (ingreso.error) {
+            console.error('El abono inicial no llegó a Ingresos:', ingreso.error)
+          }
+        }
       }
 
       // Que el huésped de una reserva manual también quede disponible para Email Marketing,
