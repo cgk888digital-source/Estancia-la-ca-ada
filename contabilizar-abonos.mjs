@@ -83,7 +83,8 @@ for (const p of pagos) {
     date: p.payment_date,
     payment_method: p.method,
     reference: p.reference || null,
-    reservation_id: b.id,
+    // Sin `reservation_id`: su clave foranea apunta a la tabla `reservations`, vacia y
+    // sin uso. El enlace con el abono lo lleva `notes`.
     notes: marca(p.id),
   })
 }

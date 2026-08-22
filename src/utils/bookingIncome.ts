@@ -62,7 +62,11 @@ export async function registrarIngresoDeAbono(
     date: p.date,
     payment_method: p.method,
     reference: p.reference || null,
-    reservation_id: p.bookingId,
+    // Aqui NO va `reservation_id`: esa columna tiene una clave foranea contra la tabla
+    // `reservations`, que esta vacia y no la usa nadie — es un resto de la plantilla.
+    // Apuntarla contra una reserva de `bookings` hace fallar el insert con un 23503.
+    // El enlace con el abono lo lleva `notes`, que es lo que se consulta para no
+    // duplicar y para poder retirar el ingreso.
     notes: marca,
   })
 
