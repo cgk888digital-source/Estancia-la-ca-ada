@@ -8,7 +8,8 @@ interface AuthContextType {
   sessionReady: boolean
   /** La sesión con la base de datos se perdió y hubo que volver a pedir el PIN. */
   sessionExpired: boolean
-  login: (pin: string) => Promise<boolean>
+  /** Devuelve el rol si el PIN es correcto, o null si no. */
+  login: (pin: string) => Promise<Role | null>
   logout: () => Promise<void>
 }
 
@@ -104,9 +105,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => sub.subscription.unsubscribe()
   }, [])
 
-  const login = useCallback(async (pin: string): Promise<boolean> => {
+  const login = useCallback(async (pin: string): Promise<Role | null> => {
     const user = PINS[pin]
-    if (!user) return false
+    if (!user) return null
 
     const { error } = await supabase.auth.signInWithPassword({
       email: user.email,
@@ -115,7 +116,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (error) {
       console.error('Error authenticating admin user:', error)
-      return false
+      return null
     }
 
     setRole(user.role)
@@ -126,7 +127,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('adminPin', pin)
     } catch { /* modo privado del navegador */ }
 
-    return true
+    return user.role
   }, [])
 
   const logout = useCallback(async () => {

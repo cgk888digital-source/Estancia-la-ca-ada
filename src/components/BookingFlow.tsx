@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { repartirNochesEntre, type RepartoDeNoches } from '../utils/seasonNights';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, X, Users, Dog, Calendar as CalendarIcon, Award, Check } from 'lucide-react';
 import { activeAccommodationOptions, getMaxCapacity } from '../data/accommodations';
@@ -171,18 +172,21 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
     }
   };
 
-  const calculateStayPrice = (roomId: number, adults: number, children: number, nights: number, isDecember: boolean) => {
-    const roomNightlyRate = getRoomPrice(roomId, isDecember);
+  const calculateStayPrice = (roomId: number, adults: number, children: number, nights: number, noches: RepartoDeNoches) => {
+    const roomTotal = (noches.normales * getRoomPrice(roomId, false))
+      + (noches.navidenas * getRoomPrice(roomId, true));
+    // Con la estadia a caballo entre dos temporadas no hay un unico precio por noche:
+    // se muestra el promedio, y el total sigue siendo la suma exacta noche a noche.
+    const roomNightlyRate = nights > 0 ? roomTotal / nights : 0;
     // Alimentación (desayuno + cena) por noche, según lo configurado en Tarifas y Descuentos.
     const mealsNightlyRate = (adults * mealRates.perAdult) + (children * mealRates.perChild);
-    const totalNightlyRate = roomNightlyRate + mealsNightlyRate;
     return {
       roomNightly: roomNightlyRate,
       mealsNightly: mealsNightlyRate,
-      roomTotal: roomNightlyRate * nights,
+      roomTotal,
       mealsTotal: mealsNightlyRate * nights,
-      nightlyRate: totalNightlyRate,
-      totalStayPrice: totalNightlyRate * nights
+      nightlyRate: roomNightlyRate + mealsNightlyRate,
+      totalStayPrice: roomTotal + (mealsNightlyRate * nights)
     };
   };
 
@@ -283,6 +287,13 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
 
   const isDecember = selectedDates.start ? getSeason(selectedDates.start) === 'dec' : false;
 
+  // Cada noche a su temporada. Antes bastaba con que el check-in cayera en navidad para
+  // cobrar TODA la estadia a tarifa alta, y al reves: entrar el 18 de diciembre salia a
+  // tarifa normal aunque se durmiera hasta despues de Navidad.
+  const reparto = selectedDates.start && selectedDates.end
+    ? repartirNochesEntre(selectedDates.start, selectedDates.end)
+    : { total: totalNights, navidenas: isDecember ? totalNights : 0, normales: isDecember ? 0 : totalNights };
+
   // Capacidad numérica: siempre desde accommodations.ts (getMaxCapacity), nunca duplicada aquí.
   const getRoomMaxCapacity = getMaxCapacity;
 
@@ -294,19 +305,20 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
     if (selectedUnits.length === 0) {
       return { roomNightly: 0, mealsNightly: 0, roomTotal: 0, mealsTotal: 0, nightlyRate: 0, totalStayPrice: 0 };
     }
-    let totalRoomNightly = 0;
+    let roomTotal = 0;
     selectedUnits.forEach(id => {
-      totalRoomNightly += getRoomPrice(id, isDecember);
+      roomTotal += (reparto.normales * getRoomPrice(id, false))
+        + (reparto.navidenas * getRoomPrice(id, true));
     });
+    const totalRoomNightly = totalNights > 0 ? roomTotal / totalNights : 0;
     const mealsNightlyRate = (occupants.adults * mealRates.perAdult) + (occupants.children * mealRates.perChild);
-    const nightlyRate = totalRoomNightly + mealsNightlyRate;
     return {
       roomNightly: totalRoomNightly,
       mealsNightly: mealsNightlyRate,
-      roomTotal: totalRoomNightly * totalNights,
+      roomTotal,
       mealsTotal: mealsNightlyRate * totalNights,
-      nightlyRate: nightlyRate,
-      totalStayPrice: nightlyRate * totalNights
+      nightlyRate: totalRoomNightly + mealsNightlyRate,
+      totalStayPrice: roomTotal + (mealsNightlyRate * totalNights)
     };
   };
 
@@ -459,7 +471,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
 
                   const displayMealsAdults = Math.min(occupants.adults, getRoomMaxCapacity(opt.id));
                   const displayMealsChildren = Math.min(occupants.children, Math.max(0, getRoomMaxCapacity(opt.id) - displayMealsAdults));
-                  const roomPriceDetails = calculateStayPrice(opt.id, displayMealsAdults, displayMealsChildren, totalNights, isDecember);
+                  const roomPriceDetails = calculateStayPrice(opt.id, displayMealsAdults, displayMealsChildren, totalNights, reparto);
 
                   return (
                     <motion.div
@@ -1246,7 +1258,7 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
                   const allocatedBabies = Math.floor(occupants.babies / N) + (idx === 0 ? occupants.babies % N : 0);
                   const allocatedPets = Math.floor(occupants.pets / N) + (idx === 0 ? occupants.pets % N : 0);
 
-                  const roomPriceDetails = calculateStayPrice(id, allocatedAdults, allocatedChildren, totalNights, isDecember);
+                  const roomPriceDetails = calculateStayPrice(id, allocatedAdults, allocatedChildren, totalNights, reparto);
                   const roomTotal = roomPriceDetails.totalStayPrice;
                   const roomDeposit = roomTotal * (depositPercent / 100);
 

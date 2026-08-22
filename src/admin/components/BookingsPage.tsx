@@ -6,6 +6,7 @@ import {
 import { accommodationOptions, activeAccommodationOptions, getMaxCapacity } from '../../data/accommodations'
 import LoadErrorBanner from './LoadErrorBanner'
 import { registrarIngresoDeAbono, retirarIngresoDeAbono } from '../../utils/bookingIncome'
+import { repartirNoches } from '../../utils/seasonNights'
 import { supabase } from '../../lib/supabase'
 import type { Booking, BookingPayment } from '../types'
 import PrintableReservationsReport from './PrintableReservationsReport'
@@ -308,31 +309,36 @@ export default function BookingsPage() {
 
   const getStandardRate = (accId: number, checkIn: string, checkOut: string, adults: number, children: number) => {
     const nights = calculateNights(checkIn, checkOut)
-    const d = parseLocalDate(checkIn)
-    // Temporada navideña Dic 21 - Ene 07 (mismo criterio que la app del huésped, verificado en Paxer).
-    const isDecember = (d.getMonth() === 11 && d.getDate() >= 21) || (d.getMonth() === 0 && d.getDate() <= 7)
+
+    // Cada noche se cobra a su propia temporada. La navideña (21 dic - 7 ene, criterio
+    // verificado en Paxer) puede cubrir solo una parte de la estadia.
+    const { navidenas, normales } = repartirNoches(checkIn, checkOut)
 
     const dbAcc = dbAccommodations.find(o => Number(o.id) === accId)
-    let roomPrice: number
+    let precioNormal: number
+    let precioNavideno: number
+
     if (dbAcc) {
-      const basePrice = isDecember ? Number(dbAcc.december_price) : Number(dbAcc.price)
-      const discount = Number(dbAcc.discount_percent || 0)
-      roomPrice = discount > 0 ? Math.round(basePrice * (1 - discount / 100)) : basePrice
+      const descuento = Number(dbAcc.discount_percent || 0)
+      const conDescuento = (p: number) => descuento > 0 ? Math.round(p * (1 - descuento / 100)) : p
+      precioNormal = conDescuento(Number(dbAcc.price))
+      precioNavideno = conDescuento(Number(dbAcc.december_price))
     } else {
       // Fallback con las tarifas navideñas del grid de Paxer.
       const acc = accommodationOptions.find(o => o.id === accId)
       if (!acc) return 0
-      roomPrice = acc.price
-      if (isDecember) {
-        if (accId === 1 || accId === 6 || accId === 7 || accId === 50 || accId === 51 || accId === 52) roomPrice = 196
-        else if (accId === 2 || accId === 4) roomPrice = 350
-        else if (accId >= 30 && accId <= 35) roomPrice = 84 // Galería La Manita
-        else if (accId >= 36 && accId <= 41) roomPrice = 92 // Galería Llano Grande
-      }
+      precioNormal = acc.price
+      precioNavideno = acc.price
+      if (accId === 1 || accId === 6 || accId === 7 || accId === 50 || accId === 51 || accId === 52) precioNavideno = 196
+      else if (accId === 2 || accId === 4) precioNavideno = 350
+      else if (accId >= 30 && accId <= 35) precioNavideno = 84 // Galería La Manita
+      else if (accId >= 36 && accId <= 41) precioNavideno = 92 // Galería Llano Grande
     }
-    
+
+    const alojamiento = (normales * precioNormal) + (navidenas * precioNavideno)
+    // La alimentación no cambia con la temporada: va por noche y por persona.
     const mealsPrice = (adults * mealRates.perAdult) + (children * mealRates.perChild)
-    return (roomPrice + mealsPrice) * nights
+    return alojamiento + (mealsPrice * nights)
   }
 
   // Helper functions to open/close the manual booking modal safely
@@ -812,20 +818,59 @@ export default function BookingsPage() {
     ))
   }
 
+  /**
+   * Borra una reserva y todo lo que colgaba de ella.
+   *
+   * Antes solo se borraba la fila de `bookings`: sus abonos quedaban vivos en
+   * `booking_payments` sin reserva a la que pertenecer, y ahora que cada abono crea su
+   * ingreso, ese dinero se habria quedado en la contabilidad de una reserva que ya no
+   * existe. Se limpia en orden inverso al que se creo: primero los ingresos, luego los
+   * abonos, y la reserva al final.
+   *
+   * Ademas fallaba en silencio: si la base rechazaba el borrado, la reserva desaparecia
+   * de la pantalla pero seguia ahi, y reaparecia al recargar.
+   */
   const handleDeleteBooking = async (bookingId: string) => {
-    if (confirm('¿Estás segura de que deseas eliminar esta reserva?')) {
-      const { error } = await supabase
-        .from('bookings')
-        .delete()
-        .eq('id', bookingId)
+    if (!confirm('¿Estás segura de que deseas eliminar esta reserva? Se borrarán también sus abonos y los ingresos que generaron.')) return
 
-      if (error) {
-        console.error('Error deleting booking:', error)
-      } else {
-        setBookings(prev => prev.filter(b => b.id !== bookingId))
-      }
-      setSelectedBooking(null)
+    const { data: abonos, error: errorAbonos } = await supabase
+      .from('booking_payments')
+      .select('id')
+      .eq('booking_id', bookingId)
+
+    if (errorAbonos) {
+      console.error('No se pudieron leer los abonos de la reserva:', errorAbonos)
+      alert('No se pudo comprobar si la reserva tiene abonos. No se borró nada.')
+      return
     }
+
+    for (const abono of abonos || []) {
+      const { error } = await retirarIngresoDeAbono(supabase, abono.id)
+      if (error) {
+        console.error('No se pudo retirar el ingreso del abono:', error)
+        alert('No se pudo retirar de Ingresos el dinero de esta reserva. No se borró nada.')
+        return
+      }
+    }
+
+    if ((abonos || []).length > 0) {
+      const { error } = await supabase.from('booking_payments').delete().eq('booking_id', bookingId)
+      if (error) {
+        console.error('No se pudieron borrar los abonos:', error)
+        alert('No se pudieron borrar los abonos de la reserva. No se borró la reserva.')
+        return
+      }
+    }
+
+    const { error } = await supabase.from('bookings').delete().eq('id', bookingId)
+    if (error) {
+      console.error('Error deleting booking:', error)
+      alert('No se pudo borrar la reserva. Vuelva a intentarlo.')
+      return
+    }
+
+    setBookings(prev => prev.filter(b => b.id !== bookingId))
+    setSelectedBooking(null)
   }
 
   // Suma todos los abonos de una reserva y actualiza el monto/estatus de pago de la reserva
