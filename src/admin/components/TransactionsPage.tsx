@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { Plus, Search, X, Check, CalendarDays, ChevronDown, Loader2, Receipt } from 'lucide-react'
-import { mockTransactions, categoryLabels, categoryColors } from '../data/mockData'
+import { categoryLabels, categoryColors } from '../data/mockData'
+import LoadErrorBanner from './LoadErrorBanner'
 import type { Transaction, TransactionType, TransactionCategory, PaymentMethod, Employee } from '../types'
 import { supabase } from '../../lib/supabase'
 import ReceiptModal from './ReceiptModal'
@@ -81,6 +82,7 @@ const PAGE_SIZE = 25
 const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [viewReceipt, setViewReceipt] = useState<{emp: Employee, amountUsd: number, period: string, bcvRate: number} | null>(null)
   const [search, setSearch] = useState('')
 
@@ -134,12 +136,12 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       if (!active) return
 
       if (error) {
+        // Nunca rellenar con datos de demostracion: se avisa y se deja vacio.
         console.error('Error fetching transactions:', error)
-        setTransactions(mockTransactions)
-      } else if (data && data.length > 0) {
-        setTransactions(data.map(mapDbTransactionToReact))
+        setLoadError(error.message)
       } else {
-        setTransactions([])
+        setLoadError(null)
+        setTransactions((data || []).map(mapDbTransactionToReact))
       }
       setLoading(false)
     }
@@ -272,6 +274,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
 
   return (
     <div className="space-y-5">
+      <LoadErrorBanner message={loadError} />
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>

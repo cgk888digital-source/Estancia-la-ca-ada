@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { Plus, Check, X, UserCheck, UserX, DollarSign, Loader2, Users, Clock, Calendar, Receipt } from 'lucide-react'
-import { mockEmployees } from '../data/mockData'
+import LoadErrorBanner from './LoadErrorBanner'
 import type { Employee } from '../types'
 import { supabase } from '../../lib/supabase'
 import { getBcvEuroRate } from '../../utils/exchangeRate'
@@ -136,6 +136,7 @@ const PayEventualModal: React.FC<PayEventualModalProps> = ({ emp, onConfirm, onC
 const EmployeesPage: React.FC = () => {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [paidId, setPaidId] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
@@ -173,12 +174,12 @@ const EmployeesPage: React.FC = () => {
       if (!active) return
 
       if (error) {
+        // Nunca rellenar con la plantilla de demostracion: se avisa y se deja vacio.
         console.error('Error fetching employees:', error)
-        setEmployees(mockEmployees.map(e => ({ ...e, employeeType: 'fijo', paymentFrequency: 'mensual', dailyRate: 0, contractedDays: 0 })))
-      } else if (data && data.length > 0) {
-        setEmployees(data.map(mapDbEmployeeToReact))
+        setLoadError(error.message)
       } else {
-        setEmployees([])
+        setLoadError(null)
+        setEmployees((data || []).map(mapDbEmployeeToReact))
       }
       setLoading(false)
     }
@@ -434,6 +435,7 @@ const EmployeesPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <LoadErrorBanner message={loadError} />
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>

@@ -4,7 +4,7 @@ import {
   Info, Baby, Sparkles, RefreshCw, Printer, Maximize2, Minimize2
 } from 'lucide-react'
 import { accommodationOptions, activeAccommodationOptions, getMaxCapacity } from '../../data/accommodations'
-import { mockBookings } from '../data/mockBookings'
+import LoadErrorBanner from './LoadErrorBanner'
 import { supabase } from '../../lib/supabase'
 import type { Booking, BookingPayment } from '../types'
 import PrintableReservationsReport from './PrintableReservationsReport'
@@ -213,6 +213,7 @@ const getPaymentColorClasses = (booking: Pick<Booking, 'confirmed' | 'paymentSta
 export default function BookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [monthPage, setMonthPage] = useState(1)
   const PAGE_SIZE = 20
   const [activeTab, setActiveTab] = useState<'dia' | 'semana' | 'mes'>('dia')
@@ -593,12 +594,12 @@ export default function BookingsPage() {
       if (!active) return
 
       if (error) {
+        // Un planner lleno de reservas inventadas es peor que uno vacio: se avisa.
         console.error('Error fetching bookings from Supabase:', error)
-        setBookings(mockBookings)
-      } else if (data && data.length > 0) {
-        setBookings(data.map(mapDbBookingToReact))
+        setLoadError(error.message)
       } else {
-        setBookings([])
+        setLoadError(null)
+        setBookings((data || []).map(mapDbBookingToReact))
       }
       setLoading(false)
     }
@@ -1268,6 +1269,7 @@ export default function BookingsPage() {
   return (
     <>
       <div className="space-y-6 print:hidden">
+        <LoadErrorBanner message={loadError} />
         {/* 1. Header with dynamic greetings */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
