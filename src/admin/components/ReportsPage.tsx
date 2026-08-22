@@ -4,7 +4,8 @@ import {
   AreaChart, Area, PieChart, Pie, Cell, Legend
 } from 'recharts'
 import { Loader2, X, Utensils, Users, Home } from 'lucide-react'
-import { mockTransactions, mockMonthlyData, categoryLabels, categoryColors } from '../data/mockData'
+import { categoryLabels, categoryColors } from '../data/mockData'
+import { lastMonths, monthKey, shiftMonth } from '../utils/months'
 import type { Transaction, TransactionType, TransactionCategory, PaymentMethod, Booking } from '../types'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -52,6 +53,10 @@ const ReportsPage: React.FC = () => {
   
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [bookings, setBookings] = useState<Booking[]>([])
+  // Las dos graficas de tendencia necesitan varios meses, pero la consulta de arriba
+  // solo trae el periodo filtrado. Sin esto no podian enseñar historia ninguna: lo
+  // unico que pintaban era el relleno de demostracion.
+  const [historyTx, setHistoryTx] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
 
   // Filtering State
@@ -62,6 +67,35 @@ const ReportsPage: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false)
   const [modalTitle, setModalTitle] = useState('')
   const [modalData, setModalData] = useState<Transaction[]>([])
+
+  // Historico de 7 meses. Va aparte porque no depende del filtro y no hace falta
+  // repetirlo cada vez que la dueña cambia de dia o de mes.
+  useEffect(() => {
+    let active = true
+    const fetchHistory = async () => {
+      const desde = monthKey(shiftMonth(new Date(), -6)) + '-01'
+      const { data, error } = await supabase.from('transactions')
+        .select('id, date, type, category, description, amount, payment_method, related_to')
+        .gte('date', desde)
+      if (!active) return
+      if (error) {
+        console.error('No se pudo cargar el historico de reportes:', error)
+        return
+      }
+      setHistoryTx((data || []).map((db: DbTransaction) => ({
+        id: db.id,
+        date: db.date,
+        type: db.type as TransactionType,
+        category: db.category as TransactionCategory,
+        description: db.description,
+        amount: Number(db.amount) || 0,
+        paymentMethod: db.payment_method as PaymentMethod,
+        relatedTo: db.related_to || ''
+      })))
+    }
+    fetchHistory()
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -116,7 +150,8 @@ const ReportsPage: React.FC = () => {
     return () => { active = false }
   }, [filterType, filterDate])
 
-  const txList = transactions.length > 0 ? transactions : mockTransactions
+  // Sin respaldo de demostracion: una tabla vacia significa cero, no inventar.
+  const txList = transactions
 
   // Filter Logic
   const getFilterPrefix = useCallback(() => {
@@ -201,24 +236,8 @@ const ReportsPage: React.FC = () => {
       .sort((a, b) => b.value - a.value)
   }, [filteredTx])
 
-  const monthlyData = useMemo(() => {
-    const monthMappings: Record<string, string> = {
-      'Nov': '2025-11', 'Dic': '2025-12', 'Ene': '2026-01', 'Feb': '2026-02',
-      'Mar': '2026-03', 'Abr': '2026-04', 'May': '2026-05'
-    }
-
-    return mockMonthlyData.map(item => {
-      const prefix = monthMappings[item.month]
-      if (!prefix) return item
-
-      const monthTxs = txList.filter(t => t.date.startsWith(prefix))
-      if (monthTxs.length === 0) return item
-
-      const pIngresos = monthTxs.filter(t => t.type === 'ingreso').reduce((s, t) => s + t.amount, 0)
-      const pEgresos = monthTxs.filter(t => t.type === 'egreso').reduce((s, t) => s + t.amount, 0)
-      return { month: item.month, ingresos: pIngresos, egresos: pEgresos }
-    })
-  }, [txList])
+  /** Los siete meses que terminan en el actual, con cifras reales. */
+  const monthlyData = useMemo(() => lastMonths(historyTx, 7), [historyTx])
 
   const netTrend = useMemo(() => monthlyData.map(m => ({ ...m, neto: m.ingresos - m.egresos })), [monthlyData])
 

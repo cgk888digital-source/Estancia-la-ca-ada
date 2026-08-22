@@ -4,31 +4,14 @@ import {
   PieChart, Pie, Cell, Legend
 } from 'recharts'
 import { TrendingUp, TrendingDown, DollarSign, Users, ArrowUpRight, ArrowDownRight, Loader2 } from 'lucide-react'
-import { mockTransactions, mockEmployees, categoryLabels, categoryColors } from '../data/mockData'
+import { categoryLabels, categoryColors } from '../data/mockData'
 import type { Transaction, TransactionType, TransactionCategory, PaymentMethod, Employee } from '../types'
 import { supabase } from '../../lib/supabase'
 import { parseLocalDate } from '../../utils/dateUtils'
+import { monthKey, monthName, shiftMonth, sumMonth, lastMonths } from '../utils/months'
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
-
-const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
-
-/** '2026-08' — la clave con la que se comparan las fechas de las transacciones. */
-const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-
-/** 'Agosto' / 'Ago' — el nombre que ve la dueña. Antes estaba escrito a mano como
- *  "Mayo" y no cambiaba nunca, asi que las cifras del mes en curso salian con el
- *  nombre de otro mes. */
-const monthName = (d: Date, style: 'long' | 'short' = 'long') =>
-  cap(d.toLocaleDateString('es-VE', { month: style }).replace('.', ''))
-
-const shiftMonth = (d: Date, delta: number) => new Date(d.getFullYear(), d.getMonth() + delta, 1)
-
-/** Suma los ingresos o los egresos de un mes concreto. Pura, para que las dependencias
- *  de los useMemo sigan siendo solo los datos y no la funcion. */
-const sumMonth = (list: Transaction[], prefix: string, type: TransactionType) =>
-  list.filter(t => t.date.startsWith(prefix) && t.type === type).reduce((s, t) => s + t.amount, 0)
 
 interface DbTransaction {
   id: string
@@ -56,28 +39,30 @@ interface DbEmployee {
   contracted_days?: number
 }
 
+/**
+ * Lee lo ultimo que se vio, para pintar algo mientras llega la respuesta del servidor.
+ * Nunca devuelve datos de demostracion: si no hay nada guardado, no hay nada que pintar.
+ */
+function leerCache<T>(clave: string): T[] {
+  try {
+    const cache = localStorage.getItem(clave)
+    if (!cache) return []
+    const parsed = JSON.parse(cache)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
 const Dashboard: React.FC = () => {
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    try {
-      const cache = localStorage.getItem('estancia_transactions')
-      if (cache) {
-        const parsed = JSON.parse(cache)
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed
-      }
-    } catch (e) {}
-    return mockTransactions
-  })
-  const [employees, setEmployees] = useState<Employee[]>(() => {
-    try {
-      const cache = localStorage.getItem('estancia_employees')
-      if (cache) {
-        const parsed = JSON.parse(cache)
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed
-      }
-    } catch (e) {}
-    return mockEmployees
-  })
-  const [loading, setLoading] = useState(false)
+  const [transactions, setTransactions] = useState<Transaction[]>(() =>
+    leerCache<Transaction>('estancia_transactions'))
+  const [employees, setEmployees] = useState<Employee[]>(() =>
+    leerCache<Employee>('estancia_employees'))
+  // Arranca cargando salvo que ya haya algo en cache: asi no se enseña un panel
+  // en cero como si fuera la realidad mientras la consulta va en camino.
+  const [loading, setLoading] = useState(
+    () => leerCache('estancia_transactions').length === 0)
 
   useEffect(() => {
     let active = true
@@ -143,8 +128,11 @@ const Dashboard: React.FC = () => {
     }
   }, [])
 
-  const txList = transactions.length > 0 ? transactions : mockTransactions
-  const empList = employees.length > 0 ? employees : mockEmployees
+  // Sin respaldo de demostracion: una tabla vacia significa cero, no significa
+  // inventar. Al borrar los empleados sembrados, este respaldo hacia que el panel
+  // siguiera anunciando 488.000 de sueldos pendientes de gente que ya no existia.
+  const txList = transactions
+  const empList = employees
 
   // El mes en curso, recalculado en cada carga: nada de nombres escritos a mano.
   const thisMonth = useMemo(() => new Date(), [])
@@ -186,23 +174,8 @@ const Dashboard: React.FC = () => {
     empList.filter(e => e.pendingPayment && e.status === 'activo').length
   , [empList])
 
-  /**
-   * Los siete meses que terminan en el actual, calculados de las transacciones reales.
-   * Antes los meses estaban fijados a Nov-2025..May-2026 y, cuando un mes no tenia
-   * movimientos, la grafica rellenaba con cifras de demostracion: la dueña veia
-   * ingresos que nunca existieron. Un mes sin datos ahora vale cero.
-   */
-  const monthlyData = useMemo(() =>
-    Array.from({ length: 7 }, (_, i) => {
-      const d = shiftMonth(thisMonth, i - 6)
-      const prefix = monthKey(d)
-      return {
-        month: monthName(d, 'short'),
-        ingresos: sumMonth(txList, prefix, 'ingreso'),
-        egresos: sumMonth(txList, prefix, 'egreso'),
-      }
-    })
-  , [txList, thisMonth])
+  /** Los siete meses que terminan en el actual, con cifras reales. */
+  const monthlyData = useMemo(() => lastMonths(txList, 7, thisMonth), [txList, thisMonth])
 
   // Pie data — income breakdown (memoized)
   const incomePie = useMemo(() => monthTx
