@@ -22,6 +22,9 @@ interface MealPrices {
   meal_dinner_adult: string
   meal_breakfast_child: string
   meal_dinner_child: string
+  /** Alimentación total por adulto y noche del 21 de diciembre al 7 de enero. En esas
+   *  fechas la pensión del adulto sube; la del niño se mantiene igual. */
+  meal_adult_navidad: string
 }
 
 const MEAL_KEYS: (keyof MealPrices)[] = [
@@ -29,6 +32,7 @@ const MEAL_KEYS: (keyof MealPrices)[] = [
   'meal_dinner_adult',
   'meal_breakfast_child',
   'meal_dinner_child',
+  'meal_adult_navidad',
 ]
 
 const MEAL_LABELS: Record<keyof MealPrices, string> = {
@@ -36,6 +40,7 @@ const MEAL_LABELS: Record<keyof MealPrices, string> = {
   meal_dinner_adult: 'Cena Adulto',
   meal_breakfast_child: 'Desayuno Niño',
   meal_dinner_child: 'Cena Niño',
+  meal_adult_navidad: 'Alimentación Adulto (Navidad)',
 }
 
 export default function RatesPage() {
@@ -63,6 +68,7 @@ export default function RatesPage() {
     meal_dinner_adult: '34',
     meal_breakfast_child: '20',
     meal_dinner_child: '28',
+    meal_adult_navidad: '62',
   })
   const [savingMeals, setSavingMeals] = useState(false)
   const [successMeals, setSuccessMeals] = useState(false)
@@ -424,6 +430,24 @@ export default function RatesPage() {
                     className="w-full border border-gray-200 bg-white rounded-xl px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:border-[#C5A059] focus:ring-1 focus:ring-[#C5A059]/30 transition-all"
                   />
                 </div>
+              </div>
+
+              {/* Del 21 de diciembre al 7 de enero la pension del adulto sube. Cotejado
+                  contra Paxer con ocho reservas navideñas reales. */}
+              <div className="pt-3 border-t border-[#C5A059]/20">
+                <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1 block">
+                  Alimentación en Navidad ($ / noche) <span className="text-[#C5A059]">— 21 dic al 7 ene</span>
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={meals.meal_adult_navidad}
+                  onChange={e => setMeals(prev => ({ ...prev, meal_adult_navidad: e.target.value }))}
+                  className="w-full border border-gray-200 bg-white rounded-xl px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:border-[#C5A059] focus:ring-1 focus:ring-[#C5A059]/30 transition-all"
+                />
+                <p className="text-[10px] text-gray-400 mt-1">
+                  Sustituye al total de desayuno + cena en esas fechas. El niño no cambia.
+                </p>
               </div>
             </div>
 

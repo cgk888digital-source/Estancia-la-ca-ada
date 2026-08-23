@@ -6,7 +6,7 @@ import {
 import { accommodationOptions, activeAccommodationOptions, getMaxCapacity } from '../../data/accommodations'
 import LoadErrorBanner from './LoadErrorBanner'
 import { registrarIngresoDeAbono, retirarIngresoDeAbono } from '../../utils/bookingIncome'
-import { repartirNoches } from '../../utils/seasonNights'
+import { repartirNoches, precioEstancia } from '../../utils/seasonNights'
 import { supabase } from '../../lib/supabase'
 import type { Booking, BookingPayment } from '../types'
 import PrintableReservationsReport from './PrintableReservationsReport'
@@ -308,11 +308,10 @@ export default function BookingsPage() {
   const isMobile = useIsMobile()
 
   const getStandardRate = (accId: number, checkIn: string, checkOut: string, adults: number, children: number) => {
-    const nights = calculateNights(checkIn, checkOut)
-
-    // Cada noche se cobra a su propia temporada. La navideña (21 dic - 7 ene, criterio
-    // verificado en Paxer) puede cubrir solo una parte de la estadia.
-    const { navidenas, normales } = repartirNoches(checkIn, checkOut)
+    // Cada noche se cobra a su propia temporada, habitacion y pension incluidas. La
+    // navideña (21 dic - 7 ene, verificada en Paxer) puede cubrir solo parte de la
+    // estadia, y en ella la pension del adulto sube.
+    const noches = repartirNoches(checkIn, checkOut)
 
     const dbAcc = dbAccommodations.find(o => Number(o.id) === accId)
     let precioNormal: number
@@ -324,21 +323,24 @@ export default function BookingsPage() {
       precioNormal = conDescuento(Number(dbAcc.price))
       precioNavideno = conDescuento(Number(dbAcc.december_price))
     } else {
-      // Fallback con las tarifas navideñas del grid de Paxer.
+      // Fallback con las tarifas del grid de Paxer, ya sin los 6 de mas que llevaban.
       const acc = accommodationOptions.find(o => o.id === accId)
       if (!acc) return 0
       precioNormal = acc.price
       precioNavideno = acc.price
-      if (accId === 1 || accId === 6 || accId === 7 || accId === 50 || accId === 51 || accId === 52) precioNavideno = 196
-      else if (accId === 2 || accId === 4) precioNavideno = 350
-      else if (accId >= 30 && accId <= 35) precioNavideno = 84 // Galería La Manita
-      else if (accId >= 36 && accId <= 41) precioNavideno = 92 // Galería Llano Grande
+      if (accId === 1 || accId === 6 || accId === 7 || accId === 50 || accId === 51 || accId === 52) precioNavideno = 190
+      else if (accId === 2 || accId === 4) precioNavideno = 344
+      else if (accId >= 30 && accId <= 35) precioNavideno = 78 // Galería La Manita
+      else if (accId >= 36 && accId <= 41) precioNavideno = 86 // Galería Llano Grande
     }
 
-    const alojamiento = (normales * precioNormal) + (navidenas * precioNavideno)
-    // La alimentación no cambia con la temporada: va por noche y por persona.
-    const mealsPrice = (adults * mealRates.perAdult) + (children * mealRates.perChild)
-    return alojamiento + (mealsPrice * nights)
+    return precioEstancia(
+      noches,
+      { normal: precioNormal, navidena: precioNavideno },
+      { adulto: mealRates.perAdult, adultoNavideno: mealRates.perAdultNavidad, nino: mealRates.perChild },
+      adults,
+      children
+    ).total
   }
 
   // Helper functions to open/close the manual booking modal safely

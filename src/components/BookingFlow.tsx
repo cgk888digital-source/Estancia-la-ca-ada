@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { repartirNochesEntre, type RepartoDeNoches } from '../utils/seasonNights';
+import { repartirNochesEntre, precioEstancia, type RepartoDeNoches } from '../utils/seasonNights';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, X, Users, Dog, Calendar as CalendarIcon, Award, Check } from 'lucide-react';
 import { activeAccommodationOptions, getMaxCapacity } from '../data/accommodations';
@@ -147,8 +147,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
       const discount = Number(dbAcc.discount_percent || 0);
       return discount > 0 ? Math.round(basePrice * (1 - discount / 100)) : basePrice;
     }
-    // Fallback to static defaults (tarifas base derivadas de Paxer: precio 1 pasajero - $56 de
-    // alimentación). "isDecember" = temporada navideña del 21 dic al 7 ene.
+    // Respaldo si la base no responde. Son solo la habitacion: la alimentacion se suma
+    // aparte, y en navidad el adulto cuesta mas. "isDecember" = 21 dic al 7 ene.
     switch (roomId) {
       case 1:
       case 6:
@@ -156,37 +156,39 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
       case 50:
       case 51:
       case 52:
-        return isDecember ? 196 : 140;
+        return isDecember ? 190 : 140;
       case 2:
-        return isDecember ? 350 : 297; // Cabaña La Lomita
+        return isDecember ? 344 : 297; // Cabaña La Lomita
       case 4:
-        return isDecember ? 350 : 300; // Cabaña Mitibibó
+        return isDecember ? 344 : 300; // Cabaña Mitibibó
       case 30: case 31: case 32: case 33: case 34: case 35:
-        return isDecember ? 84 : 62; // Galería La Manita (habitaciones 1-6)
+        return isDecember ? 78 : 62; // Galería La Manita (habitaciones 1-6)
       case 36:
-        return isDecember ? 92 : 66; // Galería Llano Grande — Habitación 7 (2 pax)
+        return isDecember ? 86 : 66; // Galería Llano Grande — Habitación 7 (2 pax)
       case 37: case 38: case 39: case 40: case 41:
-        return isDecember ? 92 : 64; // Galería Llano Grande (habitaciones 8-12)
+        return isDecember ? 86 : 64; // Galería Llano Grande (habitaciones 8-12)
       default:
         return 0;
     }
   };
 
   const calculateStayPrice = (roomId: number, adults: number, children: number, nights: number, noches: RepartoDeNoches) => {
-    const roomTotal = (noches.normales * getRoomPrice(roomId, false))
-      + (noches.navidenas * getRoomPrice(roomId, true));
+    const desglose = precioEstancia(
+      noches,
+      { normal: getRoomPrice(roomId, false), navidena: getRoomPrice(roomId, true) },
+      { adulto: mealRates.perAdult, adultoNavideno: mealRates.perAdultNavidad, nino: mealRates.perChild },
+      adults,
+      children
+    );
     // Con la estadia a caballo entre dos temporadas no hay un unico precio por noche:
     // se muestra el promedio, y el total sigue siendo la suma exacta noche a noche.
-    const roomNightlyRate = nights > 0 ? roomTotal / nights : 0;
-    // Alimentación (desayuno + cena) por noche, según lo configurado en Tarifas y Descuentos.
-    const mealsNightlyRate = (adults * mealRates.perAdult) + (children * mealRates.perChild);
     return {
-      roomNightly: roomNightlyRate,
-      mealsNightly: mealsNightlyRate,
-      roomTotal,
-      mealsTotal: mealsNightlyRate * nights,
-      nightlyRate: roomNightlyRate + mealsNightlyRate,
-      totalStayPrice: roomTotal + (mealsNightlyRate * nights)
+      roomNightly: nights > 0 ? desglose.alojamiento / nights : 0,
+      mealsNightly: nights > 0 ? desglose.pension / nights : 0,
+      roomTotal: desglose.alojamiento,
+      mealsTotal: desglose.pension,
+      nightlyRate: nights > 0 ? desglose.total / nights : 0,
+      totalStayPrice: desglose.total
     };
   };
 
@@ -305,20 +307,30 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
     if (selectedUnits.length === 0) {
       return { roomNightly: 0, mealsNightly: 0, roomTotal: 0, mealsTotal: 0, nightlyRate: 0, totalStayPrice: 0 };
     }
+    // La pension se cuenta una sola vez para todo el grupo; las habitaciones, cada una
+    // con su tarifa. Por eso la primera lleva los ocupantes y las demas van a cero.
     let roomTotal = 0;
     selectedUnits.forEach(id => {
-      roomTotal += (reparto.normales * getRoomPrice(id, false))
-        + (reparto.navidenas * getRoomPrice(id, true));
+      roomTotal += precioEstancia(
+        reparto,
+        { normal: getRoomPrice(id, false), navidena: getRoomPrice(id, true) },
+        { adulto: 0, adultoNavideno: 0, nino: 0 }, 0, 0
+      ).alojamiento;
     });
-    const totalRoomNightly = totalNights > 0 ? roomTotal / totalNights : 0;
-    const mealsNightlyRate = (occupants.adults * mealRates.perAdult) + (occupants.children * mealRates.perChild);
+    const pension = precioEstancia(
+      reparto,
+      { normal: 0, navidena: 0 },
+      { adulto: mealRates.perAdult, adultoNavideno: mealRates.perAdultNavidad, nino: mealRates.perChild },
+      occupants.adults,
+      occupants.children
+    ).pension;
     return {
-      roomNightly: totalRoomNightly,
-      mealsNightly: mealsNightlyRate,
+      roomNightly: totalNights > 0 ? roomTotal / totalNights : 0,
+      mealsNightly: totalNights > 0 ? pension / totalNights : 0,
       roomTotal,
-      mealsTotal: mealsNightlyRate * totalNights,
-      nightlyRate: totalRoomNightly + mealsNightlyRate,
-      totalStayPrice: roomTotal + (mealsNightlyRate * totalNights)
+      mealsTotal: pension,
+      nightlyRate: totalNights > 0 ? (roomTotal + pension) / totalNights : 0,
+      totalStayPrice: roomTotal + pension
     };
   };
 

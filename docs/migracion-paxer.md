@@ -84,26 +84,23 @@ Manita de 58 a 62 y el niño de 40 a 48). El cambio cae en el primer día de un 
 de subida de tarifa, no de temporada— y marzo de 2027 vuelve a marcar 118. Todas las
 fechas con precio viejo están en el pasado.
 
-## PENDIENTE: la tarifa navideña está mal en la app
+## La tarifa navideña — corregido el 22 de agosto de 2026
 
-`accommodations.december_price` tiene **6 dólares de más** en todas las unidades, y la
-pensión del adulto no sube a 62 en navidad. Los dos errores se compensan cuando hay un
-solo adulto, y se separan en cuanto hay dos o más.
+`accommodations.december_price` tenía **6 dólares de más** en todas las unidades, y la
+pensión del adulto no subía a 62 en navidad. Los dos errores se compensaban cuando había
+un solo adulto y se separaban en cuanto había dos o más: con dos adultos la app cobraba 6
+de menos por noche; con seis, 30.
 
-**Con dos adultos la app cobra 6 de menos por noche; con seis, 30 de menos.**
+Ya está arreglado:
 
-Comprobado contra ocho reservas navideñas reales (Carlos Lascurain, Andreína Negrón,
-Muriel Beltran, Muricio Rubio, Federico Loynaz, Gustavo Salazar, Michelle King, Adolfo
-Ledo) con 1, 2, 3 y 6 adultos, en galería, suite y cabaña. El modelo corregido acierta en
-las ocho.
+1. Se bajaron 6 los `december_price` de las 24 unidades.
+2. Se añadió el ajuste `meal_adult_navidad` (62), editable desde *Tarifas y Descuentos*.
+3. El cálculo (`src/utils/seasonNights.ts`) aplica a cada noche su tarifa de habitación
+   **y** su pensión según la temporada en que cae.
 
-Para arreglarlo hace falta:
-
-1. Bajar 6 los `december_price` de las 24 unidades.
-2. Que la pensión del adulto dependa de la temporada: 56 normal, 62 navidad.
-
-Mientras no se haga, **toda reserva navideña con más de un adulto creada desde la app
-saldrá corta**. Las 44 migradas llevan el total correcto de Paxer y no les afecta.
+Comprobado contra **16 reservas reales**: las once navideñas —con 1, 2, 3 y 6 adultos, con
+y sin niños, en galería, suite y cabaña—, una que cruza el 21 de diciembre, y cuatro de
+temporada normal. Las dieciséis dan el total exacto de Paxer.
 
 ## Descuentos
 

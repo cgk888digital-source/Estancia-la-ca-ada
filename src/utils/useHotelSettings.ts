@@ -13,26 +13,39 @@ interface HotelSettings {
   meal_breakfast_child: string
   /** Precio de la cena por niño (3-12 años), por noche. */
   meal_dinner_child: string
+  /** Alimentación total por adulto y noche en temporada navideña (21 dic - 7 ene).
+   *  En navidad sube; el niño se mantiene igual todo el año. */
+  meal_adult_navidad: string
 }
 
-// Los valores de alimentación suman el total histórico verificado contra Paxer:
-// $56 por adulto y $48 por niño, por noche.
+// Valores verificados contra el grid de Paxer: 56 por adulto y 48 por niño y noche el
+// resto del año, y 62 por adulto en temporada navideña.
 const DEFAULTS: HotelSettings = {
   checkin_time: '2:00 PM',
   checkout_time: '11:00 AM',
   table_count: '6',
-  meal_breakfast_adult: '28',
-  meal_dinner_adult: '28',
-  meal_breakfast_child: '24',
-  meal_dinner_child: '24',
+  meal_breakfast_adult: '22',
+  meal_dinner_adult: '34',
+  meal_breakfast_child: '20',
+  meal_dinner_child: '28',
+  meal_adult_navidad: '62',
 }
 
 const SETTING_KEYS = Object.keys(DEFAULTS) as (keyof HotelSettings)[]
 
-/** Total de alimentación por noche que se suma a la tarifa de la habitación. */
+/**
+ * Alimentación por persona y noche, que se suma a la tarifa de la habitación.
+ *
+ * El adulto cuesta mas en navidad; el niño vale igual todo el año. Si por lo que sea la
+ * tarifa navideña no estuviera cargada, se usa la normal en su lugar: es preferible
+ * cobrar de menos a cobrar un disparate.
+ */
 export function getMealRates(settings: HotelSettings) {
+  const perAdult = Number(settings.meal_breakfast_adult) + Number(settings.meal_dinner_adult)
+  const navideno = Number(settings.meal_adult_navidad)
   return {
-    perAdult: Number(settings.meal_breakfast_adult) + Number(settings.meal_dinner_adult),
+    perAdult,
+    perAdultNavidad: Number.isFinite(navideno) && navideno > 0 ? navideno : perAdult,
     perChild: Number(settings.meal_breakfast_child) + Number(settings.meal_dinner_child),
   }
 }
