@@ -597,7 +597,7 @@ export default function RatesPage() {
             <Sliders size={16} className="text-[#C5A059]" /> Reglas de Tarifas y Temporadas
           </h3>
           <p className="text-xs text-gray-500 leading-relaxed">
-            El sistema aplica automáticamente la <strong>Tarifa Diciembre</strong> si la fecha de Check-in cae en diciembre (temporada alta). Para el resto del año, se utiliza la <strong>Tarifa Base</strong>. Si configuras un <strong>Descuento Activo</strong> mayor al 0%, se aplicará de inmediato al huésped y se mostrará el precio original tachado como incentivo de reserva.
+            El sistema aplica la <strong>Tarifa Diciembre</strong> a cada noche que caiga entre el <strong>21 de diciembre y el 7 de enero</strong>, no a la estadía entera: si un huésped entra el 18 y se va el 26, las tres primeras noches van a Tarifa Base y las demás a Tarifa Diciembre. En esas fechas la alimentación del adulto también cambia a la de Navidad. El resto del año se usa la <strong>Tarifa Base</strong>. Si configuras un <strong>Descuento Activo</strong> mayor al 0%, se aplicará de inmediato al huésped y se mostrará el precio original tachado como incentivo de reserva.
           </p>
         </div>
 
