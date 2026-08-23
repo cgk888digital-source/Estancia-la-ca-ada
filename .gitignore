@@ -25,3 +25,6 @@ dist-ssr
 
 .vercel
 Estancia-la-ca-ada/
+
+# Copias de seguridad de datos: son de la posada, no del codigo
+respaldos/
