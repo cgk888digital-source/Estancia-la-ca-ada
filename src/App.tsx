@@ -1,5 +1,5 @@
 import { useState, lazy, Suspense, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useLocation, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Home, Utensils, Calendar, Award, ChevronLeft, Bed } from 'lucide-react'
 import type { BookingFlowData } from './components/BookingFlow'
@@ -20,6 +20,8 @@ type Screen = 'home' | 'restaurant' | 'excursions' | 'club' | 'cava' | 'success'
 
 function App() {
   const [searchParams] = useSearchParams()
+  const location = useLocation()
+  const navigate = useNavigate()
   const { settings: hotelSettings } = useHotelSettings()
   const [tableId, setTableId] = useState<string | null>(() => {
     return localStorage.getItem('estancia_table_id')
@@ -52,6 +54,26 @@ function App() {
     }
   }, [searchParams, hotelSettings.table_count])
   const [bookingInitialUnitId, setBookingInitialUnitId] = useState<number | null>(null)
+
+  /**
+   * Enlace directo al formulario de reserva: estancialacanada.com/reservar
+   *
+   * Sirve para mandar gente desde WhatsApp sin que tenga que buscar el boton en la
+   * portada. Quien llega desde una conversacion viene decidido, y cada paso de mas es
+   * gente que se pierde por el camino.
+   *
+   * La ruta abre el formulario por si misma, sin pasar por un efecto: asi aparece ya
+   * abierto en el primer pintado, sin el parpadeo de ver la portada primero.
+   */
+  const enRutaDeReserva = location.pathname.replace(/\/+$/, '') === '/reservar'
+  const mostrarReserva = isBookingOpen || enRutaDeReserva
+
+  /** Al cerrar se vuelve a la portada, para que recargar no lo reabra. */
+  const cerrarReserva = () => {
+    setIsBookingOpen(false)
+    setBookingInitialUnitId(null)
+    if (enRutaDeReserva) navigate('/', { replace: true })
+  }
 
   const slideVariants = {
     initial: (direction: number) => ({
@@ -201,18 +223,14 @@ function App() {
 
         {/* Booking Flow Modal */}
         <AnimatePresence>
-          {isBookingOpen && (
+          {mostrarReserva && (
             <Suspense fallback={<div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/50 backdrop-blur-sm text-[#C5A059]">Cargando...</div>}>
               <BookingFlow 
-                onClose={() => {
-                  setIsBookingOpen(false);
-                  setBookingInitialUnitId(null);
-                }} 
+                onClose={cerrarReserva}
                 initialUnitId={bookingInitialUnitId}
                 onComplete={(data) => {
                   setBookingData(data);
-                  setIsBookingOpen(false);
-                  setBookingInitialUnitId(null);
+                  cerrarReserva();
                   navigateTo('success');
                 }}
               />
