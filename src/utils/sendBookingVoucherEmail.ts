@@ -14,7 +14,7 @@ export async function sendBookingVoucherEmail(supabase: SupabaseClient, data: Vo
   if (!email) return
 
   const firstName = data.guestName.trim().split(' ')[0]
-  const pending = data.totalAmount - data.amountPaid
+  const pending = Math.max(0, data.totalAmount - data.amountPaid)
 
   const html = `
     <div style="font-family: Arial, Helvetica, sans-serif; max-width: 640px; margin: 0 auto; color: #2E2118;">

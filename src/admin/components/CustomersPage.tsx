@@ -4,6 +4,7 @@ import { Check, FileSpreadsheet, Mail, Phone, Plus, Search, Sparkles, Users, X }
 import * as XLSX from 'xlsx'
 import { supabase } from '../../lib/supabase'
 import type { CustomerStatus, MarketingCustomer } from '../types'
+import { joinPersonName, splitPersonName } from '../../utils/personName'
 
 interface DbCustomer {
   id: string
@@ -22,7 +23,8 @@ interface DbCustomer {
 }
 
 const emptyForm = {
-  fullName: '',
+  firstName: '',
+  lastName: '',
   email: '',
   phone: '',
   status: 'subscribed' as CustomerStatus,
@@ -218,9 +220,11 @@ export default function CustomersPage() {
   }
 
   function openEdit(customer: MarketingCustomer) {
+    const { firstName, lastName } = splitPersonName(customer.fullName)
     setEditing(customer)
     setForm({
-      fullName: customer.fullName,
+      firstName,
+      lastName,
       email: customer.email,
       phone: customer.phone,
       status: customer.status,
@@ -232,10 +236,10 @@ export default function CustomersPage() {
   }
 
   async function handleSave() {
-    if (!form.fullName.trim() || (!form.email.trim() && !form.phone.trim())) return
+    if (!form.firstName.trim() || !form.lastName.trim() || (!form.email.trim() && !form.phone.trim())) return
 
     const payload = {
-      full_name: form.fullName.trim(),
+      full_name: joinPersonName(form.firstName, form.lastName),
       email: form.email.trim() || null,
       phone: form.phone.trim() || null,
       status: form.status,
@@ -390,7 +394,8 @@ export default function CustomersPage() {
               <button onClick={() => setModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-xl text-gray-500"><X size={18} /></button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label="Nombre" value={form.fullName} onChange={fullName => setForm(f => ({ ...f, fullName }))} className="sm:col-span-2" />
+              <Field label="Nombre" value={form.firstName} onChange={firstName => setForm(f => ({ ...f, firstName }))} placeholder="Ej. Luis Enrique" />
+              <Field label="Apellido" value={form.lastName} onChange={lastName => setForm(f => ({ ...f, lastName }))} placeholder="Ej. Feo" />
               <Field label="Correo" type="email" value={form.email} onChange={email => setForm(f => ({ ...f, email }))} />
               <Field label="Teléfono" value={form.phone} onChange={phone => setForm(f => ({ ...f, phone }))} />
               <div>
@@ -412,7 +417,7 @@ export default function CustomersPage() {
                 <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={3} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059] resize-none" />
               </div>
             </div>
-            <button onClick={handleSave} disabled={!form.fullName.trim() || (!form.email.trim() && !form.phone.trim())} className="w-full py-3 bg-[#C5A059] hover:bg-[#b8904a] text-white font-bold rounded-2xl text-sm disabled:opacity-40 flex items-center justify-center gap-2">
+            <button onClick={handleSave} disabled={!form.firstName.trim() || !form.lastName.trim() || (!form.email.trim() && !form.phone.trim())} className="w-full py-3 bg-[#C5A059] hover:bg-[#b8904a] text-white font-bold rounded-2xl text-sm disabled:opacity-40 flex items-center justify-center gap-2">
               <Check size={16} /> {saved ? 'Guardado' : 'Guardar Cliente'}
             </button>
           </div>

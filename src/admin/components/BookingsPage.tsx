@@ -16,6 +16,7 @@ import { useHotelSettings, getMealRates } from '../../utils/useHotelSettings'
 import { sendBookingConfirmationEmail } from '../../utils/sendBookingConfirmationEmail'
 import { sendBookingVoucherEmail } from '../../utils/sendBookingVoucherEmail'
 import { useIsMobile } from '../../utils/useMediaQuery'
+import { joinPersonName, splitPersonName } from '../../utils/personName'
 
 // Helper to format currency
 const fmt = (n: number) =>
@@ -244,16 +245,31 @@ export default function BookingsPage() {
   const [activeTab, setActiveTab] = useState<'dia' | 'semana' | 'mes'>('dia')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
-  const [editingAccommodation, setEditingAccommodation] = useState(false)
+  const [editingGuest, setEditingGuest] = useState(false)
+  const [savingGuest, setSavingGuest] = useState(false)
+  const [editGuestForm, setEditGuestForm] = useState({
+    firstName: '',
+    lastName: '',
+    ci: '',
+    phone: '',
+    email: '',
+    companions: ''
+  })
   const [addingRoomsToBooking, setAddingRoomsToBooking] = useState(false)
   const [additionalAccommodationIds, setAdditionalAccommodationIds] = useState<number[]>([])
   const [savingAdditionalRooms, setSavingAdditionalRooms] = useState(false)
   const [additionalGuests, setAdditionalGuests] = useState({ adults: 2, children: 0, babies: 0, pets: 0 })
+  const [editingRoomId, setEditingRoomId] = useState<string | null>(null)
+  const [savingRoom, setSavingRoom] = useState(false)
+  const [editRoomForm, setEditRoomForm] = useState({ accommodationId: 0, adults: 0, children: 0, babies: 0, pets: 0 })
   const [editingDates, setEditingDates] = useState(false)
   const [editDatesForm, setEditDatesForm] = useState({ checkIn: '', checkOut: '' })
   const [editingFinancials, setEditingFinancials] = useState(false)
   const [savingFinancials, setSavingFinancials] = useState(false)
   const [editDiscountPercent, setEditDiscountPercent] = useState(0)
+  const [editingNotes, setEditingNotes] = useState(false)
+  const [savingNotes, setSavingNotes] = useState(false)
+  const [editNotes, setEditNotes] = useState('')
   // Historial de abonos de la reserva abierta (como en Paxer): cada pago con su fecha,
   // monto, método y número de operación, en vez de un solo monto acumulado.
   const [bookingPayments, setBookingPayments] = useState<BookingPayment[]>([])
@@ -331,6 +347,10 @@ export default function BookingsPage() {
 
   // Accommodation lookup helper
   const getAccommodation = (id: number) => accommodationOptions.find(o => o.id === id)
+
+  const getBookingGroup = (booking: Booking) => booking.locator
+    ? bookings.filter(item => item.locator === booking.locator)
+    : [booking]
 
   // Desayuno + cena por noche, configurables desde Tarifas y Descuentos.
   const { settings: hotelSettings } = useHotelSettings()
@@ -586,7 +606,8 @@ export default function BookingsPage() {
     }
   }, [rangeSelect, pendingCheckIn])
 
-  // Carga el historial de abonos cada vez que se abre la ficha de una reserva.
+  // Carga los abonos de todas las habitaciones que comparten el localizador. Así la
+  // ficha financiera representa la reserva completa, no solo la fila que se tocó.
   useEffect(() => {
     let active = true
 
@@ -596,10 +617,13 @@ export default function BookingsPage() {
         return
       }
       setLoadingPayments(true)
+      const groupIds = selectedBooking.locator
+        ? bookings.filter(item => item.locator === selectedBooking.locator).map(item => item.id)
+        : [selectedBooking.id]
       const { data, error } = await supabase
         .from('booking_payments')
         .select('*')
-        .eq('booking_id', selectedBooking.id)
+        .in('booking_id', groupIds)
         .order('payment_date', { ascending: true })
 
       if (!active) return
@@ -614,7 +638,7 @@ export default function BookingsPage() {
 
     loadPayments()
     return () => { active = false }
-  }, [selectedBooking?.id])
+  }, [selectedBooking?.id, selectedBooking?.locator, bookings.length])
 
   const dragOverCellRef = useRef<string | null>(null)
   // Un simple click siempre dispara mousedown + mouseup, casi nunca con el mouse 100%
@@ -880,16 +904,10 @@ export default function BookingsPage() {
   }
 
   /**
-   * Borra una reserva y todo lo que colgaba de ella.
-   *
-   * Antes solo se borraba la fila de `bookings`: sus abonos quedaban vivos en
-   * `booking_payments` sin reserva a la que pertenecer, y ahora que cada abono crea su
-   * ingreso, ese dinero se habria quedado en la contabilidad de una reserva que ya no
-   * existe. Se limpia en orden inverso al que se creo: primero los ingresos, luego los
-   * abonos, y la reserva al final.
-   *
-   * Ademas fallaba en silencio: si la base rechazaba el borrado, la reserva desaparecia
-   * de la pantalla pero seguia ahi, y reaparecia al recargar.
+   * En una reserva grupal se anula solo la habitación: el precio del grupo baja, pero
+   * el dinero que entregó el cliente no se toca. Los abonos que apuntaban a esa fila se
+   * trasladan a otra habitación del mismo localizador y el total pagado se redistribuye.
+   * Solo cuando se elimina la última habitación se eliminan también abonos e ingresos.
    */
   const handleDeleteBooking = async (bookingId: string) => {
     const booking = bookings.find(b => b.id === bookingId)
@@ -901,10 +919,89 @@ export default function BookingsPage() {
     const isGroupBooking = groupBookings.length > 1
     const accommodationTitle = getAccommodation(booking.accommodationId)?.title || 'la habitación seleccionada'
     const confirmationMessage = isGroupBooking
-      ? `¿Anular solamente ${accommodationTitle}?\n\nLas otras ${groupBookings.length - 1} ${groupBookings.length - 1 === 1 ? 'habitación permanecerá' : 'habitaciones permanecerán'} activas bajo el localizador ${booking.locator}. Solo se retirarán los abonos e ingresos asignados a esta habitación.`
+      ? `¿Anular solamente ${accommodationTitle}?\n\nSe restará ${fmt(booking.totalAmount)} del costo total. Las otras ${groupBookings.length - 1} ${groupBookings.length - 1 === 1 ? 'habitación permanecerá' : 'habitaciones permanecerán'} activas y todos los abonos del cliente se conservarán.`
       : '¿Estás segura de que deseas eliminar esta reserva? Se borrarán también sus abonos y los ingresos que generaron.'
 
     if (!confirm(confirmationMessage)) return
+
+    if (isGroupBooking) {
+      const remainingBookings = groupBookings.filter(room => room.id !== bookingId)
+      const paymentTarget = remainingBookings[0]
+      const groupPaidTotal = groupBookings.reduce((sum, room) => sum + room.amountPaid, 0)
+      const { data: roomPaymentRows, error: readPaymentsError } = await supabase
+        .from('booking_payments')
+        .select('id')
+        .eq('booking_id', bookingId)
+
+      if (readPaymentsError) {
+        console.error('No se pudieron comprobar los abonos de la habitación:', readPaymentsError)
+        alert('No se pudo comprobar el historial de abonos. No se anuló la habitación.')
+        return
+      }
+
+      const movedPaymentIds = (roomPaymentRows || []).map(payment => payment.id)
+      const restoreRemainingPaidAmounts = async () => {
+        await Promise.all(remainingBookings.map(room => supabase
+          .from('bookings')
+          .update({ amount_paid: room.amountPaid, payment_status: room.paymentStatus })
+          .eq('id', room.id)
+        ))
+        setBookings(prev => prev.map(current => {
+          const original = remainingBookings.find(room => room.id === current.id)
+          return original ? { ...current, amountPaid: original.amountPaid, paymentStatus: original.paymentStatus } : current
+        }))
+        setSelectedBooking(prev => {
+          if (!prev) return prev
+          const original = remainingBookings.find(room => room.id === prev.id)
+          return original ? { ...prev, amountPaid: original.amountPaid, paymentStatus: original.paymentStatus } : prev
+        })
+      }
+
+      // El historial y su transacción de caja permanecen intactos. Solo cambia la fila
+      // de habitación a la que apunta el abono para evitar pagos huérfanos.
+      const { error: movePaymentsError } = await supabase
+        .from('booking_payments')
+        .update({ booking_id: paymentTarget.id })
+        .eq('booking_id', bookingId)
+
+      if (movePaymentsError) {
+        console.error('No se pudieron trasladar los abonos de la habitación:', movePaymentsError)
+        alert('No se pudo conservar correctamente el historial de abonos. No se anuló la habitación.')
+        return
+      }
+
+      const paidAmountsSynced = await syncGroupPaidTotal(remainingBookings, groupPaidTotal)
+      if (!paidAmountsSynced) {
+        await restoreRemainingPaidAmounts()
+        if (movedPaymentIds.length > 0) {
+          await supabase.from('booking_payments').update({ booking_id: bookingId }).in('id', movedPaymentIds)
+        }
+        alert('No se pudo redistribuir el depósito. No se anuló la habitación.')
+        return
+      }
+
+      const { error: deleteRoomError } = await supabase.from('bookings').delete().eq('id', bookingId)
+      if (deleteRoomError) {
+        console.error('Error deleting room from group booking:', deleteRoomError)
+        await restoreRemainingPaidAmounts()
+        if (movedPaymentIds.length > 0) {
+          await supabase
+            .from('booking_payments')
+            .update({ booking_id: bookingId })
+            .in('id', movedPaymentIds)
+        }
+        alert('No se pudo anular la habitación. Los abonos se conservaron.')
+        return
+      }
+
+      setBookingPayments(prev => prev.map(payment => payment.bookingId === bookingId
+        ? { ...payment, bookingId: paymentTarget.id }
+        : payment
+      ))
+      setBookings(prev => prev.filter(room => room.id !== bookingId))
+      setSelectedBooking(null)
+      return
+    }
 
     const { data: abonos, error: errorAbonos } = await supabase
       .from('booking_payments')
@@ -946,65 +1043,106 @@ export default function BookingsPage() {
     setSelectedBooking(null)
   }
 
-  // Suma todos los abonos de una reserva y actualiza el monto/estatus de pago de la reserva
-  // para que "Monto Abonado" siempre refleje la suma real del historial de pagos.
-  const syncBookingPaidAmount = async (booking: Booking, payments: BookingPayment[]) => {
-    const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0)
-    const paymentStatus = totalPaid >= booking.totalAmount ? 'completo' : totalPaid > 0 ? 'parcial' : 'pendiente'
+  // El abono pertenece a la reserva completa. Se distribuye entre las habitaciones solo
+  // para mantener compatibles las columnas existentes, sin cambiar nunca el total pagado.
+  const syncGroupPaidTotal = async (group: Booking[], paidTotal: number) => {
+    const normalizedPaidTotal = Math.round(paidTotal * 100) / 100
+    const groupTotal = group.reduce((sum, room) => sum + room.totalAmount, 0)
+    const paymentStatus: Booking['paymentStatus'] = normalizedPaidTotal >= groupTotal
+      ? 'completo'
+      : normalizedPaidTotal > 0 ? 'parcial' : 'pendiente'
 
-    const { error } = await supabase
+    // El depósito es global: se conserva una sola vez en la fila principal del grupo.
+    // Las demás habitaciones no reciben porciones ficticias del pago.
+    const updates = group.map((room, index) => ({
+      id: room.id,
+      amountPaid: index === 0 ? normalizedPaidTotal : 0,
+      paymentStatus
+    }))
+
+    const results = await Promise.all(updates.map(update => supabase
       .from('bookings')
-      .update({ amount_paid: totalPaid, payment_status: paymentStatus })
-      .eq('id', booking.id)
-
-    if (error) {
-      console.error('Error syncing booking paid amount:', error)
-      return
+      .update({ amount_paid: update.amountPaid, payment_status: update.paymentStatus })
+      .eq('id', update.id)
+    ))
+    const failed = results.find(result => result.error)
+    if (failed?.error) {
+      console.error('Error syncing group paid amounts:', failed.error)
+      return false
     }
 
-    setBookings(prev => prev.map(b => b.id === booking.id ? { ...b, amountPaid: totalPaid, paymentStatus } : b))
-    setSelectedBooking(prev => prev && prev.id === booking.id ? { ...prev, amountPaid: totalPaid, paymentStatus } : prev)
+    const updatesById = new Map(updates.map(update => [update.id, update]))
+    setBookings(prev => prev.map(room => {
+      const update = updatesById.get(room.id)
+      return update ? { ...room, ...update } : room
+    }))
+    setSelectedBooking(prev => {
+      if (!prev) return prev
+      const update = updatesById.get(prev.id)
+      return update ? { ...prev, ...update } : prev
+    })
+    return true
+  }
+
+  const syncGroupPaidAmounts = async (group: Booking[], payments: BookingPayment[]) => {
+    const paidTotal = payments.reduce((sum, payment) => sum + payment.amount, 0)
+    await syncGroupPaidTotal(group, paidTotal)
   }
 
   const handleSaveBookingDiscount = async () => {
     if (!selectedBooking) return
 
     const percent = Math.min(100, Math.max(0, Number(editDiscountPercent) || 0))
-    const standardTotal = getStandardRate(
-      selectedBooking.accommodationId,
-      selectedBooking.checkIn,
-      selectedBooking.checkOut,
-      selectedBooking.guestsCount.adults,
-      selectedBooking.guestsCount.children
-    )
-    const totalAmount = Math.max(0, Math.round(standardTotal * (1 - percent / 100) * 100) / 100)
-    const paymentStatus: Booking['paymentStatus'] = selectedBooking.amountPaid >= totalAmount
-      ? 'completo'
-      : selectedBooking.amountPaid > 0
-        ? 'parcial'
-        : 'pendiente'
-    const specialNotes = withBookingDiscountNote(selectedBooking.specialNotes, percent)
+    const groupBookings = getBookingGroup(selectedBooking)
+    const updates = groupBookings.map(room => {
+      const standardTotal = getStandardRate(
+        room.accommodationId,
+        room.checkIn,
+        room.checkOut,
+        room.guestsCount.adults,
+        room.guestsCount.children
+      )
+      const totalAmount = Math.max(0, Math.round(standardTotal * (1 - percent / 100) * 100) / 100)
+      const paymentStatus: Booking['paymentStatus'] = room.amountPaid >= totalAmount
+        ? 'completo'
+        : room.amountPaid > 0 ? 'parcial' : 'pendiente'
+      return {
+        id: room.id,
+        totalAmount,
+        paymentStatus,
+        specialNotes: withBookingDiscountNote(room.specialNotes, percent)
+      }
+    })
 
     setSavingFinancials(true)
-    const { error } = await supabase
+    const results = await Promise.all(updates.map(update => supabase
       .from('bookings')
       .update({
-        total_amount: totalAmount,
-        payment_status: paymentStatus,
-        special_notes: specialNotes
+        total_amount: update.totalAmount,
+        payment_status: update.paymentStatus,
+        special_notes: update.specialNotes
       })
-      .eq('id', selectedBooking.id)
+      .eq('id', update.id)
+    ))
     setSavingFinancials(false)
 
-    if (error) {
-      console.error('Error updating booking discount:', error)
+    const failed = results.find(result => result.error)
+    if (failed?.error) {
+      console.error('Error updating booking discount:', failed.error)
       alert('No se pudo actualizar el descuento. Intenta de nuevo.')
       return
     }
 
-    const updatedFields = { totalAmount, paymentStatus, specialNotes }
-    setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, ...updatedFields } : b))
-    setSelectedBooking(prev => prev ? { ...prev, ...updatedFields } : prev)
+    const updatesById = new Map(updates.map(update => [update.id, update]))
+    setBookings(prev => prev.map(room => {
+      const update = updatesById.get(room.id)
+      return update ? { ...room, ...update } : room
+    }))
+    setSelectedBooking(prev => {
+      if (!prev) return prev
+      const update = updatesById.get(prev.id)
+      return update ? { ...prev, ...update } : prev
+    })
     setEditingFinancials(false)
   }
 
@@ -1016,10 +1154,19 @@ export default function BookingsPage() {
       return
     }
 
+    const groupBookings = getBookingGroup(selectedBooking)
+    const groupTotal = groupBookings.reduce((sum, room) => sum + room.totalAmount, 0)
+    const groupPaid = groupBookings.reduce((sum, room) => sum + room.amountPaid, 0)
+    const pendingTotal = Math.max(0, groupTotal - groupPaid)
+    if (amount > pendingTotal + 0.009) {
+      alert(`El abono supera el saldo pendiente de la reserva (${fmt(pendingTotal)}).`)
+      return
+    }
+
     const newPayment = {
-      booking_id: selectedBooking.id,
+      booking_id: groupBookings[0].id,
       payment_date: paymentForm.date,
-      amount,
+      amount: Math.round(amount * 100) / 100,
       currency: 'USD',
       method: paymentForm.method,
       reference: paymentForm.reference.trim() || null,
@@ -1028,7 +1175,7 @@ export default function BookingsPage() {
 
     const { data, error } = await supabase
       .from('booking_payments')
-      .insert([newPayment])
+      .insert(newPayment)
       .select('*')
 
     if (error || !data) {
@@ -1037,37 +1184,68 @@ export default function BookingsPage() {
       return
     }
 
-    const updatedPayments = [...bookingPayments, mapDbPaymentToReact(data[0])]
+    const insertedPayments = data.map(mapDbPaymentToReact)
+    const updatedPayments = [...bookingPayments, ...insertedPayments]
       .sort((a, b) => a.paymentDate.localeCompare(b.paymentDate))
     setBookingPayments(updatedPayments)
-    await syncBookingPaidAmount(selectedBooking, updatedPayments)
+    await syncGroupPaidAmounts(groupBookings, updatedPayments)
 
-    // El dinero cobrado tiene que aparecer en Ingresos. Si esto falla hay que decirlo:
-    // un abono que no llega a la contabilidad es dinero que desaparece de los reportes.
-    const ingreso = await registrarIngresoDeAbono(supabase, {
-      paymentId: data[0].id,
-      bookingId: selectedBooking.id,
-      guestName: selectedBooking.guestName,
-      locator: selectedBooking.locator,
-      accommodationTitle: getAccommodation(selectedBooking.accommodationId)?.title,
-      amount,
-      date: paymentForm.date,
-      method: paymentForm.method,
-      reference: paymentForm.reference.trim() || null,
-    })
-    if (ingreso.error) {
-      console.error('El abono se guardó pero no llegó a Ingresos:', ingreso.error)
-      alert('El abono quedó registrado, pero NO se pudo anotar en Ingresos. Avise a soporte antes de cerrar la caja.')
+    for (const payment of insertedPayments) {
+      const ingreso = await registrarIngresoDeAbono(supabase, {
+        paymentId: payment.id,
+        bookingId: payment.bookingId,
+        guestName: selectedBooking.guestName,
+        locator: selectedBooking.locator,
+        accommodationTitle: groupBookings.length > 1 ? `${groupBookings.length} habitaciones` : getAccommodation(groupBookings[0].accommodationId)?.title,
+        amount: payment.amount,
+        date: paymentForm.date,
+        method: paymentForm.method,
+        reference: paymentForm.reference.trim() || null,
+      })
+      if (ingreso.error) {
+        console.error('El abono se guardó pero no llegó a Ingresos:', ingreso.error)
+        alert('El abono quedó registrado, pero no llegó a Ingresos. Avise a soporte antes de cerrar la caja.')
+      }
     }
 
     setAddingPayment(false)
     setPaymentForm({ amount: '', date: todayStr, method: 'transferencia', reference: '' })
 
-    // El abono queda verificado en este momento: es cuando corresponde mandar el
-    // comprobante. La función relee los pagos de la base, así que sale con el abono
-    // recién cargado y su número de operación ya incluidos.
-    sendVoucherForBooking(selectedBooking)
-      .catch(err => console.error('Error enviando el comprobante:', err))
+    if (selectedBooking.guestEmail.trim()) {
+      const totalAmount = groupBookings.reduce((sum, room) => sum + room.totalAmount, 0)
+      const amountPaid = updatedPayments.reduce((sum, payment) => sum + payment.amount, 0)
+      sendBookingVoucherEmail(supabase, {
+        locator: selectedBooking.locator || selectedBooking.id.slice(0, 6).toUpperCase(),
+        guestName: selectedBooking.guestName.replace(/\s+\(\d+\/\d+\)$/, ''),
+        guestEmail: selectedBooking.guestEmail,
+        guestPhone: selectedBooking.guestPhone,
+        guestCi: selectedBooking.guestCi,
+        companions: selectedBooking.companions,
+        channel: 'Local',
+        checkIn: selectedBooking.checkIn,
+        checkOut: selectedBooking.checkOut,
+        nights: calculateNights(selectedBooking.checkIn, selectedBooking.checkOut),
+        guestsCount: groupBookings.reduce((sum, room) => sum + room.guestsCount.adults + room.guestsCount.children, 0),
+        paymentMethod: paymentForm.method,
+        totalAmount,
+        amountPaid,
+        rooms: groupBookings.map(room => ({
+          title: getAccommodation(room.accommodationId)?.title || `Alojamiento ${room.accommodationId}`,
+          capacity: getMaxCapacity(room.accommodationId),
+          nights: calculateNights(room.checkIn, room.checkOut),
+          adults: room.guestsCount.adults,
+          children: room.guestsCount.children,
+          cost: room.totalAmount
+        })),
+        payments: updatedPayments.map(payment => ({
+          date: payment.paymentDate,
+          amount: payment.amount,
+          method: payment.method,
+          status: payment.status,
+          reference: payment.reference
+        }))
+      }).catch(err => console.error('Error enviando el comprobante grupal:', err))
+    }
   }
 
   const handleDeletePayment = async (payment: BookingPayment) => {
@@ -1094,7 +1272,7 @@ export default function BookingsPage() {
 
     const updatedPayments = bookingPayments.filter(p => p.id !== payment.id)
     setBookingPayments(updatedPayments)
-    await syncBookingPaidAmount(selectedBooking, updatedPayments)
+    await syncGroupPaidAmounts(getBookingGroup(selectedBooking), updatedPayments)
   }
 
   const handleConfirmBooking = async (bookingId: string) => {
@@ -1186,6 +1364,147 @@ export default function BookingsPage() {
     setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, ...updatedFields } : b))
     setSelectedBooking(prev => prev && prev.id === bookingId ? { ...prev, ...updatedFields } : prev)
     return true
+  }
+
+  const handleSaveGuestDetails = async () => {
+    if (!selectedBooking) return
+    const guestName = joinPersonName(editGuestForm.firstName, editGuestForm.lastName)
+    if (!editGuestForm.firstName.trim() || !editGuestForm.lastName.trim()) {
+      alert('El nombre y el apellido del huésped son obligatorios.')
+      return
+    }
+
+    const payload = {
+      guest_name: guestName,
+      guest_ci: editGuestForm.ci.trim() || null,
+      guest_phone: editGuestForm.phone.trim(),
+      guest_email: editGuestForm.email.trim(),
+      companions: editGuestForm.companions.trim() || null
+    }
+
+    setSavingGuest(true)
+    let query = supabase.from('bookings').update(payload)
+    query = selectedBooking.locator
+      ? query.eq('locator', selectedBooking.locator)
+      : query.eq('id', selectedBooking.id)
+    const { error } = await query
+    setSavingGuest(false)
+
+    if (error) {
+      console.error('Error updating guest details:', error)
+      alert('No se pudieron actualizar los datos del huésped. Intenta de nuevo.')
+      return
+    }
+
+    const appliesToBooking = (booking: Booking) => selectedBooking.locator
+      ? booking.locator === selectedBooking.locator
+      : booking.id === selectedBooking.id
+    const updatedFields = {
+      guestName,
+      guestCi: editGuestForm.ci.trim(),
+      guestPhone: editGuestForm.phone.trim(),
+      guestEmail: editGuestForm.email.trim(),
+      companions: editGuestForm.companions.trim()
+    }
+    setBookings(prev => prev.map(booking => appliesToBooking(booking) ? { ...booking, ...updatedFields } : booking))
+    setSelectedBooking(prev => prev ? { ...prev, ...updatedFields } : prev)
+    setEditingGuest(false)
+  }
+
+  const handleSaveBookingNotes = async () => {
+    if (!selectedBooking) return
+    const notes = editNotes.trim()
+    setSavingNotes(true)
+    let query = supabase.from('bookings').update({ special_notes: notes || null })
+    query = selectedBooking.locator
+      ? query.eq('locator', selectedBooking.locator)
+      : query.eq('id', selectedBooking.id)
+    const { error } = await query
+    setSavingNotes(false)
+    if (error) {
+      console.error('Error updating booking notes:', error)
+      alert('No se pudieron actualizar las notas.')
+      return
+    }
+
+    const appliesToBooking = (booking: Booking) => selectedBooking.locator
+      ? booking.locator === selectedBooking.locator
+      : booking.id === selectedBooking.id
+    setBookings(prev => prev.map(booking => appliesToBooking(booking) ? { ...booking, specialNotes: notes } : booking))
+    setSelectedBooking(prev => prev ? { ...prev, specialNotes: notes } : prev)
+    setEditingNotes(false)
+  }
+
+  const handleSaveRoomDetails = async () => {
+    if (!selectedBooking || !editingRoomId) return
+    const roomBooking = bookings.find(item => item.id === editingRoomId)
+    if (!roomBooking) return
+
+    const totalGuests = editRoomForm.adults + editRoomForm.children
+    const maxCapacity = getMaxCapacity(editRoomForm.accommodationId)
+    if (maxCapacity > 0 && totalGuests > maxCapacity) {
+      alert(`Esta habitación admite hasta ${maxCapacity} personas y se ingresaron ${totalGuests}.`)
+      return
+    }
+
+    const collision = bookings.find(item =>
+      item.id !== roomBooking.id &&
+      item.accommodationId === editRoomForm.accommodationId &&
+      roomBooking.checkIn < item.checkOut && roomBooking.checkOut > item.checkIn
+    )
+    if (collision) {
+      alert(`${getAccommodation(editRoomForm.accommodationId)?.title || 'La habitación'} ya está ocupada en esas fechas.`)
+      return
+    }
+
+    const discount = getBookingDiscountPercent(roomBooking.specialNotes)
+    const standardTotal = getStandardRate(
+      editRoomForm.accommodationId,
+      roomBooking.checkIn,
+      roomBooking.checkOut,
+      editRoomForm.adults,
+      editRoomForm.children
+    )
+    const totalAmount = Math.round(standardTotal * (1 - discount / 100) * 100) / 100
+    const paymentStatus: Booking['paymentStatus'] = roomBooking.amountPaid >= totalAmount
+      ? 'completo'
+      : roomBooking.amountPaid > 0 ? 'parcial' : 'pendiente'
+
+    setSavingRoom(true)
+    const { error } = await supabase
+      .from('bookings')
+      .update({
+        accommodation_id: editRoomForm.accommodationId,
+        adults: editRoomForm.adults,
+        children: editRoomForm.children,
+        babies: editRoomForm.babies,
+        pets: editRoomForm.pets,
+        total_amount: totalAmount,
+        payment_status: paymentStatus
+      })
+      .eq('id', roomBooking.id)
+    setSavingRoom(false)
+
+    if (error) {
+      console.error('Error updating room details:', error)
+      alert('No se pudo actualizar la habitación.')
+      return
+    }
+
+    const updatedFields = {
+      accommodationId: editRoomForm.accommodationId,
+      guestsCount: {
+        adults: editRoomForm.adults,
+        children: editRoomForm.children,
+        babies: editRoomForm.babies,
+        pets: editRoomForm.pets
+      },
+      totalAmount,
+      paymentStatus
+    }
+    setBookings(prev => prev.map(item => item.id === roomBooking.id ? { ...item, ...updatedFields } : item))
+    setSelectedBooking(prev => prev && prev.id === roomBooking.id ? { ...prev, ...updatedFields } : prev)
+    setEditingRoomId(null)
   }
 
   const handleAddRoomsToBooking = async () => {
@@ -1473,7 +1792,10 @@ export default function BookingsPage() {
       getStandardRate(room.id, form.checkIn, form.checkOut, room.adults, room.children)
     )
     const roomFinalTotals = allocateMoney(finalTotal, roomStandardTotals)
-    const roomPayments = allocateMoney(Number(form.amountPaid), roomFinalTotals)
+    const initialPaidTotal = Math.round(Number(form.amountPaid) * 100) / 100
+    const globalPaymentStatus: Booking['paymentStatus'] = initialPaidTotal >= finalTotal
+      ? 'completo'
+      : initialPaidTotal > 0 ? 'parcial' : 'pendiente'
 
     const newBookings = roomAllocations.map((room, index) => ({
       guest_name: `${fullGuestName}${roomAllocations.length > 1 ? ` (${index + 1}/${roomAllocations.length})` : ''}`,
@@ -1489,10 +1811,8 @@ export default function BookingsPage() {
       babies: room.babies,
       pets: room.pets,
       total_amount: roomFinalTotals[index],
-      amount_paid: roomPayments[index],
-      payment_status: roomPayments[index] >= roomFinalTotals[index]
-        ? 'completo'
-        : roomPayments[index] > 0 ? 'parcial' : 'pendiente',
+      amount_paid: index === 0 ? initialPaidTotal : 0,
+      payment_status: globalPaymentStatus,
       payment_method: form.paymentMethod,
       payment_reference: form.paymentReference.trim() || null,
       status: initialStatus,
@@ -1514,19 +1834,19 @@ export default function BookingsPage() {
       setBookings(prev => [...data.map(mapDbBookingToReact), ...prev])
 
       if (Number(form.amountPaid) > 0) {
-        const paymentRows = data.map((bookingRow, index) => ({
-          booking_id: bookingRow.id,
+        const paymentRow = {
+          booking_id: data[0].id,
           payment_date: form.paymentDate || todayStr,
-          amount: roomPayments[index],
+          amount: initialPaidTotal,
           currency: 'USD',
           method: form.paymentMethod,
           reference: form.paymentReference.trim() || null,
           status: 'verificado'
-        })).filter(payment => payment.amount > 0)
+        }
 
         const { data: pagosIniciales, error: paymentError } = await supabase
           .from('booking_payments')
-          .insert(paymentRows)
+          .insert(paymentRow)
           .select('id, booking_id, amount')
 
         if (paymentError) {
@@ -1539,7 +1859,7 @@ export default function BookingsPage() {
               bookingId: payment.booking_id,
               guestName: fullGuestName,
               locator: locatorCode,
-              accommodationTitle: getAccommodation(Number(bookingRow?.accommodation_id))?.title,
+              accommodationTitle: data.length > 1 ? `${data.length} habitaciones` : getAccommodation(Number(bookingRow?.accommodation_id))?.title,
               amount: Number(payment.amount),
               date: form.paymentDate || todayStr,
               method: form.paymentMethod,
@@ -1620,23 +1940,24 @@ export default function BookingsPage() {
   const sendVoucherForBooking = async (booking: Booking) => {
     const email = booking.guestEmail?.trim()
     if (!email) return { sent: false, reason: 'sin-correo' as const }
+    const groupBookings = getBookingGroup(booking)
+    const groupIds = groupBookings.map(room => room.id)
 
     const { data: paymentRows } = await supabase
       .from('booking_payments')
       .select('*')
-      .eq('booking_id', booking.id)
+      .in('booking_id', groupIds)
       .order('payment_date', { ascending: true })
 
     const verified = (paymentRows ?? []).filter(p => p.status === 'verificado')
     if (verified.length === 0) return { sent: false, reason: 'sin-pagos' as const }
 
     const paidVerified = verified.reduce((sum, p) => sum + Number(p.amount), 0)
-    const acc = getAccommodation(booking.accommodationId)
     const nights = calculateNights(booking.checkIn, booking.checkOut)
 
     await sendBookingVoucherEmail(supabase, {
       locator: booking.locator || booking.id.slice(0, 6).toUpperCase(),
-      guestName: booking.guestName,
+      guestName: booking.guestName.replace(/\s+\(\d+\/\d+\)$/, ''),
       guestEmail: email,
       guestPhone: booking.guestPhone,
       guestCi: booking.guestCi,
@@ -1645,19 +1966,19 @@ export default function BookingsPage() {
       checkIn: booking.checkIn,
       checkOut: booking.checkOut,
       nights,
-      guestsCount: booking.guestsCount.adults + booking.guestsCount.children,
+      guestsCount: groupBookings.reduce((sum, room) => sum + room.guestsCount.adults + room.guestsCount.children, 0),
       paymentMethod: booking.paymentMethod,
-      totalAmount: booking.totalAmount,
+      totalAmount: groupBookings.reduce((sum, room) => sum + room.totalAmount, 0),
       amountPaid: paidVerified,
-      rooms: [{
-        title: acc?.title || '',
-        capacity: acc?.maxCapacity,
+      rooms: groupBookings.map(room => ({
+        title: getAccommodation(room.accommodationId)?.title || '',
+        capacity: getMaxCapacity(room.accommodationId),
         nights,
-        adults: booking.guestsCount.adults,
-        children: booking.guestsCount.children,
+        adults: room.guestsCount.adults,
+        children: room.guestsCount.children,
         plan: 'Temporadas',
-        cost: booking.totalAmount,
-      }],
+        cost: room.totalAmount,
+      })),
       payments: verified.map(p => ({
         date: p.payment_date,
         amount: Number(p.amount),
@@ -2494,7 +2815,7 @@ export default function BookingsPage() {
       {selectedBooking && (
         <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-end p-0 bg-black/40 backdrop-blur-sm">
           {/* Overlay click to close */}
-          <div className="absolute inset-0" onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setAddingRoomsToBooking(false); setAdditionalAccommodationIds([]); setEditingDates(false); setEditingFinancials(false); setAddingPayment(false) }} />
+          <div className="absolute inset-0" onClick={() => { setSelectedBooking(null); setEditingGuest(false); setEditingRoomId(null); setAddingRoomsToBooking(false); setAdditionalAccommodationIds([]); setEditingDates(false); setEditingFinancials(false); setEditingNotes(false); setAddingPayment(false) }} />
           
           <div className="relative w-full max-w-md h-[90dvh] sm:h-screen bg-white rounded-t-3xl sm:rounded-l-3xl sm:rounded-tr-none shadow-2xl p-5 sm:p-6 flex flex-col justify-between overflow-y-auto animate-in slide-in-from-bottom sm:slide-in-from-right duration-300">
             <div>
@@ -2515,7 +2836,7 @@ export default function BookingsPage() {
                   </span>
                 </div>
                 <button
-                  onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setAddingRoomsToBooking(false); setAdditionalAccommodationIds([]); setEditingDates(false); setEditingFinancials(false); setAddingPayment(false) }}
+                  onClick={() => { setSelectedBooking(null); setEditingGuest(false); setEditingRoomId(null); setAddingRoomsToBooking(false); setAdditionalAccommodationIds([]); setEditingDates(false); setEditingFinancials(false); setEditingNotes(false); setAddingPayment(false) }}
                   className="p-2 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600"
                 >
                   <X size={20} />
@@ -2525,27 +2846,127 @@ export default function BookingsPage() {
               {/* Guest profile card layout */}
               <div className="py-6 space-y-6">
                 {/* 1. Guest profile banner */}
-                <div className="flex items-center gap-4 bg-gray-50/50 p-4 rounded-3xl border border-gray-100">
-                  <div className="w-14 h-14 bg-[#C5A059]/15 text-[#C5A059] border border-[#C5A059]/10 rounded-2xl flex items-center justify-center text-xl font-bold font-serif">
-                    {selectedBooking.guestName.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-gray-800 leading-tight">{selectedBooking.guestName}</h3>
-                    {selectedBooking.guestCi && (
-                      <span className="text-[11px] text-gray-400 font-semibold">CI {selectedBooking.guestCi}</span>
-                    )}
-                    <div className="flex flex-col gap-1 mt-1.5 text-xs text-gray-500">
-                      <a href={`tel:${selectedBooking.guestPhone}`} className="flex items-center gap-1 hover:text-[#C5A059]"><Phone size={12} /> {selectedBooking.guestPhone}</a>
-                      <a href={`mailto:${selectedBooking.guestEmail}`} className="flex items-center gap-1 hover:text-[#C5A059]"><Mail size={12} /> {selectedBooking.guestEmail}</a>
+                <div className="bg-gray-50/50 p-4 rounded-3xl border border-gray-100">
+                  {editingGuest ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Editar datos del huésped</span>
+                        {selectedBooking.locator && bookings.filter(b => b.locator === selectedBooking.locator).length > 1 && (
+                          <span className="text-[9px] font-bold text-sky-600">Se actualiza todo el grupo</span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[9px] font-bold text-gray-400 uppercase block mb-1">Nombre</label>
+                          <input
+                            value={editGuestForm.firstName}
+                            onChange={e => setEditGuestForm(f => ({ ...f, firstName: e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white outline-none focus:border-[#C5A059]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-bold text-gray-400 uppercase block mb-1">Apellido</label>
+                          <input
+                            value={editGuestForm.lastName}
+                            onChange={e => setEditGuestForm(f => ({ ...f, lastName: e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white outline-none focus:border-[#C5A059]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-bold text-gray-400 uppercase block mb-1">Cédula</label>
+                          <input
+                            value={editGuestForm.ci}
+                            onChange={e => setEditGuestForm(f => ({ ...f, ci: e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white outline-none focus:border-[#C5A059]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-bold text-gray-400 uppercase block mb-1">Teléfono</label>
+                          <input
+                            value={editGuestForm.phone}
+                            onChange={e => setEditGuestForm(f => ({ ...f, phone: e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white outline-none focus:border-[#C5A059]"
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-[9px] font-bold text-gray-400 uppercase block mb-1">Correo electrónico</label>
+                          <input
+                            type="email"
+                            value={editGuestForm.email}
+                            onChange={e => setEditGuestForm(f => ({ ...f, email: e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white outline-none focus:border-[#C5A059]"
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-[9px] font-bold text-gray-400 uppercase block mb-1">Acompañantes</label>
+                          <textarea
+                            rows={2}
+                            value={editGuestForm.companions}
+                            onChange={e => setEditGuestForm(f => ({ ...f, companions: e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white outline-none focus:border-[#C5A059] resize-none"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={handleSaveGuestDetails}
+                          disabled={savingGuest || !editGuestForm.firstName.trim() || !editGuestForm.lastName.trim()}
+                          className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider hover:underline disabled:opacity-40"
+                        >
+                          {savingGuest ? 'Guardando...' : 'Guardar datos'}
+                        </button>
+                        <button
+                          onClick={() => setEditingGuest(false)}
+                          disabled={savingGuest}
+                          className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:underline"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="flex items-center gap-4">
+                      <div className="w-14 h-14 shrink-0 bg-[#C5A059]/15 text-[#C5A059] border border-[#C5A059]/10 rounded-2xl flex items-center justify-center text-xl font-bold font-serif">
+                        {selectedBooking.guestName.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-base font-bold text-gray-800 leading-tight">{selectedBooking.guestName}</h3>
+                        {selectedBooking.guestCi && (
+                          <span className="text-[11px] text-gray-400 font-semibold">CI {selectedBooking.guestCi}</span>
+                        )}
+                        <div className="flex flex-col gap-1 mt-1.5 text-xs text-gray-500">
+                          <a href={`tel:${selectedBooking.guestPhone}`} className="flex items-center gap-1 hover:text-[#C5A059]"><Phone size={12} /> {selectedBooking.guestPhone}</a>
+                          <a href={`mailto:${selectedBooking.guestEmail}`} className="flex items-center gap-1 hover:text-[#C5A059] truncate"><Mail size={12} className="shrink-0" /> {selectedBooking.guestEmail}</a>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const { firstName, lastName } = splitPersonName(selectedBooking.guestName.replace(/\s+\(\d+\/\d+\)$/, ''))
+                          setEditGuestForm({
+                            firstName,
+                            lastName,
+                            ci: selectedBooking.guestCi || '',
+                            phone: selectedBooking.guestPhone || '',
+                            email: selectedBooking.guestEmail || '',
+                            companions: selectedBooking.companions || ''
+                          })
+                          setEditingGuest(true)
+                        }}
+                        className="shrink-0 text-[10px] font-bold text-[#C5A059] uppercase tracking-wider hover:underline"
+                      >
+                        Editar datos
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* 2. Cabin detail */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Estadía Asignada</span>
-                    {!editingAccommodation && !addingRoomsToBooking && (
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">
+                      Habitaciones de la reserva ({getBookingGroup(selectedBooking).length})
+                    </span>
+                    {!addingRoomsToBooking && (
                       <div className="flex items-center gap-3">
                         <button
                           onClick={() => setAddingRoomsToBooking(true)}
@@ -2553,54 +2974,97 @@ export default function BookingsPage() {
                         >
                           <Plus size={11} /> Añadir habitación
                         </button>
-                        <button
-                          onClick={() => setEditingAccommodation(true)}
-                          className="text-[10px] font-bold text-[#C5A059] uppercase tracking-wider hover:underline"
-                        >
-                          Cambiar
-                        </button>
                       </div>
                     )}
                   </div>
-                  {editingAccommodation ? (
-                    <div className="space-y-2">
-                      <select
-                        value={selectedBooking.accommodationId}
-                        onChange={e => {
-                          const newAccId = Number(e.target.value)
-                          reassignBooking(selectedBooking.id, newAccId, selectedBooking.checkIn, selectedBooking.checkOut)
-                            .then(ok => { if (ok) setEditingAccommodation(false) })
-                        }}
-                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white"
-                      >
-                        {activeAccommodationOptions.map(acc => (
-                          <option key={acc.id} value={acc.id}>{acc.title} ({acc.type} - Máx. {acc.maxCapacity} pax)</option>
-                        ))}
-                      </select>
-                      <button
-                        onClick={() => setEditingAccommodation(false)}
-                        className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:underline"
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  ) : (() => {
-                    const acc = getAccommodation(selectedBooking.accommodationId)
-                    return (
-                      <div className="flex items-center gap-3 bg-white p-3 border border-gray-100 rounded-2xl">
-                        <img
-                          src={acc?.image}
-                          alt={acc?.title}
-                          className="w-16 h-16 object-cover rounded-xl"
-                        />
-                        <div>
-                          <h4 className="text-sm font-bold text-gray-800">{acc?.title}</h4>
-                          <span className="text-[10px] uppercase tracking-widest text-[#C5A059] font-bold block mt-0.5">{acc?.type}</span>
-                          <span className="text-[11px] text-gray-400 mt-1 block">Capacidad: {acc?.capacity}</span>
+                  <div className="space-y-2">
+                    {getBookingGroup(selectedBooking).map(roomBooking => {
+                      const acc = getAccommodation(roomBooking.accommodationId)
+                      const isEditing = editingRoomId === roomBooking.id
+                      const previewStandard = isEditing
+                        ? getStandardRate(editRoomForm.accommodationId, roomBooking.checkIn, roomBooking.checkOut, editRoomForm.adults, editRoomForm.children)
+                        : 0
+                      const previewDiscount = getBookingDiscountPercent(roomBooking.specialNotes)
+                      const previewTotal = Math.round(previewStandard * (1 - previewDiscount / 100) * 100) / 100
+                      return (
+                        <div key={roomBooking.id} className="bg-white p-3 border border-gray-100 rounded-2xl">
+                          {isEditing ? (
+                            <div className="space-y-3">
+                              <select
+                                value={editRoomForm.accommodationId}
+                                onChange={e => setEditRoomForm(f => ({ ...f, accommodationId: Number(e.target.value) }))}
+                                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white"
+                              >
+                                {activeAccommodationOptions.map(option => (
+                                  <option key={option.id} value={option.id}>{option.title} — Máx. {option.maxCapacity} pax</option>
+                                ))}
+                              </select>
+                              <div className="grid grid-cols-4 gap-2">
+                                {(['adults', 'children', 'babies', 'pets'] as const).map(key => (
+                                  <div key={key}>
+                                    <label className="text-[8px] font-bold text-gray-400 uppercase block mb-1">
+                                      {key === 'adults' ? 'Adultos' : key === 'children' ? 'Niños' : key === 'babies' ? 'Bebés' : 'Mascotas'}
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      value={editRoomForm[key]}
+                                      onChange={e => setEditRoomForm(f => ({ ...f, [key]: Math.max(0, Number(e.target.value)) }))}
+                                      className="w-full border border-gray-200 rounded-lg px-2 py-2 text-xs outline-none focus:border-[#C5A059]"
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="flex justify-between rounded-xl bg-gray-50 px-3 py-2 text-xs">
+                                <span className="font-semibold text-gray-500">Precio recalculado</span>
+                                <span className="font-bold text-gray-800">{fmt(previewTotal)}</span>
+                              </div>
+                              <div className="flex gap-3">
+                                <button onClick={handleSaveRoomDetails} disabled={savingRoom} className="text-[10px] font-bold text-emerald-600 uppercase hover:underline disabled:opacity-40">
+                                  {savingRoom ? 'Guardando...' : 'Guardar habitación'}
+                                </button>
+                                <button onClick={() => setEditingRoomId(null)} disabled={savingRoom} className="text-[10px] font-bold text-gray-400 uppercase hover:underline">Cancelar</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-3">
+                              <img src={acc?.image} alt={acc?.title} className="w-14 h-14 object-cover rounded-xl" />
+                              <div className="min-w-0 flex-1">
+                                <h4 className="text-xs font-bold text-gray-800">{acc?.title}</h4>
+                                <p className="text-[10px] text-gray-400 mt-1">
+                                  {roomBooking.guestsCount.adults} adultos · {roomBooking.guestsCount.children} niños
+                                  {roomBooking.guestsCount.babies > 0 && ` · ${roomBooking.guestsCount.babies} bebés`}
+                                </p>
+                                <p className="text-xs font-bold text-[#8A6D33] mt-1">{fmt(roomBooking.totalAmount)}</p>
+                              </div>
+                              <div className="flex flex-col items-end gap-2">
+                                <button
+                                  onClick={() => {
+                                    setEditRoomForm({
+                                      accommodationId: roomBooking.accommodationId,
+                                      adults: roomBooking.guestsCount.adults,
+                                      children: roomBooking.guestsCount.children,
+                                      babies: roomBooking.guestsCount.babies,
+                                      pets: roomBooking.guestsCount.pets
+                                    })
+                                    setEditingRoomId(roomBooking.id)
+                                  }}
+                                  className="text-[9px] font-bold text-[#C5A059] uppercase hover:underline"
+                                >
+                                  Editar
+                                </button>
+                                {getBookingGroup(selectedBooking).length > 1 && (
+                                  <button onClick={() => handleDeleteBooking(roomBooking.id)} className="text-[9px] font-bold text-rose-500 uppercase hover:underline">
+                                    Anular
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    )
-                  })()}
+                      )
+                    })}
+                  </div>
 
                   {addingRoomsToBooking && (() => {
                     const groupBookings = selectedBooking.locator
@@ -2610,14 +3074,20 @@ export default function BookingsPage() {
                     const remainingSlots = Math.max(0, 4 - groupBookings.length)
                     const capacity = additionalAccommodationIds.reduce((sum, id) => sum + getMaxCapacity(id), 0)
                     const guests = additionalGuests.adults + additionalGuests.children
+                    const selectedAdditionalId = additionalAccommodationIds[0]
+                    const additionalStandardTotal = selectedAdditionalId
+                      ? getStandardRate(selectedAdditionalId, selectedBooking.checkIn, selectedBooking.checkOut, additionalGuests.adults, additionalGuests.children)
+                      : 0
+                    const additionalDiscount = getBookingDiscountPercent(selectedBooking.specialNotes)
+                    const additionalTotal = Math.round(additionalStandardTotal * (1 - additionalDiscount / 100) * 100) / 100
                     return (
                       <div className="border border-emerald-100 bg-emerald-50/40 rounded-2xl p-3 space-y-3">
                         <div className="flex items-center justify-between">
                           <div>
                             <p className="text-xs font-bold text-emerald-800">Agregar a esta reserva</p>
-                            <p className="text-[10px] text-emerald-700/70">Puedes agregar {remainingSlots} unidad(es) más.</p>
+                            <p className="text-[10px] text-emerald-700/70">Agrega una por vez para asignar correctamente sus ocupantes.</p>
                           </div>
-                          <span className="text-[10px] font-bold text-emerald-700">{additionalAccommodationIds.length}/{remainingSlots}</span>
+                          <span className="text-[10px] font-bold text-emerald-700">Quedan {remainingSlots} cupos</span>
                         </div>
 
                         <div className="max-h-44 overflow-y-auto custom-scrollbar space-y-1.5">
@@ -2636,9 +3106,9 @@ export default function BookingsPage() {
                                   disabled={occupied}
                                   onChange={() => {
                                     if (selected) {
-                                      setAdditionalAccommodationIds(ids => ids.filter(id => id !== acc.id))
-                                    } else if (additionalAccommodationIds.length < remainingSlots) {
-                                      setAdditionalAccommodationIds(ids => [...ids, acc.id])
+                                      setAdditionalAccommodationIds([])
+                                    } else if (remainingSlots > 0) {
+                                      setAdditionalAccommodationIds([acc.id])
                                     }
                                   }}
                                   className="rounded text-emerald-600 focus:ring-emerald-500"
@@ -2671,6 +3141,12 @@ export default function BookingsPage() {
                         </div>
                         {capacity > 0 && guests > capacity && (
                           <p className="text-[10px] font-semibold text-rose-600">Capacidad excedida: {guests} huéspedes para {capacity} plazas.</p>
+                        )}
+                        {selectedAdditionalId && (
+                          <div className="flex items-center justify-between rounded-xl border border-emerald-100 bg-white px-3 py-2.5 text-xs">
+                            <span className="font-semibold text-gray-600">Precio de esta habitación</span>
+                            <span className="font-bold text-emerald-700">{fmt(additionalTotal)}</span>
+                          </div>
                         )}
 
                         <div className="flex items-center gap-3">
@@ -2734,17 +3210,20 @@ export default function BookingsPage() {
                       </div>
                       <div className="flex items-center gap-3">
                         <button
-                          onClick={() => {
+                          onClick={async () => {
                             if (editDatesForm.checkOut <= editDatesForm.checkIn) {
                               alert('Error: la fecha de check-out debe ser posterior al check-in.')
                               return
                             }
-                            reassignBooking(selectedBooking.id, selectedBooking.accommodationId, editDatesForm.checkIn, editDatesForm.checkOut)
-                              .then(ok => { if (ok) setEditingDates(false) })
+                            const results = []
+                            for (const room of getBookingGroup(selectedBooking)) {
+                              results.push(await reassignBooking(room.id, room.accommodationId, editDatesForm.checkIn, editDatesForm.checkOut))
+                            }
+                            if (results.every(Boolean)) setEditingDates(false)
                           }}
                           className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider hover:underline"
                         >
-                          Guardar
+                          Guardar en toda la reserva
                         </button>
                         <button
                           onClick={() => setEditingDates(false)}
@@ -2770,19 +3249,22 @@ export default function BookingsPage() {
 
                 {/* 4. Guests count list */}
                 <div className="bg-gray-50/30 p-4 border border-gray-100 rounded-2xl space-y-3">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Lista de Acompañantes</span>
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Resumen de ocupantes</span>
                   <div className="grid grid-cols-2 gap-4 text-xs font-semibold text-gray-600">
                     <div className="flex items-center gap-2">
                       <Users size={16} className="text-gray-400" />
-                      <span>{selectedBooking.guestsCount.adults} Adultos</span>
+                      <span>{getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.guestsCount.adults, 0)} Adultos</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Baby size={16} className="text-gray-400" />
-                      <span>{selectedBooking.guestsCount.children} Niños {selectedBooking.guestsCount.babies > 0 && `(${selectedBooking.guestsCount.babies} bebés)`}</span>
+                      <span>
+                        {getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.guestsCount.children, 0)} Niños
+                        {getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.guestsCount.babies, 0) > 0 && ` (${getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.guestsCount.babies, 0)} bebés)`}
+                      </span>
                     </div>
-                    {selectedBooking.guestsCount.pets > 0 && (
+                    {getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.guestsCount.pets, 0) > 0 && (
                       <div className="flex items-center gap-2 col-span-2 text-emerald-700 font-bold">
-                        <span>🐾 Traen {selectedBooking.guestsCount.pets} mascota(s)</span>
+                        <span>🐾 Traen {getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.guestsCount.pets, 0)} mascota(s)</span>
                       </div>
                     )}
                   </div>
@@ -2795,16 +3277,42 @@ export default function BookingsPage() {
                 </div>
 
                 {/* 5. Special Notes */}
-                {selectedBooking.specialNotes && (
-                  <div className="bg-amber-500/5 border border-amber-500/10 p-4 rounded-2xl space-y-1.5">
+                <div className="bg-amber-500/5 border border-amber-500/10 p-4 rounded-2xl space-y-2">
+                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5 text-amber-800 font-bold text-xs">
                       <Info size={14} /> Notas de la Administración
                     </div>
-                    <p className="text-xs text-amber-700/80 leading-relaxed font-medium">
-                      "{selectedBooking.specialNotes}"
-                    </p>
+                    {!editingNotes && (
+                      <button
+                        onClick={() => { setEditNotes(selectedBooking.specialNotes || ''); setEditingNotes(true) }}
+                        className="text-[9px] font-bold text-amber-700 uppercase hover:underline"
+                      >
+                        Editar
+                      </button>
+                    )}
                   </div>
-                )}
+                  {editingNotes ? (
+                    <div className="space-y-2">
+                      <textarea
+                        rows={4}
+                        value={editNotes}
+                        onChange={e => setEditNotes(e.target.value)}
+                        className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-xs bg-white outline-none focus:border-amber-400 resize-none"
+                        placeholder="Notas internas, solicitudes especiales, referencias..."
+                      />
+                      <div className="flex gap-3">
+                        <button onClick={handleSaveBookingNotes} disabled={savingNotes} className="text-[9px] font-bold text-emerald-600 uppercase hover:underline disabled:opacity-40">
+                          {savingNotes ? 'Guardando...' : 'Guardar notas'}
+                        </button>
+                        <button onClick={() => setEditingNotes(false)} disabled={savingNotes} className="text-[9px] font-bold text-gray-400 uppercase hover:underline">Cancelar</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-amber-700/80 leading-relaxed font-medium">
+                      {selectedBooking.specialNotes ? '"' + selectedBooking.specialNotes + '"' : 'Sin notas registradas.'}
+                    </p>
+                  )}
+                </div>
 
                 {/* 6. Finanzas */}
                 <div className="bg-gray-50/50 p-4 border border-gray-100 rounded-2xl space-y-2">
@@ -2824,13 +3332,14 @@ export default function BookingsPage() {
                   </div>
 
                   {editingFinancials ? (() => {
-                    const standardTotal = getStandardRate(
-                      selectedBooking.accommodationId,
-                      selectedBooking.checkIn,
-                      selectedBooking.checkOut,
-                      selectedBooking.guestsCount.adults,
-                      selectedBooking.guestsCount.children
-                    )
+                    const groupBookings = getBookingGroup(selectedBooking)
+                    const standardTotal = groupBookings.reduce((sum, room) => sum + getStandardRate(
+                      room.accommodationId,
+                      room.checkIn,
+                      room.checkOut,
+                      room.guestsCount.adults,
+                      room.guestsCount.children
+                    ), 0)
                     const previewTotal = Math.round(standardTotal * (1 - editDiscountPercent / 100) * 100) / 100
                     return (
                       <div className="pt-2 space-y-3 border-t border-gray-200/70">
@@ -2863,7 +3372,7 @@ export default function BookingsPage() {
                           </div>
                         </div>
                         <div className="flex justify-between text-xs bg-white border border-[#C5A059]/20 rounded-xl p-3">
-                          <span className="text-gray-600 font-semibold">Nuevo costo total</span>
+                          <span className="text-gray-600 font-semibold">Nuevo total de toda la reserva</span>
                           <span className="font-bold text-[#8A6D33]">{fmt(previewTotal)}</span>
                         </div>
                         <div className="flex items-center gap-3">
@@ -2886,6 +3395,12 @@ export default function BookingsPage() {
                     )
                   })() : (
                     <>
+                      {getBookingGroup(selectedBooking).map(room => (
+                        <div key={room.id} className="flex justify-between gap-3 text-[10px] py-1 border-b border-gray-100/50">
+                          <span className="text-gray-500 truncate">{getAccommodation(room.accommodationId)?.title}</span>
+                          <span className="font-bold text-gray-700 shrink-0">{fmt(room.totalAmount)}</span>
+                        </div>
+                      ))}
                       {getBookingDiscountPercent(selectedBooking.specialNotes) > 0 && (
                         <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
                           <span className="text-gray-500 font-semibold">Descuento individual</span>
@@ -2893,18 +3408,8 @@ export default function BookingsPage() {
                         </div>
                       )}
                       <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
-                        <span className="text-gray-500 font-semibold">Costo Total</span>
-                        <span className="font-bold text-gray-800">{fmt(selectedBooking.totalAmount)}</span>
-                      </div>
-                      <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
-                        <span className="text-gray-500 font-semibold">Monto Abonado</span>
-                        <span className="font-bold text-emerald-600">{fmt(selectedBooking.amountPaid)}</span>
-                      </div>
-                      <div className="flex justify-between text-xs py-1 font-bold">
-                        <span className="text-gray-800">Saldo Pendiente</span>
-                        <span className={selectedBooking.totalAmount - selectedBooking.amountPaid > 0 ? 'text-rose-500' : 'text-emerald-600'}>
-                          {fmt(selectedBooking.totalAmount - selectedBooking.amountPaid)}
-                        </span>
+                        <span className="text-gray-500 font-semibold">Costo total de la reserva</span>
+                        <span className="font-bold text-gray-800">{fmt(getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.totalAmount, 0))}</span>
                       </div>
                     </>
                   )}
@@ -2957,8 +3462,41 @@ export default function BookingsPage() {
                     </div>
                   )}
 
+                  {(() => {
+                    const group = getBookingGroup(selectedBooking)
+                    const totalCost = group.reduce((sum, room) => sum + room.totalAmount, 0)
+                    const totalPaid = group.reduce((sum, room) => sum + room.amountPaid, 0)
+                    const balance = Math.max(0, totalCost - totalPaid)
+                    const credit = Math.max(0, totalPaid - totalCost)
+                    return (
+                      <div className="mt-3 pt-3 border-t-2 border-gray-200 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-gray-600">Costo total</span>
+                          <span className="font-bold text-gray-900">{fmt(totalCost)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-gray-600">Monto abonado</span>
+                          <span className="font-bold text-emerald-600">{fmt(totalPaid)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm pt-1">
+                          <span className="font-bold text-gray-900">Deuda del cliente</span>
+                          <span className={balance > 0 ? 'font-bold text-rose-500' : 'font-bold text-emerald-600'}>{fmt(balance)}</span>
+                        </div>
+                        {credit > 0 && (
+                          <div className="flex items-center justify-between text-xs pt-1 border-t border-emerald-100">
+                            <span className="font-bold text-emerald-700">Saldo a favor del cliente</span>
+                            <span className="font-bold text-emerald-600">{fmt(credit)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
+
                   {addingPayment && (
                     <div className="space-y-2 pt-2 border-t border-gray-100">
+                      <p className="text-[10px] text-sky-700 bg-sky-50 border border-sky-100 rounded-xl px-3 py-2">
+                        Este pago se registrará como un abono global de la reserva. Deuda actual: <strong>{fmt(Math.max(0, getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.totalAmount, 0) - getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.amountPaid, 0)))}</strong>.
+                      </p>
                       <div className="grid grid-cols-2 gap-2">
                         <div>
                           <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Monto ($)</label>
@@ -3071,7 +3609,7 @@ export default function BookingsPage() {
 
               {selectedBooking.locator && bookings.filter(b => b.locator === selectedBooking.locator).length > 1 && (
                 <div className="rounded-2xl border border-sky-100 bg-sky-50 p-3 text-[11px] leading-relaxed text-sky-800">
-                  <strong>Reserva grupal:</strong> esta habitación forma parte de un grupo de {bookings.filter(b => b.locator === selectedBooking.locator).length} unidades. Puedes anularla sin afectar las demás.
+                  <strong>Reserva grupal:</strong> esta habitación forma parte de un grupo de {bookings.filter(b => b.locator === selectedBooking.locator).length} unidades. Puedes anularla sin afectar las demás ni modificar los abonos entregados por el cliente.
                 </div>
               )}
 
@@ -3161,11 +3699,11 @@ export default function BookingsPage() {
                         <div
                           key={i}
                           onClick={() => {
-                            const parts = g.name.trim().split(/\s+/)
+                            const { firstName, lastName } = splitPersonName(g.name.replace(/\s+\(\d+\/\d+\)$/, ''))
                             setForm(f => ({
                               ...f,
-                              guestFirstName: parts[0] || '',
-                              guestLastName: parts.slice(1).join(' '),
+                              guestFirstName: firstName,
+                              guestLastName: lastName,
                               guestPhone: g.phone || f.guestPhone,
                               guestEmail: g.email || f.guestEmail
                             }))

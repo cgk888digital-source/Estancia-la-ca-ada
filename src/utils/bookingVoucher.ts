@@ -119,7 +119,8 @@ const row = (label: string, value: string, highlight = false) => `
 
 export function buildBookingVoucherHtml(data: VoucherData): string {
   const created = data.createdAt ?? new Date()
-  const balance = data.totalAmount - data.amountPaid
+  const balance = Math.max(0, data.totalAmount - data.amountPaid)
+  const credit = Math.max(0, data.amountPaid - data.totalAmount)
   const payments = data.payments ?? []
 
   const roomsHtml = data.rooms.map(r => `
@@ -132,13 +133,25 @@ export function buildBookingVoucherHtml(data: VoucherData): string {
   `).join('')
 
   const paymentsHtml = payments.length
-    ? payments.map(p => `
-        ${row('Fecha', esc(fmtDate(p.date)))}
-        ${row('Monto', esc(fmtMoney(p.amount)))}
-        ${row('Método', esc(methodLabels[p.method] ?? p.method))}
-        ${row('Estatus', esc(p.status ?? 'Verificado'))}
-        ${row('Nº Oper', esc(p.reference ?? '—'))}
-        <tr><td colspan="2" style="border-bottom:1px solid ${C.line};"></td></tr>`).join('')
+    ? `<tr><td colspan="2" style="padding:10px 12px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;">
+          <thead>
+            <tr style="background:#F8F8F8;">
+              <th style="padding:8px 6px;text-align:left;font-size:11px;color:${C.muted};border-bottom:1px solid ${C.line};">Monto</th>
+              <th style="padding:8px 6px;text-align:left;font-size:11px;color:${C.muted};border-bottom:1px solid ${C.line};">Fecha</th>
+              <th style="padding:8px 6px;text-align:left;font-size:11px;color:${C.muted};border-bottom:1px solid ${C.line};">Método</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${payments.map(p => `
+              <tr>
+                <td style="padding:9px 6px;font-size:11px;font-weight:bold;color:${C.ink};border-bottom:1px solid ${C.line};">${esc(fmtMoney(p.amount))}</td>
+                <td style="padding:9px 6px;font-size:11px;color:${C.ink};border-bottom:1px solid ${C.line};">${esc(fmtDate(p.date))}</td>
+                <td style="padding:9px 6px;font-size:11px;color:${C.ink};border-bottom:1px solid ${C.line};">${esc(methodLabels[p.method] ?? p.method)}${p.reference ? `<br><span style="font-size:9px;color:${C.muted};">Ref. ${esc(p.reference)}</span>` : ''}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </td></tr>`
     : `<tr><td colspan="2" style="padding:8px 12px;font-size:12px;color:${C.muted};">Aún no se han registrado pagos.</td></tr>`
 
   return `
@@ -177,14 +190,14 @@ export function buildBookingVoucherHtml(data: VoucherData): string {
 
     ${roomsHtml}
 
-    ${sectionTitle('Costo')}
-    ${row('Costo por habitaciones', esc(fmtMoney(data.totalAmount)))}
-    ${row('Costo total de la reserva', `<strong>${esc(fmtMoney(data.totalAmount))}</strong>`)}
-    ${row('Abonado', esc(fmtMoney(data.amountPaid)))}
-    ${row('Saldo pendiente', `<strong style="color:${balance > 0 ? '#B4462F' : '#2F7A4E'};">${esc(fmtMoney(balance))}</strong>`)}
-
     ${sectionTitle('Pagos recibidos')}
     ${paymentsHtml}
+
+    ${sectionTitle('Resumen financiero')}
+    ${row('Costo total', `<strong>${esc(fmtMoney(data.totalAmount))}</strong>`)}
+    ${row('Monto abonado', `<strong style="color:#2F7A4E;">${esc(fmtMoney(data.amountPaid))}</strong>`)}
+    ${row('Deuda del cliente', `<strong style="color:${balance > 0 ? '#B4462F' : '#2F7A4E'};">${esc(fmtMoney(balance))}</strong>`)}
+    ${credit > 0 ? row('Saldo a favor del cliente', `<strong style="color:#2F7A4E;">${esc(fmtMoney(credit))}</strong>`) : ''}
 
     ${sectionTitle('Condiciones del Hotel')}
     <tr><td colspan="2" style="padding:10px 12px;">
