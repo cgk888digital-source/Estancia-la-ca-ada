@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import {
   Calendar, Users, Check, LogIn, LogOut, Trash2, Search, Plus, X, Phone, Mail,
-  Info, Baby, Sparkles, RefreshCw, Printer, Maximize2, Minimize2
+  Info, Baby, Sparkles, RefreshCw, Printer, Maximize2, Minimize2, Percent
 } from 'lucide-react'
 import { accommodationOptions, activeAccommodationOptions, getMaxCapacity } from '../../data/accommodations'
 import LoadErrorBanner from './LoadErrorBanner'
@@ -182,6 +182,29 @@ const calculateNights = (startStr: string, endStr: string) => {
   return diffDays > 0 ? diffDays : 1
 }
 
+/**
+ * Las reservas migradas de Paxer guardan el descuento particular en las notas
+ * (por ejemplo: "descuento del 10% exacto"). Las reservas nuevas creadas desde el
+ * panel usan "Descuento aplicado: 10%". Reconocer ambos formatos permite conservar
+ * el beneficio del huésped cuando se cambian fechas o alojamiento.
+ */
+const getBookingDiscountPercent = (notes?: string) => {
+  const matches = [...(notes || '').matchAll(/descuento(?:\s+aplicado)?(?:\s+(?:del|de))?\s*:?\s*(\d+(?:[.,]\d+)?)\s*%/gi)]
+  const lastMatch = matches.at(-1)
+  if (!lastMatch) return 0
+  const value = Number(lastMatch[1].replace(',', '.'))
+  return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0
+}
+
+const withBookingDiscountNote = (notes: string | undefined, percent: number) => {
+  // El marcador administrado por la app va al final y prevalece sobre cualquier nota
+  // histórica de Paxer. Se conserva incluso en 0% para poder quitar un descuento viejo.
+  const withoutAppMarker = (notes || '')
+    .replace(/\s*Descuento aplicado:\s*\d+(?:[.,]\d+)?%\.?/gi, '')
+    .trim()
+  return [withoutAppMarker, `Descuento aplicado: ${percent}%.`].filter(Boolean).join(' ')
+}
+
 // Paleta calcada de Paxer (el software que la clienta ya usa) para que el color de cada
 // reserva se vea igual en ambos sistemas: Reservado (azul cielo) → Sin pago (azul) →
 // Pago parcial (naranja) → Pagado (verde).
@@ -224,6 +247,9 @@ export default function BookingsPage() {
   const [editingAccommodation, setEditingAccommodation] = useState(false)
   const [editingDates, setEditingDates] = useState(false)
   const [editDatesForm, setEditDatesForm] = useState({ checkIn: '', checkOut: '' })
+  const [editingFinancials, setEditingFinancials] = useState(false)
+  const [savingFinancials, setSavingFinancials] = useState(false)
+  const [editDiscountPercent, setEditDiscountPercent] = useState(0)
   // Historial de abonos de la reserva abierta (como en Paxer): cada pago con su fecha,
   // monto, método y número de operación, en vez de un solo monto acumulado.
   const [bookingPayments, setBookingPayments] = useState<BookingPayment[]>([])
@@ -266,6 +292,7 @@ export default function BookingsPage() {
   const [discountPercent, setDiscountPercent] = useState(0)
   const [locatorCode, setLocatorCode] = useState('')
   const [dbAccommodations, setDbAccommodations] = useState<DbAccommodation[]>([])
+  const [selectedAccommodationIds, setSelectedAccommodationIds] = useState<number[]>([2])
   
   // Form State for creating a new booking
   const [form, setForm] = useState({
@@ -343,10 +370,37 @@ export default function BookingsPage() {
     ).total
   }
 
+  const allocateGuestsAcrossAccommodations = (ids: number[]) => {
+    let adultsLeft = Number(form.adults)
+    let childrenLeft = Number(form.children)
+    let babiesLeft = Number(form.babies)
+    let petsLeft = Number(form.pets)
+
+    return ids.map((id, index) => {
+      const capacity = getMaxCapacity(id) || adultsLeft + childrenLeft
+      const adults = Math.min(adultsLeft, capacity)
+      adultsLeft -= adults
+      const children = Math.min(childrenLeft, Math.max(0, capacity - adults))
+      childrenLeft -= children
+      const babies = index === 0 ? babiesLeft : 0
+      const pets = index === 0 ? petsLeft : 0
+      babiesLeft -= babies
+      petsLeft -= pets
+      return { id, adults, children, babies, pets }
+    })
+  }
+
+  const getGroupStandardRate = (ids: number[]) =>
+    allocateGuestsAcrossAccommodations(ids).reduce(
+      (sum, room) => sum + getStandardRate(room.id, form.checkIn, form.checkOut, room.adults, room.children),
+      0
+    )
+
   // Helper functions to open/close the manual booking modal safely
   const openAddModal = () => {
     setUseCustomRate(false)
     setDiscountPercent(0)
+    setSelectedAccommodationIds([2])
     
     // Generate a unique booking locator code (e.g. LC-A4B7D)
     const newLocator = 'LC-' + Math.random().toString(36).substring(2, 7).toUpperCase()
@@ -386,7 +440,7 @@ export default function BookingsPage() {
 
   // Derive rates on the fly to avoid useEffect sync triggers (React best practices)
   const standardRate = showAddModal
-    ? getStandardRate(form.accommodationId, form.checkIn, form.checkOut, form.adults, form.children)
+    ? getGroupStandardRate(selectedAccommodationIds)
     : 0
 
   const calculatedTotal = useCustomRate
@@ -476,6 +530,7 @@ export default function BookingsPage() {
       // `checkOutStr` es la fecha de salida real que se guarda en la reserva.
       const openWith = (checkInStr: string, checkOutStr: string) => {
         openAddModal()
+        setSelectedAccommodationIds([accId])
         setForm(f => ({ ...f, accommodationId: accId, checkIn: checkInStr, checkOut: checkOutStr }))
         setPendingCheckIn(null)
       }
@@ -833,7 +888,19 @@ export default function BookingsPage() {
    * de la pantalla pero seguia ahi, y reaparecia al recargar.
    */
   const handleDeleteBooking = async (bookingId: string) => {
-    if (!confirm('¿Estás segura de que deseas eliminar esta reserva? Se borrarán también sus abonos y los ingresos que generaron.')) return
+    const booking = bookings.find(b => b.id === bookingId)
+    if (!booking) return
+
+    const groupBookings = booking.locator
+      ? bookings.filter(b => b.locator === booking.locator)
+      : [booking]
+    const isGroupBooking = groupBookings.length > 1
+    const accommodationTitle = getAccommodation(booking.accommodationId)?.title || 'la habitación seleccionada'
+    const confirmationMessage = isGroupBooking
+      ? `¿Anular solamente ${accommodationTitle}?\n\nLas otras ${groupBookings.length - 1} ${groupBookings.length - 1 === 1 ? 'habitación permanecerá' : 'habitaciones permanecerán'} activas bajo el localizador ${booking.locator}. Solo se retirarán los abonos e ingresos asignados a esta habitación.`
+      : '¿Estás segura de que deseas eliminar esta reserva? Se borrarán también sus abonos y los ingresos que generaron.'
+
+    if (!confirm(confirmationMessage)) return
 
     const { data: abonos, error: errorAbonos } = await supabase
       .from('booking_payments')
@@ -893,6 +960,48 @@ export default function BookingsPage() {
 
     setBookings(prev => prev.map(b => b.id === booking.id ? { ...b, amountPaid: totalPaid, paymentStatus } : b))
     setSelectedBooking(prev => prev && prev.id === booking.id ? { ...prev, amountPaid: totalPaid, paymentStatus } : prev)
+  }
+
+  const handleSaveBookingDiscount = async () => {
+    if (!selectedBooking) return
+
+    const percent = Math.min(100, Math.max(0, Number(editDiscountPercent) || 0))
+    const standardTotal = getStandardRate(
+      selectedBooking.accommodationId,
+      selectedBooking.checkIn,
+      selectedBooking.checkOut,
+      selectedBooking.guestsCount.adults,
+      selectedBooking.guestsCount.children
+    )
+    const totalAmount = Math.max(0, Math.round(standardTotal * (1 - percent / 100) * 100) / 100)
+    const paymentStatus: Booking['paymentStatus'] = selectedBooking.amountPaid >= totalAmount
+      ? 'completo'
+      : selectedBooking.amountPaid > 0
+        ? 'parcial'
+        : 'pendiente'
+    const specialNotes = withBookingDiscountNote(selectedBooking.specialNotes, percent)
+
+    setSavingFinancials(true)
+    const { error } = await supabase
+      .from('bookings')
+      .update({
+        total_amount: totalAmount,
+        payment_status: paymentStatus,
+        special_notes: specialNotes
+      })
+      .eq('id', selectedBooking.id)
+    setSavingFinancials(false)
+
+    if (error) {
+      console.error('Error updating booking discount:', error)
+      alert('No se pudo actualizar el descuento. Intenta de nuevo.')
+      return
+    }
+
+    const updatedFields = { totalAmount, paymentStatus, specialNotes }
+    setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, ...updatedFields } : b))
+    setSelectedBooking(prev => prev ? { ...prev, ...updatedFields } : prev)
+    setEditingFinancials(false)
   }
 
   const handleAddPayment = async () => {
@@ -1026,9 +1135,35 @@ export default function BookingsPage() {
       return false
     }
 
+    // Las fechas, la habitación y la cantidad de huéspedes determinan el precio. Al
+    // modificar una reserva se recalcula la estancia completa con las mismas tarifas
+    // que usa "Nueva Reserva". También permite reparar reservas cuya fecha ya cambió
+    // con la versión anterior: basta abrir "Cambiar" y volver a guardar el mismo rango.
+    const newStandardTotal = getStandardRate(
+      newAccId,
+      newCheckIn,
+      newCheckOut,
+      booking.guestsCount.adults,
+      booking.guestsCount.children
+    )
+    const bookingDiscountPercent = getBookingDiscountPercent(booking.specialNotes)
+    const discountedTotal = newStandardTotal * (1 - bookingDiscountPercent / 100)
+    const newTotalAmount = Math.max(0, Math.round(discountedTotal * 100) / 100)
+    const newPaymentStatus: Booking['paymentStatus'] = booking.amountPaid >= newTotalAmount
+      ? 'completo'
+      : booking.amountPaid > 0
+        ? 'parcial'
+        : 'pendiente'
+
     const { error } = await supabase
       .from('bookings')
-      .update({ accommodation_id: newAccId, check_in: newCheckIn, check_out: newCheckOut })
+      .update({
+        accommodation_id: newAccId,
+        check_in: newCheckIn,
+        check_out: newCheckOut,
+        total_amount: newTotalAmount,
+        payment_status: newPaymentStatus
+      })
       .eq('id', bookingId)
 
     if (error) {
@@ -1037,8 +1172,15 @@ export default function BookingsPage() {
       return false
     }
 
-    setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, accommodationId: newAccId, checkIn: newCheckIn, checkOut: newCheckOut } : b))
-    setSelectedBooking(prev => prev && prev.id === bookingId ? { ...prev, accommodationId: newAccId, checkIn: newCheckIn, checkOut: newCheckOut } : prev)
+    const updatedFields = {
+      accommodationId: newAccId,
+      checkIn: newCheckIn,
+      checkOut: newCheckOut,
+      totalAmount: newTotalAmount,
+      paymentStatus: newPaymentStatus
+    }
+    setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, ...updatedFields } : b))
+    setSelectedBooking(prev => prev && prev.id === bookingId ? { ...prev, ...updatedFields } : prev)
     return true
   }
 
@@ -1154,25 +1296,30 @@ export default function BookingsPage() {
     const fullGuestName = `${form.guestFirstName.trim()} ${form.guestLastName.trim()}`.trim()
     if (!fullGuestName) return
 
+    if (selectedAccommodationIds.length === 0) {
+      alert('Selecciona al menos una habitación o cabaña.')
+      return
+    }
+
     if (form.checkOut <= form.checkIn) {
       alert('Error: La fecha de check-out debe ser posterior a la fecha de check-in.')
       return
     }
 
-    const collision = bookings.find(b => {
-      if (b.accommodationId !== Number(form.accommodationId)) return false
-      return form.checkIn < b.checkOut && form.checkOut > b.checkIn
-    })
+    const collision = bookings.find(b =>
+      selectedAccommodationIds.includes(b.accommodationId) &&
+      form.checkIn < b.checkOut && form.checkOut > b.checkIn
+    )
 
     if (collision) {
-      alert(`Error: Conflicto de fechas. La cabaña ya está reservada para el huésped "${collision.guestName}" desde el ${collision.checkIn} hasta el ${collision.checkOut}.`)
+      alert(`Error: ${getAccommodation(collision.accommodationId)?.title || 'Una unidad'} ya está reservada para "${collision.guestName}" desde el ${collision.checkIn} hasta el ${collision.checkOut}.`)
       return
     }
 
-    const maxCapacity = getMaxCapacity(Number(form.accommodationId))
+    const maxCapacity = selectedAccommodationIds.reduce((sum, id) => sum + getMaxCapacity(id), 0)
     const totalGuests = Number(form.adults) + Number(form.children)
     if (maxCapacity > 0 && totalGuests > maxCapacity) {
-      alert(`Error: Capacidad excedida. Esta habitación/cabaña admite hasta ${maxCapacity} personas (adultos + niños) y se ingresaron ${totalGuests}.`)
+      alert(`Error: Las ${selectedAccommodationIds.length} unidades seleccionadas admiten hasta ${maxCapacity} personas y se ingresaron ${totalGuests}.`)
       return
     }
 
@@ -1180,75 +1327,104 @@ export default function BookingsPage() {
       ? (discountPercent > 0 ? Math.round(standardRate * (1 - discountPercent / 100)) : form.totalAmount)
       : standardRate
 
+    const allocateMoney = (amount: number, weights: number[]) => {
+      let centsLeft = Math.round(amount * 100)
+      const weightTotal = weights.reduce((sum, value) => sum + value, 0)
+      return weights.map((weight, index) => {
+        const cents = index === weights.length - 1
+          ? centsLeft
+          : Math.round((amount * 100 * (weightTotal > 0 ? weight / weightTotal : 1 / weights.length)))
+        centsLeft -= cents
+        return cents / 100
+      })
+    }
+
     const initialStatus = form.checkIn === todayStr ? 'checkin_hoy' : 'confirmado'
-    const newBooking = {
-      guest_name: fullGuestName,
+    const discountNote = useCustomRate && discountPercent > 0
+      ? `Descuento aplicado: ${discountPercent}%.`
+      : ''
+    const groupNote = selectedAccommodationIds.length > 1
+      ? `Reserva grupal: ${selectedAccommodationIds.length} alojamientos bajo el localizador ${locatorCode}.`
+      : ''
+    const specialNotes = [form.specialNotes.trim(), groupNote, discountNote].filter(Boolean).join(' ')
+    const roomAllocations = allocateGuestsAcrossAccommodations(selectedAccommodationIds)
+    const roomStandardTotals = roomAllocations.map(room =>
+      getStandardRate(room.id, form.checkIn, form.checkOut, room.adults, room.children)
+    )
+    const roomFinalTotals = allocateMoney(finalTotal, roomStandardTotals)
+    const roomPayments = allocateMoney(Number(form.amountPaid), roomFinalTotals)
+
+    const newBookings = roomAllocations.map((room, index) => ({
+      guest_name: `${fullGuestName}${roomAllocations.length > 1 ? ` (${index + 1}/${roomAllocations.length})` : ''}`,
       guest_phone: form.guestPhone.trim() || '+58 412-000-0000',
       guest_email: form.guestEmail.trim() || 'cliente@estancialacanada.com',
       guest_ci: form.guestCi.trim() || null,
       companions: form.companions.trim() || null,
-      accommodation_id: Number(form.accommodationId),
+      accommodation_id: room.id,
       check_in: form.checkIn,
       check_out: form.checkOut,
-      adults: Number(form.adults),
-      children: Number(form.children),
-      babies: Number(form.babies),
-      pets: Number(form.pets),
-      total_amount: finalTotal,
-      amount_paid: Number(form.amountPaid),
-      payment_status: Number(form.amountPaid) >= finalTotal 
-        ? 'completo' 
-        : Number(form.amountPaid) > 0 ? 'parcial' : 'pendiente',
+      adults: room.adults,
+      children: room.children,
+      babies: room.babies,
+      pets: room.pets,
+      total_amount: roomFinalTotals[index],
+      amount_paid: roomPayments[index],
+      payment_status: roomPayments[index] >= roomFinalTotals[index]
+        ? 'completo'
+        : roomPayments[index] > 0 ? 'parcial' : 'pendiente',
       payment_method: form.paymentMethod,
       payment_reference: form.paymentReference.trim() || null,
       status: initialStatus,
-      confirmed: true, // reserva creada directamente por el staff, no requiere revisión aparte
-      special_notes: form.specialNotes.trim() || null,
+      confirmed: true,
+      special_notes: specialNotes || null,
       locator: locatorCode
-    }
+    }))
 
     const { data, error } = await supabase
       .from('bookings')
-      .insert([newBooking])
+      .insert(newBookings)
       .select('*')
 
     if (error) {
       console.error('Error adding booking:', error)
-    } else if (data && data[0]) {
-      setBookings(prev => [mapDbBookingToReact(data[0]), ...prev])
+      alert('No se pudo guardar la reserva. Intenta de nuevo.')
+      return
+    } else if (data && data.length > 0) {
+      setBookings(prev => [...data.map(mapDbBookingToReact), ...prev])
 
-      // Si se registró un abono inicial, queda como el primer pago del historial.
       if (Number(form.amountPaid) > 0) {
-        const { data: pagoInicial, error: paymentError } = await supabase
+        const paymentRows = data.map((bookingRow, index) => ({
+          booking_id: bookingRow.id,
+          payment_date: form.paymentDate || todayStr,
+          amount: roomPayments[index],
+          currency: 'USD',
+          method: form.paymentMethod,
+          reference: form.paymentReference.trim() || null,
+          status: 'verificado'
+        })).filter(payment => payment.amount > 0)
+
+        const { data: pagosIniciales, error: paymentError } = await supabase
           .from('booking_payments')
-          .insert([{
-            booking_id: data[0].id,
-            payment_date: form.paymentDate || todayStr,
-            amount: Number(form.amountPaid),
-            currency: 'USD',
-            method: form.paymentMethod,
-            reference: form.paymentReference.trim() || null,
-            status: 'verificado'
-          }])
-          .select('id')
+          .insert(paymentRows)
+          .select('id, booking_id, amount')
 
         if (paymentError) {
           console.error('Error adding initial payment:', paymentError)
-        } else if (pagoInicial && pagoInicial[0]) {
-          // Ese abono es dinero recibido: va a Ingresos como el del restaurante.
-          const ingreso = await registrarIngresoDeAbono(supabase, {
-            paymentId: pagoInicial[0].id,
-            bookingId: data[0].id,
-            guestName: fullGuestName,
-            locator: locatorCode,
-            accommodationTitle: getAccommodation(Number(form.accommodationId))?.title,
-            amount: Number(form.amountPaid),
-            date: form.paymentDate || todayStr,
-            method: form.paymentMethod,
-            reference: form.paymentReference.trim() || null,
-          })
-          if (ingreso.error) {
-            console.error('El abono inicial no llegó a Ingresos:', ingreso.error)
+        } else {
+          for (const payment of pagosIniciales || []) {
+            const bookingRow = data.find(row => row.id === payment.booking_id)
+            const ingreso = await registrarIngresoDeAbono(supabase, {
+              paymentId: payment.id,
+              bookingId: payment.booking_id,
+              guestName: fullGuestName,
+              locator: locatorCode,
+              accommodationTitle: getAccommodation(Number(bookingRow?.accommodation_id))?.title,
+              amount: Number(payment.amount),
+              date: form.paymentDate || todayStr,
+              method: form.paymentMethod,
+              reference: form.paymentReference.trim() || null,
+            })
+            if (ingreso.error) console.error('El abono inicial no llegó a Ingresos:', ingreso.error)
           }
         }
       }
@@ -1269,7 +1445,7 @@ export default function BookingsPage() {
           email: form.guestEmail.trim(),
           guestName: fullGuestName,
           locator: locatorCode,
-          accommodationTitle: getAccommodation(Number(form.accommodationId))?.title || '',
+          accommodationTitle: selectedAccommodationIds.map(id => getAccommodation(id)?.title).filter(Boolean).join(' + '),
           checkIn: form.checkIn,
           checkOut: form.checkOut,
           totalAmount: finalTotal,
@@ -1277,10 +1453,38 @@ export default function BookingsPage() {
         })
       }
 
-      // Si el staff cargó un abono al crear la reserva, ese dinero ya está verificado:
-      // ahí sí corresponde mandar el comprobante.
       if (Number(form.amountPaid) > 0 && form.guestEmail.trim()) {
-        sendVoucherForBooking(mapDbBookingToReact(data[0]))
+        sendBookingVoucherEmail(supabase, {
+          locator: locatorCode,
+          guestName: fullGuestName,
+          guestEmail: form.guestEmail.trim(),
+          guestPhone: form.guestPhone.trim(),
+          guestCi: form.guestCi.trim(),
+          companions: form.companions.trim(),
+          channel: 'Local',
+          checkIn: form.checkIn,
+          checkOut: form.checkOut,
+          nights: calculateNights(form.checkIn, form.checkOut),
+          guestsCount: Number(form.adults) + Number(form.children),
+          paymentMethod: form.paymentMethod,
+          totalAmount: finalTotal,
+          amountPaid: Number(form.amountPaid),
+          rooms: roomAllocations.map((room, index) => ({
+            title: getAccommodation(room.id)?.title || `Alojamiento ${room.id}`,
+            capacity: getMaxCapacity(room.id),
+            nights: calculateNights(form.checkIn, form.checkOut),
+            adults: room.adults,
+            children: room.children,
+            cost: roomFinalTotals[index]
+          })),
+          payments: [{
+            date: form.paymentDate || todayStr,
+            amount: Number(form.amountPaid),
+            method: form.paymentMethod,
+            status: 'Verificado',
+            reference: form.paymentReference.trim()
+          }]
+        }).catch(err => console.error('Error enviando el comprobante grupal:', err))
       }
     }
 
@@ -2169,7 +2373,7 @@ export default function BookingsPage() {
       {selectedBooking && (
         <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-end p-0 bg-black/40 backdrop-blur-sm">
           {/* Overlay click to close */}
-          <div className="absolute inset-0" onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setEditingDates(false); setAddingPayment(false) }} />
+          <div className="absolute inset-0" onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setEditingDates(false); setEditingFinancials(false); setAddingPayment(false) }} />
           
           <div className="relative w-full max-w-md h-[90dvh] sm:h-screen bg-white rounded-t-3xl sm:rounded-l-3xl sm:rounded-tr-none shadow-2xl p-5 sm:p-6 flex flex-col justify-between overflow-y-auto animate-in slide-in-from-bottom sm:slide-in-from-right duration-300">
             <div>
@@ -2190,7 +2394,7 @@ export default function BookingsPage() {
                   </span>
                 </div>
                 <button
-                  onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setEditingDates(false); setAddingPayment(false) }}
+                  onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setEditingDates(false); setEditingFinancials(false); setAddingPayment(false) }}
                   className="p-2 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600"
                 >
                   <X size={20} />
@@ -2384,21 +2588,106 @@ export default function BookingsPage() {
 
                 {/* 6. Finanzas */}
                 <div className="bg-gray-50/50 p-4 border border-gray-100 rounded-2xl space-y-2">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Estado Financiero</span>
-                  <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
-                    <span className="text-gray-500 font-semibold">Costo Total</span>
-                    <span className="font-bold text-gray-800">{fmt(selectedBooking.totalAmount)}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Estado Financiero</span>
+                    {!editingFinancials && (
+                      <button
+                        onClick={() => {
+                          setEditDiscountPercent(getBookingDiscountPercent(selectedBooking.specialNotes))
+                          setEditingFinancials(true)
+                        }}
+                        className="text-[10px] font-bold text-[#C5A059] uppercase tracking-wider hover:underline flex items-center gap-1"
+                      >
+                        <Percent size={11} /> Editar tarifa / descuento
+                      </button>
+                    )}
                   </div>
-                  <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
-                    <span className="text-gray-500 font-semibold">Monto Abonado</span>
-                    <span className="font-bold text-emerald-600">{fmt(selectedBooking.amountPaid)}</span>
-                  </div>
-                  <div className="flex justify-between text-xs py-1 font-bold">
-                    <span className="text-gray-800">Saldo Pendiente</span>
-                    <span className={selectedBooking.totalAmount - selectedBooking.amountPaid > 0 ? 'text-rose-500' : 'text-emerald-600'}>
-                      {fmt(selectedBooking.totalAmount - selectedBooking.amountPaid)}
-                    </span>
-                  </div>
+
+                  {editingFinancials ? (() => {
+                    const standardTotal = getStandardRate(
+                      selectedBooking.accommodationId,
+                      selectedBooking.checkIn,
+                      selectedBooking.checkOut,
+                      selectedBooking.guestsCount.adults,
+                      selectedBooking.guestsCount.children
+                    )
+                    const previewTotal = Math.round(standardTotal * (1 - editDiscountPercent / 100) * 100) / 100
+                    return (
+                      <div className="pt-2 space-y-3 border-t border-gray-200/70">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-500 font-semibold">Tarifa estándar calculada</span>
+                          <span className="font-bold text-gray-700">{fmt(standardTotal)}</span>
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Descuento individual (%)</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min={0}
+                              max={100}
+                              step="0.01"
+                              value={editDiscountPercent}
+                              onChange={e => setEditDiscountPercent(Math.min(100, Math.max(0, Number(e.target.value))))}
+                              className="w-24 border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white"
+                            />
+                            {[0, 10, 15, 20].map(value => (
+                              <button
+                                key={value}
+                                type="button"
+                                onClick={() => setEditDiscountPercent(value)}
+                                className={`px-2 py-2 rounded-lg text-[9px] font-bold border transition-colors ${editDiscountPercent === value ? 'bg-[#C5A059] text-white border-[#C5A059]' : 'bg-white text-gray-500 border-gray-200'}`}
+                              >
+                                {value}%
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex justify-between text-xs bg-white border border-[#C5A059]/20 rounded-xl p-3">
+                          <span className="text-gray-600 font-semibold">Nuevo costo total</span>
+                          <span className="font-bold text-[#8A6D33]">{fmt(previewTotal)}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={handleSaveBookingDiscount}
+                            disabled={savingFinancials}
+                            className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider hover:underline disabled:opacity-50"
+                          >
+                            {savingFinancials ? 'Guardando...' : 'Guardar descuento'}
+                          </button>
+                          <button
+                            onClick={() => setEditingFinancials(false)}
+                            disabled={savingFinancials}
+                            className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:underline disabled:opacity-50"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })() : (
+                    <>
+                      {getBookingDiscountPercent(selectedBooking.specialNotes) > 0 && (
+                        <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
+                          <span className="text-gray-500 font-semibold">Descuento individual</span>
+                          <span className="font-bold text-emerald-600">{getBookingDiscountPercent(selectedBooking.specialNotes)}%</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
+                        <span className="text-gray-500 font-semibold">Costo Total</span>
+                        <span className="font-bold text-gray-800">{fmt(selectedBooking.totalAmount)}</span>
+                      </div>
+                      <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
+                        <span className="text-gray-500 font-semibold">Monto Abonado</span>
+                        <span className="font-bold text-emerald-600">{fmt(selectedBooking.amountPaid)}</span>
+                      </div>
+                      <div className="flex justify-between text-xs py-1 font-bold">
+                        <span className="text-gray-800">Saldo Pendiente</span>
+                        <span className={selectedBooking.totalAmount - selectedBooking.amountPaid > 0 ? 'text-rose-500' : 'text-emerald-600'}>
+                          {fmt(selectedBooking.totalAmount - selectedBooking.amountPaid)}
+                        </span>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* 7. Historial de Pagos: cada abono con su fecha, método y número de operación */}
@@ -2560,12 +2849,21 @@ export default function BookingsPage() {
                 </button>
               )}
 
+              {selectedBooking.locator && bookings.filter(b => b.locator === selectedBooking.locator).length > 1 && (
+                <div className="rounded-2xl border border-sky-100 bg-sky-50 p-3 text-[11px] leading-relaxed text-sky-800">
+                  <strong>Reserva grupal:</strong> esta habitación forma parte de un grupo de {bookings.filter(b => b.locator === selectedBooking.locator).length} unidades. Puedes anularla sin afectar las demás.
+                </div>
+              )}
+
               <div className="flex gap-2">
                 <button
                   onClick={() => handleDeleteBooking(selectedBooking.id)}
                   className="flex-1 py-3 border border-rose-100 hover:bg-rose-50 text-rose-500 font-bold rounded-2xl text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5"
                 >
-                  <Trash2 size={14} /> Eliminar Reserva
+                  <Trash2 size={14} />
+                  {selectedBooking.locator && bookings.filter(b => b.locator === selectedBooking.locator).length > 1
+                    ? 'Anular esta habitación'
+                    : 'Eliminar reserva'}
                 </button>
               </div>
             </div>
@@ -2708,30 +3006,67 @@ export default function BookingsPage() {
                 </div>
               </div>
 
-              {/* Cabin Assignment */}
+              {/* Selección de uno o varios alojamientos bajo el mismo localizador */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="col-span-1 sm:col-span-3">
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Cabaña Asignada</label>
-                  <select
-                    value={form.accommodationId}
-                    onChange={e => {
-                      const id = Number(e.target.value)
-                      setForm(f => ({
-                        ...f,
-                        accommodationId: id
-                      }))
-                    }}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white"
-                  >
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Habitaciones o cabañas</label>
+                    <span className="text-[10px] font-bold text-[#C5A059]">{selectedAccommodationIds.length}/4 seleccionadas</span>
+                  </div>
+                  <div className="max-h-56 overflow-y-auto custom-scrollbar border border-gray-200 rounded-2xl bg-white p-2 space-y-1.5">
                     {activeAccommodationOptions.map(acc => {
-                      // Muestra el precio vigente de la base de datos (lo que edita "Tarifas y
-                      // Descuentos"), no el del catálogo en código — antes quedaba desactualizado.
                       const dbPrice = dbAccommodations.find(o => Number(o.id) === acc.id)?.price
+                      const selected = selectedAccommodationIds.includes(acc.id)
+                      const collision = bookings.find(b =>
+                        b.accommodationId === acc.id && form.checkIn < b.checkOut && form.checkOut > b.checkIn
+                      )
                       return (
-                        <option key={acc.id} value={acc.id}>{acc.title} ({acc.type} - ${Number(dbPrice ?? acc.price)}/noche) — Máx. {acc.maxCapacity} pax</option>
+                        <label
+                          key={acc.id}
+                          className={`flex items-center gap-3 rounded-xl border p-2.5 transition-colors ${
+                            collision
+                              ? 'bg-rose-50/60 border-rose-100 opacity-60 cursor-not-allowed'
+                              : selected
+                                ? 'bg-[#C5A059]/10 border-[#C5A059]/40 cursor-pointer'
+                                : 'bg-white border-gray-100 hover:bg-gray-50 cursor-pointer'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            disabled={!!collision && !selected}
+                            onChange={() => {
+                              if (selected) {
+                                if (selectedAccommodationIds.length === 1) return
+                                const next = selectedAccommodationIds.filter(id => id !== acc.id)
+                                setSelectedAccommodationIds(next)
+                                setForm(f => ({ ...f, accommodationId: next[0] }))
+                              } else {
+                                if (selectedAccommodationIds.length >= 4) {
+                                  alert('Puedes seleccionar hasta 4 habitaciones o cabañas por reserva.')
+                                  return
+                                }
+                                const next = [...selectedAccommodationIds, acc.id]
+                                setSelectedAccommodationIds(next)
+                                setForm(f => ({ ...f, accommodationId: next[0] }))
+                              }
+                            }}
+                            className="rounded text-[#C5A059] focus:ring-[#C5A059]"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold text-gray-700 truncate">{acc.title}</p>
+                            <p className="text-[10px] text-gray-400">${Number(dbPrice ?? acc.price)}/noche · Máx. {acc.maxCapacity} pax</p>
+                          </div>
+                          {collision && <span className="text-[9px] font-bold text-rose-500 uppercase">Ocupada</span>}
+                        </label>
                       )
                     })}
-                  </select>
+                  </div>
+                  {selectedAccommodationIds.length > 1 && (
+                    <p className="mt-2 text-[10px] text-emerald-700 font-semibold">
+                      Reserva grupal: las {selectedAccommodationIds.length} unidades compartirán el localizador {locatorCode} y el pago se distribuirá sin duplicarse.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Check-In</label>
@@ -2773,25 +3108,25 @@ export default function BookingsPage() {
                     </div>
                   )
                 }
-                const collision = bookings.find(b => {
-                  if (b.accommodationId !== Number(form.accommodationId)) return false
-                  return form.checkIn < b.checkOut && form.checkOut > b.checkIn
-                })
+                const collision = bookings.find(b =>
+                  selectedAccommodationIds.includes(b.accommodationId) &&
+                  form.checkIn < b.checkOut && form.checkOut > b.checkIn
+                )
                 if (collision) {
                   return (
                     <div className="bg-rose-50 border border-rose-100 text-rose-800 text-xs p-3.5 rounded-2xl flex flex-col gap-0.5 animate-pulse">
                       <span className="font-bold">⚠️ Conflicto de Fechas Encontrado</span>
-                      <span>La cabaña ya está reservada por <strong>"{collision.guestName}"</strong> del <strong>{collision.checkIn}</strong> al <strong>{collision.checkOut}</strong>.</span>
+                      <span><strong>{getAccommodation(collision.accommodationId)?.title}</strong> ya está reservada por <strong>"{collision.guestName}"</strong> del <strong>{collision.checkIn}</strong> al <strong>{collision.checkOut}</strong>.</span>
                     </div>
                   )
                 }
-                const maxCapacity = getMaxCapacity(Number(form.accommodationId))
+                const maxCapacity = selectedAccommodationIds.reduce((sum, id) => sum + getMaxCapacity(id), 0)
                 const totalGuests = Number(form.adults) + Number(form.children)
                 if (maxCapacity > 0 && totalGuests > maxCapacity) {
                   return (
                     <div className="bg-rose-50 border border-rose-100 text-rose-800 text-xs p-3.5 rounded-2xl flex flex-col gap-0.5 animate-fade-in">
                       <span className="font-bold">⚠️ Capacidad Excedida</span>
-                      <span>Esta habitación/cabaña admite hasta <strong>{maxCapacity} personas</strong> (adultos + niños) y se ingresaron <strong>{totalGuests}</strong>.</span>
+                      <span>Las unidades seleccionadas admiten hasta <strong>{maxCapacity} personas</strong> y se ingresaron <strong>{totalGuests}</strong>.</span>
                     </div>
                   )
                 }
@@ -2989,8 +3324,10 @@ export default function BookingsPage() {
                 disabled={
                   !(form.guestFirstName.trim() && form.guestLastName.trim()) ||
                   form.checkOut <= form.checkIn ||
-                  bookings.some(b => b.accommodationId === Number(form.accommodationId) && form.checkIn < b.checkOut && form.checkOut > b.checkIn) ||
-                  (getMaxCapacity(Number(form.accommodationId)) > 0 && (Number(form.adults) + Number(form.children)) > getMaxCapacity(Number(form.accommodationId)))
+                  selectedAccommodationIds.length === 0 ||
+                  bookings.some(b => selectedAccommodationIds.includes(b.accommodationId) && form.checkIn < b.checkOut && form.checkOut > b.checkIn) ||
+                  (selectedAccommodationIds.reduce((sum, id) => sum + getMaxCapacity(id), 0) > 0 &&
+                    (Number(form.adults) + Number(form.children)) > selectedAccommodationIds.reduce((sum, id) => sum + getMaxCapacity(id), 0))
                 }
                 className="flex-1 py-3 bg-[#C5A059] hover:bg-[#b8904a] text-white font-bold rounded-2xl text-xs uppercase tracking-wider disabled:opacity-40 transition-all flex items-center justify-center gap-1.5 active:scale-95"
               >
