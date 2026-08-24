@@ -245,6 +245,10 @@ export default function BookingsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
   const [editingAccommodation, setEditingAccommodation] = useState(false)
+  const [addingRoomsToBooking, setAddingRoomsToBooking] = useState(false)
+  const [additionalAccommodationIds, setAdditionalAccommodationIds] = useState<number[]>([])
+  const [savingAdditionalRooms, setSavingAdditionalRooms] = useState(false)
+  const [additionalGuests, setAdditionalGuests] = useState({ adults: 2, children: 0, babies: 0, pets: 0 })
   const [editingDates, setEditingDates] = useState(false)
   const [editDatesForm, setEditDatesForm] = useState({ checkIn: '', checkOut: '' })
   const [editingFinancials, setEditingFinancials] = useState(false)
@@ -1182,6 +1186,123 @@ export default function BookingsPage() {
     setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, ...updatedFields } : b))
     setSelectedBooking(prev => prev && prev.id === bookingId ? { ...prev, ...updatedFields } : prev)
     return true
+  }
+
+  const handleAddRoomsToBooking = async () => {
+    if (!selectedBooking || additionalAccommodationIds.length === 0) return
+
+    const groupBookings = selectedBooking.locator
+      ? bookings.filter(b => b.locator === selectedBooking.locator)
+      : [selectedBooking]
+    const resultingGroupSize = groupBookings.length + additionalAccommodationIds.length
+    if (resultingGroupSize > 4) {
+      alert(`Esta reserva ya tiene ${groupBookings.length} alojamiento(s). El máximo por reserva grupal es 4.`)
+      return
+    }
+
+    const collision = bookings.find(b =>
+      additionalAccommodationIds.includes(b.accommodationId) &&
+      selectedBooking.checkIn < b.checkOut && selectedBooking.checkOut > b.checkIn
+    )
+    if (collision) {
+      alert(`${getAccommodation(collision.accommodationId)?.title || 'Una unidad'} ya no está disponible para esas fechas.`)
+      return
+    }
+
+    const totalGuests = additionalGuests.adults + additionalGuests.children
+    const totalCapacity = additionalAccommodationIds.reduce((sum, id) => sum + getMaxCapacity(id), 0)
+    if (totalCapacity > 0 && totalGuests > totalCapacity) {
+      alert(`Las habitaciones nuevas admiten hasta ${totalCapacity} personas y se ingresaron ${totalGuests}.`)
+      return
+    }
+
+    let adultsLeft = additionalGuests.adults
+    let childrenLeft = additionalGuests.children
+    const allocations = additionalAccommodationIds.map((id, index) => {
+      const capacity = getMaxCapacity(id) || totalGuests
+      const adults = Math.min(adultsLeft, capacity)
+      adultsLeft -= adults
+      const children = Math.min(childrenLeft, Math.max(0, capacity - adults))
+      childrenLeft -= children
+      return {
+        id,
+        adults,
+        children,
+        babies: index === 0 ? additionalGuests.babies : 0,
+        pets: index === 0 ? additionalGuests.pets : 0
+      }
+    })
+
+    const discount = getBookingDiscountPercent(selectedBooking.specialNotes)
+    const locator = selectedBooking.locator || `LC-${Math.random().toString(36).substring(2, 7).toUpperCase()}`
+    const baseGuestName = selectedBooking.guestName.replace(/\s+\(\d+\/\d+\)$/, '')
+    const groupNote = `Reserva grupal ampliada a ${resultingGroupSize} alojamientos bajo el localizador ${locator}.`
+    const specialNotes = [selectedBooking.specialNotes, groupNote].filter(Boolean).join(' ')
+
+    const rows = allocations.map(room => {
+      const standardTotal = getStandardRate(
+        room.id,
+        selectedBooking.checkIn,
+        selectedBooking.checkOut,
+        room.adults,
+        room.children
+      )
+      const totalAmount = Math.round(standardTotal * (1 - discount / 100) * 100) / 100
+      return {
+        guest_name: baseGuestName,
+        guest_phone: selectedBooking.guestPhone,
+        guest_email: selectedBooking.guestEmail,
+        guest_ci: selectedBooking.guestCi || null,
+        companions: selectedBooking.companions || null,
+        accommodation_id: room.id,
+        check_in: selectedBooking.checkIn,
+        check_out: selectedBooking.checkOut,
+        adults: room.adults,
+        children: room.children,
+        babies: room.babies,
+        pets: room.pets,
+        total_amount: totalAmount,
+        amount_paid: 0,
+        payment_status: 'pendiente',
+        payment_method: selectedBooking.paymentMethod,
+        payment_reference: null,
+        status: selectedBooking.status,
+        confirmed: selectedBooking.confirmed,
+        special_notes: specialNotes,
+        locator
+      }
+    })
+
+    setSavingAdditionalRooms(true)
+    if (!selectedBooking.locator) {
+      const { error: locatorError } = await supabase
+        .from('bookings')
+        .update({ locator })
+        .eq('id', selectedBooking.id)
+      if (locatorError) {
+        setSavingAdditionalRooms(false)
+        alert('No se pudo preparar el localizador de la reserva.')
+        return
+      }
+    }
+
+    const { data, error } = await supabase.from('bookings').insert(rows).select('*')
+    setSavingAdditionalRooms(false)
+    if (error || !data) {
+      console.error('Error adding rooms to existing booking:', error)
+      alert('No se pudieron agregar las habitaciones. Intenta de nuevo.')
+      return
+    }
+
+    const inserted = data.map(mapDbBookingToReact)
+    setBookings(prev => [
+      ...inserted,
+      ...prev.map(b => b.id === selectedBooking.id && !b.locator ? { ...b, locator } : b)
+    ])
+    setSelectedBooking(prev => prev ? { ...prev, locator } : prev)
+    setAdditionalAccommodationIds([])
+    setAdditionalGuests({ adults: 2, children: 0, babies: 0, pets: 0 })
+    setAddingRoomsToBooking(false)
   }
 
   const handleDropOnCell = async (accId: number, dropDateStr: string) => {
@@ -2373,7 +2494,7 @@ export default function BookingsPage() {
       {selectedBooking && (
         <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-end p-0 bg-black/40 backdrop-blur-sm">
           {/* Overlay click to close */}
-          <div className="absolute inset-0" onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setEditingDates(false); setEditingFinancials(false); setAddingPayment(false) }} />
+          <div className="absolute inset-0" onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setAddingRoomsToBooking(false); setAdditionalAccommodationIds([]); setEditingDates(false); setEditingFinancials(false); setAddingPayment(false) }} />
           
           <div className="relative w-full max-w-md h-[90dvh] sm:h-screen bg-white rounded-t-3xl sm:rounded-l-3xl sm:rounded-tr-none shadow-2xl p-5 sm:p-6 flex flex-col justify-between overflow-y-auto animate-in slide-in-from-bottom sm:slide-in-from-right duration-300">
             <div>
@@ -2394,7 +2515,7 @@ export default function BookingsPage() {
                   </span>
                 </div>
                 <button
-                  onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setEditingDates(false); setEditingFinancials(false); setAddingPayment(false) }}
+                  onClick={() => { setSelectedBooking(null); setEditingAccommodation(false); setAddingRoomsToBooking(false); setAdditionalAccommodationIds([]); setEditingDates(false); setEditingFinancials(false); setAddingPayment(false) }}
                   className="p-2 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600"
                 >
                   <X size={20} />
@@ -2424,13 +2545,21 @@ export default function BookingsPage() {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Estadía Asignada</span>
-                    {!editingAccommodation && (
-                      <button
-                        onClick={() => setEditingAccommodation(true)}
-                        className="text-[10px] font-bold text-[#C5A059] uppercase tracking-wider hover:underline"
-                      >
-                        Cambiar
-                      </button>
+                    {!editingAccommodation && !addingRoomsToBooking && (
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setAddingRoomsToBooking(true)}
+                          className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider hover:underline flex items-center gap-1"
+                        >
+                          <Plus size={11} /> Añadir habitación
+                        </button>
+                        <button
+                          onClick={() => setEditingAccommodation(true)}
+                          className="text-[10px] font-bold text-[#C5A059] uppercase tracking-wider hover:underline"
+                        >
+                          Cambiar
+                        </button>
+                      </div>
                     )}
                   </div>
                   {editingAccommodation ? (
@@ -2468,6 +2597,97 @@ export default function BookingsPage() {
                           <h4 className="text-sm font-bold text-gray-800">{acc?.title}</h4>
                           <span className="text-[10px] uppercase tracking-widest text-[#C5A059] font-bold block mt-0.5">{acc?.type}</span>
                           <span className="text-[11px] text-gray-400 mt-1 block">Capacidad: {acc?.capacity}</span>
+                        </div>
+                      </div>
+                    )
+                  })()}
+
+                  {addingRoomsToBooking && (() => {
+                    const groupBookings = selectedBooking.locator
+                      ? bookings.filter(b => b.locator === selectedBooking.locator)
+                      : [selectedBooking]
+                    const assignedIds = new Set(groupBookings.map(b => b.accommodationId))
+                    const remainingSlots = Math.max(0, 4 - groupBookings.length)
+                    const capacity = additionalAccommodationIds.reduce((sum, id) => sum + getMaxCapacity(id), 0)
+                    const guests = additionalGuests.adults + additionalGuests.children
+                    return (
+                      <div className="border border-emerald-100 bg-emerald-50/40 rounded-2xl p-3 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-xs font-bold text-emerald-800">Agregar a esta reserva</p>
+                            <p className="text-[10px] text-emerald-700/70">Puedes agregar {remainingSlots} unidad(es) más.</p>
+                          </div>
+                          <span className="text-[10px] font-bold text-emerald-700">{additionalAccommodationIds.length}/{remainingSlots}</span>
+                        </div>
+
+                        <div className="max-h-44 overflow-y-auto custom-scrollbar space-y-1.5">
+                          {activeAccommodationOptions.map(acc => {
+                            if (assignedIds.has(acc.id)) return null
+                            const occupied = bookings.some(b =>
+                              b.accommodationId === acc.id &&
+                              selectedBooking.checkIn < b.checkOut && selectedBooking.checkOut > b.checkIn
+                            )
+                            const selected = additionalAccommodationIds.includes(acc.id)
+                            return (
+                              <label key={acc.id} className={`flex items-center gap-2 rounded-xl border p-2 ${occupied ? 'opacity-50 bg-rose-50 border-rose-100' : selected ? 'bg-white border-emerald-300' : 'bg-white border-gray-100'}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={selected}
+                                  disabled={occupied}
+                                  onChange={() => {
+                                    if (selected) {
+                                      setAdditionalAccommodationIds(ids => ids.filter(id => id !== acc.id))
+                                    } else if (additionalAccommodationIds.length < remainingSlots) {
+                                      setAdditionalAccommodationIds(ids => [...ids, acc.id])
+                                    }
+                                  }}
+                                  className="rounded text-emerald-600 focus:ring-emerald-500"
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[11px] font-bold text-gray-700 truncate">{acc.title}</p>
+                                  <p className="text-[9px] text-gray-400">Máx. {acc.maxCapacity} pax</p>
+                                </div>
+                                {occupied && <span className="text-[8px] font-bold text-rose-500 uppercase">Ocupada</span>}
+                              </label>
+                            )
+                          })}
+                        </div>
+
+                        <div className="grid grid-cols-4 gap-2">
+                          {(['adults', 'children', 'babies', 'pets'] as const).map(key => (
+                            <div key={key}>
+                              <label className="text-[8px] font-bold text-gray-400 uppercase block mb-1">
+                                {key === 'adults' ? 'Adultos' : key === 'children' ? 'Niños' : key === 'babies' ? 'Bebés' : 'Mascotas'}
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                value={additionalGuests[key]}
+                                onChange={e => setAdditionalGuests(prev => ({ ...prev, [key]: Math.max(0, Number(e.target.value)) }))}
+                                className="w-full border border-gray-200 rounded-lg px-2 py-2 text-xs bg-white outline-none focus:border-emerald-400"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                        {capacity > 0 && guests > capacity && (
+                          <p className="text-[10px] font-semibold text-rose-600">Capacidad excedida: {guests} huéspedes para {capacity} plazas.</p>
+                        )}
+
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={handleAddRoomsToBooking}
+                            disabled={savingAdditionalRooms || additionalAccommodationIds.length === 0 || guests > capacity}
+                            className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider hover:underline disabled:opacity-40"
+                          >
+                            {savingAdditionalRooms ? 'Agregando...' : 'Agregar a la reserva'}
+                          </button>
+                          <button
+                            onClick={() => { setAddingRoomsToBooking(false); setAdditionalAccommodationIds([]) }}
+                            disabled={savingAdditionalRooms}
+                            className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:underline"
+                          >
+                            Cancelar
+                          </button>
                         </div>
                       </div>
                     )
