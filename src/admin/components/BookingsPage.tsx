@@ -352,6 +352,26 @@ export default function BookingsPage() {
     ? bookings.filter(item => item.locator === booking.locator)
     : [booking]
 
+  // En el planner una reserva con varias habitaciones debe tener un solo estado visual.
+  // El color se calcula con el costo y los abonos globales del localizador, no con la
+  // columna de pago aislada de cada habitación.
+  const getGroupPaymentView = (booking: Booking): Pick<Booking, 'confirmed' | 'paymentStatus'> => {
+    const group = getBookingGroup(booking)
+    const totalAmount = group.reduce((sum, room) => sum + room.totalAmount, 0)
+    const amountPaid = group.reduce((sum, room) => sum + room.amountPaid, 0)
+    const paymentStatus: Booking['paymentStatus'] = amountPaid >= totalAmount && totalAmount > 0
+      ? 'completo'
+      : amountPaid > 0 ? 'parcial' : 'pendiente'
+
+    return {
+      confirmed: group.every(room => room.confirmed),
+      paymentStatus
+    }
+  }
+
+  const getBookingPaymentColors = (booking: Booking) => getPaymentColorClasses(getGroupPaymentView(booking))
+  const getBookingPaymentState = (booking: Booking) => getEffectivePaymentState(getGroupPaymentView(booking))
+
   // Desayuno + cena por noche, configurables desde Tarifas y Descuentos.
   const { settings: hotelSettings } = useHotelSettings()
   const mealRates = getMealRates(hotelSettings)
@@ -2161,7 +2181,7 @@ export default function BookingsPage() {
             if (['checkin_hoy', 'checkout_hoy', 'disponible', 'limpieza'].includes(status)) {
               badgeBg = 'bg-white border-gray-200 text-gray-800 shadow-sm'
             } else if (booking) {
-              badgeBg = getPaymentColorClasses(booking).badge
+              badgeBg = getBookingPaymentColors(booking).badge
             }
 
             return (
@@ -2270,7 +2290,7 @@ export default function BookingsPage() {
                     {status === 'ocupado' && booking && (
                       <button
                         onClick={() => setSelectedBooking(booking)}
-                        className={`w-full py-3 font-bold rounded-xl text-xs uppercase tracking-wider transition-all border ${getPaymentColorClasses(booking).badge}`}
+                        className={`w-full py-3 font-bold rounded-xl text-xs uppercase tracking-wider transition-all border ${getBookingPaymentColors(booking).badge}`}
                       >
                         Ver Detalles
                       </button>
@@ -2549,7 +2569,7 @@ export default function BookingsPage() {
                       const rightEdgeIdx = checkOutVisible ? endIdx + 1.5 : endIdx + 1
                       const leftPct = (leftEdgeIdx / weekDays.length) * 100
                       const widthPct = ((rightEdgeIdx - leftEdgeIdx) / weekDays.length) * 100
-                      const colors = getPaymentColorClasses(b)
+                      const colors = getBookingPaymentColors(b)
                       const isBeingDragged = dragInfo?.bookingId === b.id
 
                       return (
@@ -2773,8 +2793,8 @@ export default function BookingsPage() {
                           </td>
                           <td className="px-6 py-4 text-right">
                             <span className="text-sm font-bold text-gray-900">{fmt(b.totalAmount)}</span>
-                            <span className={`block text-[9px] font-bold mt-0.5 ${getPaymentColorClasses(b).text}`}>
-                              {paymentStateLabels[getEffectivePaymentState(b)].toUpperCase()}
+                            <span className={`block text-[9px] font-bold mt-0.5 ${getBookingPaymentColors(b).text}`}>
+                              {paymentStateLabels[getBookingPaymentState(b)].toUpperCase()}
                             </span>
                           </td>
                         </tr>
@@ -2830,9 +2850,9 @@ export default function BookingsPage() {
                     )}
                   </div>
                   <h2 className="text-xl font-bold font-serif text-gray-800 mt-1">Detalle del Huésped</h2>
-                  <span className={`inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full border text-[9px] font-extrabold uppercase tracking-widest ${getPaymentColorClasses(selectedBooking).badge}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${getPaymentColorClasses(selectedBooking).bullet}`} />
-                    {paymentStateLabels[getEffectivePaymentState(selectedBooking)]}
+                  <span className={`inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full border text-[9px] font-extrabold uppercase tracking-widest ${getBookingPaymentColors(selectedBooking).badge}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${getBookingPaymentColors(selectedBooking).bullet}`} />
+                    {paymentStateLabels[getBookingPaymentState(selectedBooking)]}
                   </span>
                 </div>
                 <button
