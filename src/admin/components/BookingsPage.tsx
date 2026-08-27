@@ -20,7 +20,12 @@ import { joinPersonName, splitPersonName } from '../../utils/personName'
 
 // Helper to format currency
 const fmt = (n: number) =>
-  new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
+  new Intl.NumberFormat('es-VE', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
+    maximumFractionDigits: 2
+  }).format(n)
 
 // Define status categories and their corresponding styling (premium design tokens)
 const statusConfig = {
@@ -126,7 +131,18 @@ interface GuestSuggestion {
   name: string
   phone: string
   email: string
+  ci: string
+  companions: string
 }
+
+const cleanGuestSuggestionName = (name: string) =>
+  name.replace(/\s+\((?:Habitaci[oó]n\s+)?\d+\/\d+\)$/i, '').trim()
+
+const cleanSavedGuestPhone = (phone?: string | null) =>
+  phone === '+58 412-000-0000' ? '' : phone || ''
+
+const cleanSavedGuestEmail = (email?: string | null) =>
+  email === 'cliente@estancialacanada.com' ? '' : email || ''
 
 const formatLocalDate = (date: Date) => {
   const year = date.getFullYear()
@@ -206,6 +222,33 @@ const withBookingDiscountNote = (notes: string | undefined, percent: number) => 
   return [withoutAppMarker, `Descuento aplicado: ${percent}%.`].filter(Boolean).join(' ')
 }
 
+/**
+ * El descuento fijo se guarda por habitación para que una reserva grupal conserve
+ * exactamente el mismo descuento total sin duplicarlo en cada fila de Supabase.
+ */
+const getBookingFixedDiscountAmount = (notes?: string) => {
+  const matches = [...(notes || '').matchAll(/Descuento fijo aplicado:\s*USD\s*(\d+(?:[.,]\d+)?)/gi)]
+  const lastMatch = matches.at(-1)
+  if (!lastMatch) return 0
+  const value = Number(lastMatch[1].replace(',', '.'))
+  return Number.isFinite(value) ? Math.max(0, value) : 0
+}
+
+const withBookingFixedDiscountNote = (notes: string | undefined, amount: number) => {
+  const withoutAppMarker = (notes || '')
+    .replace(/\s*Descuento fijo aplicado:\s*USD\s*\d+(?:[.,]\d+)?\.?/gi, '')
+    .trim()
+  if (amount <= 0) return withoutAppMarker
+  return [withoutAppMarker, `Descuento fijo aplicado: USD ${amount.toFixed(2)}.`].filter(Boolean).join(' ')
+}
+
+const getAdjustedBookingTotal = (standardTotal: number, notes?: string) => {
+  const percent = getBookingDiscountPercent(notes)
+  const fixedAmount = getBookingFixedDiscountAmount(notes)
+  const afterPercent = standardTotal * (1 - percent / 100)
+  return Math.max(0, Math.round((afterPercent - fixedAmount) * 100) / 100)
+}
+
 // Paleta calcada de Paxer (el software que la clienta ya usa) para que el color de cada
 // reserva se vea igual en ambos sistemas: Reservado (azul cielo) → Sin pago (azul) →
 // Pago parcial (naranja) → Pagado (verde).
@@ -267,6 +310,7 @@ export default function BookingsPage() {
   const [editingFinancials, setEditingFinancials] = useState(false)
   const [savingFinancials, setSavingFinancials] = useState(false)
   const [editDiscountPercent, setEditDiscountPercent] = useState(0)
+  const [editFixedDiscountAmount, setEditFixedDiscountAmount] = useState(0)
   const [editingNotes, setEditingNotes] = useState(false)
   const [savingNotes, setSavingNotes] = useState(false)
   const [editNotes, setEditNotes] = useState('')
@@ -494,31 +538,83 @@ export default function BookingsPage() {
   // Autocomplete effect
   useEffect(() => {
     if (!shouldShowGuestSuggestions) return
+    let active = true
 
     const timer = setTimeout(async () => {
       // Busca coincidencias tanto por nombre como por apellido, para que la administradora
       // pueda encontrar al huésped aunque solo recuerde uno de los dos.
-      const terms = [form.guestFirstName, form.guestLastName].filter(t => t.trim().length >= 2)
+      const terms = [form.guestFirstName, form.guestLastName]
+        .map(term => term.trim().replace(/[%,()]/g, ''))
+        .filter(term => term.length >= 2)
       if (terms.length === 0) return
-      const orFilter = terms.map(t => `guest_name.ilike.%${t}%`).join(',')
-      const { data } = await supabase
-        .from('bookings')
-        .select('guest_name, guest_phone, guest_email')
-        .or(orFilter)
-        .limit(10)
+      const bookingFilter = terms.map(term => `guest_name.ilike.%${term}%`).join(',')
+      const customerFilter = terms.map(term => `full_name.ilike.%${term}%`).join(',')
 
-      if (data) {
-        const unique = new Map<string, GuestSuggestion>()
-        data.forEach(d => {
-          if (!unique.has(d.guest_name)) {
-            unique.set(d.guest_name, { name: d.guest_name, phone: d.guest_phone, email: d.guest_email })
-          }
+      // Reservas aporta cédula y acompañantes; Clientes aporta los datos de contacto
+      // que pudieron actualizarse después. Se combinan para mostrar la ficha más completa.
+      const [bookingsResult, customersResult] = await Promise.all([
+        supabase
+          .from('bookings')
+          .select('guest_name, guest_phone, guest_email, guest_ci, companions, created_at')
+          .or(bookingFilter)
+          .order('created_at', { ascending: false })
+          .limit(50),
+        supabase
+          .from('marketing_customers')
+          .select('full_name, phone, email, updated_at')
+          .or(customerFilter)
+          .order('updated_at', { ascending: false })
+          .limit(25)
+      ])
+
+      if (bookingsResult.error) console.error('No se pudo buscar huéspedes anteriores:', bookingsResult.error)
+      if (customersResult.error) console.error('No se pudo buscar en Clientes:', customersResult.error)
+
+      const unique = new Map<string, GuestSuggestion>()
+      const mergeSuggestion = (incoming: GuestSuggestion, preferIncomingContact = false) => {
+        const name = cleanGuestSuggestionName(incoming.name)
+        const key = name.toLocaleLowerCase('es')
+        const current = unique.get(key)
+        if (!current) {
+          unique.set(key, { ...incoming, name })
+          return
+        }
+        unique.set(key, {
+          name: current.name,
+          phone: preferIncomingContact ? incoming.phone || current.phone : current.phone || incoming.phone,
+          email: preferIncomingContact ? incoming.email || current.email : current.email || incoming.email,
+          ci: current.ci || incoming.ci,
+          companions: current.companions || incoming.companions
         })
-        setGuestSuggestions(Array.from(unique.values()))
       }
+
+      for (const booking of bookingsResult.data || []) {
+        mergeSuggestion({
+          name: booking.guest_name,
+          phone: cleanSavedGuestPhone(booking.guest_phone),
+          email: cleanSavedGuestEmail(booking.guest_email),
+          ci: booking.guest_ci || '',
+          companions: booking.companions || ''
+        })
+      }
+
+      for (const customer of customersResult.data || []) {
+        mergeSuggestion({
+          name: customer.full_name,
+          phone: cleanSavedGuestPhone(customer.phone),
+          email: cleanSavedGuestEmail(customer.email),
+          ci: '',
+          companions: ''
+        }, true)
+      }
+
+      if (active) setGuestSuggestions(Array.from(unique.values()).slice(0, 10))
     }, 300)
 
-    return () => clearTimeout(timer)
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
   }, [form.guestFirstName, form.guestLastName, shouldShowGuestSuggestions])
 
   // Seleccionar días libres en la Semana para abrir "Nueva Reserva" ya con las fechas
@@ -1114,23 +1210,47 @@ export default function BookingsPage() {
 
     const percent = Math.min(100, Math.max(0, Number(editDiscountPercent) || 0))
     const groupBookings = getBookingGroup(selectedBooking)
-    const updates = groupBookings.map(room => {
-      const standardTotal = getStandardRate(
-        room.accommodationId,
-        room.checkIn,
-        room.checkOut,
-        room.guestsCount.adults,
-        room.guestsCount.children
-      )
-      const totalAmount = Math.max(0, Math.round(standardTotal * (1 - percent / 100) * 100) / 100)
-      const paymentStatus: Booking['paymentStatus'] = room.amountPaid >= totalAmount
-        ? 'completo'
-        : room.amountPaid > 0 ? 'parcial' : 'pendiente'
+    const standardTotals = groupBookings.map(room => getStandardRate(
+      room.accommodationId,
+      room.checkIn,
+      room.checkOut,
+      room.guestsCount.adults,
+      room.guestsCount.children
+    ))
+    const totalsAfterPercent = standardTotals.map(total =>
+      Math.max(0, Math.round(total * (1 - percent / 100) * 100) / 100)
+    )
+    const totalAfterPercent = totalsAfterPercent.reduce((sum, total) => sum + total, 0)
+    const fixedDiscount = Math.min(
+      totalAfterPercent,
+      Math.max(0, Math.round((Number(editFixedDiscountAmount) || 0) * 100) / 100)
+    )
+
+    let remainingDiscountCents = Math.round(fixedDiscount * 100)
+    const fixedDiscounts = totalsAfterPercent.map((total, index) => {
+      const cents = index === totalsAfterPercent.length - 1
+        ? remainingDiscountCents
+        : Math.min(
+          remainingDiscountCents,
+          Math.round(fixedDiscount * 100 * (totalAfterPercent > 0 ? total / totalAfterPercent : 1 / totalsAfterPercent.length))
+        )
+      remainingDiscountCents -= cents
+      return cents / 100
+    })
+    const newGroupTotal = Math.max(0, Math.round((totalAfterPercent - fixedDiscount) * 100) / 100)
+    const groupPaid = groupBookings.reduce((sum, room) => sum + room.amountPaid, 0)
+    const groupPaymentStatus: Booking['paymentStatus'] = groupPaid >= newGroupTotal
+      ? 'completo'
+      : groupPaid > 0 ? 'parcial' : 'pendiente'
+
+    const updates = groupBookings.map((room, index) => {
+      const totalAmount = Math.max(0, Math.round((totalsAfterPercent[index] - fixedDiscounts[index]) * 100) / 100)
+      const notesWithPercent = withBookingDiscountNote(room.specialNotes, percent)
       return {
         id: room.id,
         totalAmount,
-        paymentStatus,
-        specialNotes: withBookingDiscountNote(room.specialNotes, percent)
+        paymentStatus: groupPaymentStatus,
+        specialNotes: withBookingFixedDiscountNote(notesWithPercent, fixedDiscounts[index])
       }
     })
 
@@ -1348,9 +1468,7 @@ export default function BookingsPage() {
       booking.guestsCount.adults,
       booking.guestsCount.children
     )
-    const bookingDiscountPercent = getBookingDiscountPercent(booking.specialNotes)
-    const discountedTotal = newStandardTotal * (1 - bookingDiscountPercent / 100)
-    const newTotalAmount = Math.max(0, Math.round(discountedTotal * 100) / 100)
+    const newTotalAmount = getAdjustedBookingTotal(newStandardTotal, booking.specialNotes)
     const newPaymentStatus: Booking['paymentStatus'] = booking.amountPaid >= newTotalAmount
       ? 'completo'
       : booking.amountPaid > 0
@@ -1477,7 +1595,6 @@ export default function BookingsPage() {
       return
     }
 
-    const discount = getBookingDiscountPercent(roomBooking.specialNotes)
     const standardTotal = getStandardRate(
       editRoomForm.accommodationId,
       roomBooking.checkIn,
@@ -1485,7 +1602,7 @@ export default function BookingsPage() {
       editRoomForm.adults,
       editRoomForm.children
     )
-    const totalAmount = Math.round(standardTotal * (1 - discount / 100) * 100) / 100
+    const totalAmount = getAdjustedBookingTotal(standardTotal, roomBooking.specialNotes)
     const paymentStatus: Booking['paymentStatus'] = roomBooking.amountPaid >= totalAmount
       ? 'completo'
       : roomBooking.amountPaid > 0 ? 'parcial' : 'pendiente'
@@ -1576,7 +1693,10 @@ export default function BookingsPage() {
     const locator = selectedBooking.locator || `LC-${Math.random().toString(36).substring(2, 7).toUpperCase()}`
     const baseGuestName = selectedBooking.guestName.replace(/\s+\(\d+\/\d+\)$/, '')
     const groupNote = `Reserva grupal ampliada a ${resultingGroupSize} alojamientos bajo el localizador ${locator}.`
-    const specialNotes = [selectedBooking.specialNotes, groupNote].filter(Boolean).join(' ')
+    // El descuento fijo pertenece al total que ya existía. La habitación nueva hereda
+    // el porcentaje, pero no vuelve a restar una porción fija que ya fue aplicada.
+    const notesWithoutFixedDiscount = withBookingFixedDiscountNote(selectedBooking.specialNotes, 0)
+    const specialNotes = [notesWithoutFixedDiscount, groupNote].filter(Boolean).join(' ')
 
     const rows = allocations.map(room => {
       const standardTotal = getStandardRate(
@@ -3004,8 +3124,7 @@ export default function BookingsPage() {
                       const previewStandard = isEditing
                         ? getStandardRate(editRoomForm.accommodationId, roomBooking.checkIn, roomBooking.checkOut, editRoomForm.adults, editRoomForm.children)
                         : 0
-                      const previewDiscount = getBookingDiscountPercent(roomBooking.specialNotes)
-                      const previewTotal = Math.round(previewStandard * (1 - previewDiscount / 100) * 100) / 100
+                      const previewTotal = getAdjustedBookingTotal(previewStandard, roomBooking.specialNotes)
                       return (
                         <div key={roomBooking.id} className="bg-white p-3 border border-gray-100 rounded-2xl">
                           {isEditing ? (
@@ -3341,7 +3460,12 @@ export default function BookingsPage() {
                     {!editingFinancials && (
                       <button
                         onClick={() => {
+                          const group = getBookingGroup(selectedBooking)
                           setEditDiscountPercent(getBookingDiscountPercent(selectedBooking.specialNotes))
+                          setEditFixedDiscountAmount(group.reduce(
+                            (sum, room) => sum + getBookingFixedDiscountAmount(room.specialNotes),
+                            0
+                          ))
                           setEditingFinancials(true)
                         }}
                         className="text-[10px] font-bold text-[#C5A059] uppercase tracking-wider hover:underline flex items-center gap-1"
@@ -3360,7 +3484,12 @@ export default function BookingsPage() {
                       room.guestsCount.adults,
                       room.guestsCount.children
                     ), 0)
-                    const previewTotal = Math.round(standardTotal * (1 - editDiscountPercent / 100) * 100) / 100
+                    const totalAfterPercent = standardTotal * (1 - editDiscountPercent / 100)
+                    const normalizedFixedDiscount = Math.min(
+                      totalAfterPercent,
+                      Math.max(0, Number(editFixedDiscountAmount) || 0)
+                    )
+                    const previewTotal = Math.max(0, Math.round((totalAfterPercent - normalizedFixedDiscount) * 100) / 100)
                     return (
                       <div className="pt-2 space-y-3 border-t border-gray-200/70">
                         <div className="flex justify-between text-xs">
@@ -3391,6 +3520,26 @@ export default function BookingsPage() {
                             ))}
                           </div>
                         </div>
+                        <div>
+                          <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Descuento fijo (USD)</label>
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400">$</span>
+                            <input
+                              type="number"
+                              min={0}
+                              max={totalAfterPercent}
+                              step="0.01"
+                              value={editFixedDiscountAmount}
+                              onChange={e => setEditFixedDiscountAmount(Math.min(
+                                totalAfterPercent,
+                                Math.max(0, Number(e.target.value))
+                              ))}
+                              className="w-full border border-gray-200 rounded-xl pl-7 pr-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white"
+                              placeholder="Ejemplo: 5"
+                            />
+                          </div>
+                          <p className="text-[9px] text-gray-400 mt-1">Se resta directamente del total, después del porcentaje.</p>
+                        </div>
                         <div className="flex justify-between text-xs bg-white border border-[#C5A059]/20 rounded-xl p-3">
                           <span className="text-gray-600 font-semibold">Nuevo total de toda la reserva</span>
                           <span className="font-bold text-[#8A6D33]">{fmt(previewTotal)}</span>
@@ -3401,7 +3550,7 @@ export default function BookingsPage() {
                             disabled={savingFinancials}
                             className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider hover:underline disabled:opacity-50"
                           >
-                            {savingFinancials ? 'Guardando...' : 'Guardar descuento'}
+                            {savingFinancials ? 'Guardando...' : 'Guardar cambios'}
                           </button>
                           <button
                             onClick={() => setEditingFinancials(false)}
@@ -3425,6 +3574,14 @@ export default function BookingsPage() {
                         <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
                           <span className="text-gray-500 font-semibold">Descuento individual</span>
                           <span className="font-bold text-emerald-600">{getBookingDiscountPercent(selectedBooking.specialNotes)}%</span>
+                        </div>
+                      )}
+                      {getBookingGroup(selectedBooking).reduce((sum, room) => sum + getBookingFixedDiscountAmount(room.specialNotes), 0) > 0 && (
+                        <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
+                          <span className="text-gray-500 font-semibold">Descuento fijo</span>
+                          <span className="font-bold text-emerald-600">
+                            -{fmt(getBookingGroup(selectedBooking).reduce((sum, room) => sum + getBookingFixedDiscountAmount(room.specialNotes), 0))}
+                          </span>
                         </div>
                       )}
                       <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
@@ -3685,6 +3842,7 @@ export default function BookingsPage() {
                       <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Nombre</label>
                       <input
                         type="text"
+                        autoComplete="off"
                         placeholder="Ej. Ana"
                         value={form.guestFirstName}
                         onFocus={() => setShowSuggestions(true)}
@@ -3700,6 +3858,7 @@ export default function BookingsPage() {
                       <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Apellido</label>
                       <input
                         type="text"
+                        autoComplete="off"
                         placeholder="Ej. Peralta"
                         value={form.guestLastName}
                         onFocus={() => setShowSuggestions(true)}
@@ -3719,22 +3878,24 @@ export default function BookingsPage() {
                         <div
                           key={i}
                           onClick={() => {
-                            const { firstName, lastName } = splitPersonName(g.name.replace(/\s+\(\d+\/\d+\)$/, ''))
+                            const { firstName, lastName } = splitPersonName(cleanGuestSuggestionName(g.name))
                             setForm(f => ({
                               ...f,
                               guestFirstName: firstName,
                               guestLastName: lastName,
                               guestPhone: g.phone || f.guestPhone,
-                              guestEmail: g.email || f.guestEmail
+                              guestEmail: g.email || f.guestEmail,
+                              guestCi: g.ci || f.guestCi,
+                              companions: g.companions || f.companions
                             }))
                             setShowSuggestions(false)
                           }}
                           className="px-4 py-2 hover:bg-[#C5A059]/10 cursor-pointer flex flex-col gap-0.5 border-b border-gray-50 last:border-0"
                         >
                           <span className="text-xs font-bold text-gray-800">{g.name}</span>
-                          {(g.phone || g.email) && (
+                          {(g.ci || g.phone || g.email) && (
                             <span className="text-[10px] text-gray-400">
-                              {g.phone} {g.phone && g.email && '•'} {g.email}
+                              {[g.ci, g.phone, g.email].filter(Boolean).join(' • ')}
                             </span>
                           )}
                         </div>
@@ -3746,6 +3907,7 @@ export default function BookingsPage() {
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Cédula de Identidad (CI)</label>
                   <input
                     type="text"
+                    autoComplete="off"
                     placeholder="Ej. V-15395394"
                     value={form.guestCi}
                     onChange={e => setForm(f => ({ ...f, guestCi: e.target.value }))}
@@ -3756,6 +3918,7 @@ export default function BookingsPage() {
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Teléfono</label>
                   <input
                     type="text"
+                    autoComplete="off"
                     placeholder="+58 412-000-0000"
                     value={form.guestPhone}
                     onChange={e => setForm(f => ({ ...f, guestPhone: e.target.value }))}
@@ -3766,6 +3929,7 @@ export default function BookingsPage() {
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Correo Electrónico</label>
                   <input
                     type="email"
+                    autoComplete="off"
                     placeholder="email@correo.com"
                     value={form.guestEmail}
                     onChange={e => setForm(f => ({ ...f, guestEmail: e.target.value }))}
@@ -3776,6 +3940,7 @@ export default function BookingsPage() {
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Acompañantes</label>
                   <input
                     type="text"
+                    autoComplete="off"
                     placeholder="Nombres y apellidos de los demás huéspedes"
                     value={form.companions}
                     onChange={e => setForm(f => ({ ...f, companions: e.target.value }))}

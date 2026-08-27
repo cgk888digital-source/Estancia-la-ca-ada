@@ -811,6 +811,9 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                   <p className="text-[10px] text-brand-terracotta text-center font-medium mt-2 leading-relaxed bg-brand-terracotta/5 p-2.5 rounded-xl border border-brand-terracotta/10">
                     💡 {remainingPolicyText}
                   </p>
+                  <p className="text-[9px] text-brand-primary/60 text-center leading-relaxed px-2 pt-1">
+                    <strong>Importante:</strong> Los pagos en bolívares (Bs.) se calculan exclusivamente con la tasa oficial del euro (EUR) publicada por el Banco Central de Venezuela (BCV).
+                  </p>
                 </div>
               </div>
 
@@ -954,12 +957,6 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                             </p>
                           </div>
                           
-                          <div className="p-3.5 bg-brand-neutral/40 rounded-2xl text-[10px] text-brand-primary/70 leading-relaxed border border-brand-primary/5 flex flex-col gap-1 shadow-sm">
-                            <p className="font-bold text-[10px] uppercase tracking-wide text-brand-wood">Nota de Transparencia:</p>
-                            <p>
-                              Para su total tranquilidad y de acuerdo a nuestras políticas de facturación, los pagos recibidos en Bolívares (Bs.) se calculan tomando como referencia la tasa oficial del <strong>Euro (EUR)</strong> publicada por el Banco Central de Venezuela (BCV), con la finalidad de mitigar el diferencial cambiario y costos de reposición.
-                            </p>
-                          </div>
                         </div>
                       ) : (
                         <div className="text-center py-2 text-brand-primary/40 text-[10px]">Obteniendo tasa referencial...</div>
@@ -1230,7 +1227,7 @@ ${remainingAmount > 0 ? `*Monto restante (50%):* $${remainingAmount}\n*Política
 *Método de Pago Seleccionado:* ${selectedPayment === 'zelle' ? 'Zelle' : selectedPayment === 'pago_movil' ? 'Pago Móvil (Bancamiga)' : 'Transferencia Bancaria'}
 ${selectedPayment === 'pago_movil' && bcvEuroRate ? `*Monto en Bolívares a transferir:* Bs. ${(depositAmount * bcvEuroRate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 *Tasa Oficial del Euro (BCV):* Bs. ${bcvEuroRate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-_(Nota: Los pagos en bolívares se calculan a tasa BCV del euro por políticas de facturación)_` : ''}
+_(Nota: Los pagos en bolívares se calculan exclusivamente con la tasa oficial del euro publicada por el BCV.)_` : ''}
 *Código de Reserva:* ${bookingCode}
 
 Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;

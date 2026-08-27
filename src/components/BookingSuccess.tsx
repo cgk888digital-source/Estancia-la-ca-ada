@@ -105,7 +105,7 @@ ${data.remainingAmount !== undefined && data.remainingAmount > 0 ? `*Monto resta
 *Método de Pago Seleccionado:* ${data.selectedPayment === 'zelle' ? 'Zelle' : data.selectedPayment === 'pago_movil' ? 'Pago Móvil (Bancamiga)' : 'Transferencia Bancaria'}
 ${(data.selectedPayment === 'pago_movil' || data.selectedPayment === 'transferencia') && data.bcvEuroRate && data.depositAmount ? `*Monto en Bolívares a transferir:* Bs. ${(data.depositAmount * data.bcvEuroRate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 *Tasa Oficial del Euro (BCV):* Bs. ${data.bcvEuroRate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-_(Nota: Los pagos en bolívares se calculan a tasa BCV del euro por políticas de facturación)_` : ''}
+_(Nota: Los pagos en bolívares se calculan exclusivamente con la tasa oficial del euro publicada por el BCV.)_` : ''}
 *Código de Reserva:* ${data.bookingCode}
 
 Si desean formalizar la reservación deben transferir 50% por adelantado y el 50% restante 2 semanas antes de la llegada a la Estancia. 
@@ -251,6 +251,10 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
               </div>
             )}
 
+            <p className="text-[9px] text-brand-primary/60 text-center leading-relaxed px-2 py-1">
+              <strong>Importante:</strong> Los pagos en bolívares (Bs.) se calculan exclusivamente con la tasa oficial del euro (EUR) publicada por el Banco Central de Venezuela (BCV).
+            </p>
+
             {/* Desglose Pago Móvil / Transferencia en Bolívares */}
             {(data.selectedPayment === 'pago_movil' || data.selectedPayment === 'transferencia') && data.bcvEuroRate && data.depositAmount && (
               <div className="space-y-2 mt-2 pt-2 border-t border-brand-primary/5">
@@ -262,9 +266,6 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
                   <p className="text-[8px] text-brand-primary/50 text-center">
                     Tasa Oficial del Euro (BCV): Bs. {data.bcvEuroRate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
-                </div>
-                <div className="p-2.5 bg-[#FAF9F6] rounded-xl text-[8.5px] text-brand-primary/70 leading-normal border border-brand-primary/5 text-justify">
-                  <strong>Nota de Transparencia:</strong> Los pagos recibidos en Bolívares (Bs.) se calculan y procesan utilizando la tasa oficial de cambio del <strong>Euro (EUR)</strong> publicada por el Banco Central de Venezuela (BCV), de acuerdo a nuestras políticas de facturación para mitigar costos de reposición cambiaria.
                 </div>
               </div>
             )}
