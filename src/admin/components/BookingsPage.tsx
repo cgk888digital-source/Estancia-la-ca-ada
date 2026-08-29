@@ -161,6 +161,7 @@ const todayDate = new Date()
 const todayStr = formatLocalDate(todayDate)
 const defaultCheckOutStr = formatLocalDate(addDays(todayDate, 3))
 const todayLongLabel = todayDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })
+const DEFAULT_SPECIAL_NOTES = 'Hospedaje con cena y desayuno incluido.'
 
 // Mappers between DB format (snake_case) and React format (camelCase)
 const mapDbBookingToReact = (db: DbBooking): Booking => ({
@@ -381,7 +382,7 @@ export default function BookingsPage() {
     paymentDate: todayStr,
     paymentMethod: 'transferencia' as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' | 'zelle',
     paymentReference: '',
-    specialNotes: ''
+    specialNotes: DEFAULT_SPECIAL_NOTES
   })
 
   // Autocomplete state
@@ -513,7 +514,7 @@ export default function BookingsPage() {
       paymentDate: todayStr,
       paymentMethod: 'transferencia',
       paymentReference: '',
-      specialNotes: ''
+      specialNotes: DEFAULT_SPECIAL_NOTES
     })
     setShowSuggestions(false)
     setShowAddModal(true)
@@ -4278,7 +4279,7 @@ export default function BookingsPage() {
               <div>
                 <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Notas Especiales / Solicitudes</label>
                 <textarea
-                  placeholder="Ej. Traen su propia comida, requieren cuna para bebé, etc."
+                  placeholder="Agrega aquí cualquier solicitud especial."
                   value={form.specialNotes}
                   onChange={e => setForm(f => ({ ...f, specialNotes: e.target.value }))}
                   rows={2}
