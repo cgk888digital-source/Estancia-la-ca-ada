@@ -2957,7 +2957,11 @@ export default function BookingsPage() {
           {/* Overlay click to close */}
           <div className="absolute inset-0" onClick={() => { setSelectedBooking(null); setEditingGuest(false); setEditingRoomId(null); setAddingRoomsToBooking(false); setAdditionalAccommodationIds([]); setEditingDates(false); setEditingFinancials(false); setEditingNotes(false); setAddingPayment(false) }} />
           
-          <div className="relative w-full max-w-md h-[90dvh] sm:h-screen bg-white rounded-t-3xl sm:rounded-l-3xl sm:rounded-tr-none shadow-2xl p-5 sm:p-6 flex flex-col justify-between overflow-y-auto animate-in slide-in-from-bottom sm:slide-in-from-right duration-300">
+          {/* En teléfonos, el detalle ocupa todo el viewport. El antiguo 90dvh dejaba
+              visible una franja gris del overlay en la parte superior. Los insets
+              mantienen el encabezado y las acciones fuera del notch y del indicador
+              de inicio cuando el panel se abre desde la app instalada en iPhone. */}
+          <div className="relative w-full max-w-none sm:max-w-md h-[100dvh] sm:h-screen bg-white rounded-none sm:rounded-l-3xl sm:rounded-tr-none shadow-2xl px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(1.25rem,env(safe-area-inset-top))] sm:p-6 flex flex-col justify-between overflow-y-auto overscroll-contain animate-in slide-in-from-bottom sm:slide-in-from-right duration-300">
             <div>
               <div className="flex items-center justify-between pb-4 border-b border-gray-100">
                 <div>
@@ -3562,34 +3566,65 @@ export default function BookingsPage() {
                         </div>
                       </div>
                     )
-                  })() : (
-                    <>
-                      {getBookingGroup(selectedBooking).map(room => (
-                        <div key={room.id} className="flex justify-between gap-3 text-[10px] py-1 border-b border-gray-100/50">
-                          <span className="text-gray-500 truncate">{getAccommodation(room.accommodationId)?.title}</span>
-                          <span className="font-bold text-gray-700 shrink-0">{fmt(room.totalAmount)}</span>
-                        </div>
-                      ))}
-                      {getBookingDiscountPercent(selectedBooking.specialNotes) > 0 && (
-                        <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
-                          <span className="text-gray-500 font-semibold">Descuento individual</span>
-                          <span className="font-bold text-emerald-600">{getBookingDiscountPercent(selectedBooking.specialNotes)}%</span>
-                        </div>
-                      )}
-                      {getBookingGroup(selectedBooking).reduce((sum, room) => sum + getBookingFixedDiscountAmount(room.specialNotes), 0) > 0 && (
-                        <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
-                          <span className="text-gray-500 font-semibold">Descuento fijo</span>
-                          <span className="font-bold text-emerald-600">
-                            -{fmt(getBookingGroup(selectedBooking).reduce((sum, room) => sum + getBookingFixedDiscountAmount(room.specialNotes), 0))}
+                  })() : (() => {
+                    const groupBookings = getBookingGroup(selectedBooking)
+                    const percent = getBookingDiscountPercent(selectedBooking.specialNotes)
+                    const fixedDiscount = groupBookings.reduce(
+                      (sum, room) => sum + getBookingFixedDiscountAmount(room.specialNotes),
+                      0
+                    )
+                    const standardTotals = groupBookings.map(room => getStandardRate(
+                      room.accommodationId,
+                      room.checkIn,
+                      room.checkOut,
+                      room.guestsCount.adults,
+                      room.guestsCount.children
+                    ))
+                    const totalAfterPercent = standardTotals.reduce(
+                      (sum, total) => sum + Math.max(0, Math.round(total * (1 - percent / 100) * 100) / 100),
+                      0
+                    )
+                    const percentageDiscount = Math.max(
+                      0,
+                      Math.round((standardTotals.reduce((sum, total) => sum + total, 0) - totalAfterPercent) * 100) / 100
+                    )
+                    const hasDiscount = percentageDiscount > 0 || fixedDiscount > 0
+                    const finalTotal = groupBookings.reduce((sum, room) => sum + room.totalAmount, 0)
+
+                    return (
+                      <>
+                        {hasDiscount && (
+                          <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block pt-1">
+                            Tarifa estándar por alojamiento
                           </span>
+                        )}
+                        {groupBookings.map((room, index) => (
+                          <div key={room.id} className="flex justify-between gap-3 text-[10px] py-1 border-b border-gray-100/50">
+                            <span className="text-gray-500 truncate">{getAccommodation(room.accommodationId)?.title}</span>
+                            <span className="font-bold text-gray-700 shrink-0">
+                              {fmt(hasDiscount ? standardTotals[index] : room.totalAmount)}
+                            </span>
+                          </div>
+                        ))}
+                        {percentageDiscount > 0 && (
+                          <div className="flex justify-between gap-3 text-xs py-1 border-b border-gray-100/50">
+                            <span className="text-gray-500 font-semibold">Descuento individual ({percent}%)</span>
+                            <span className="font-bold text-emerald-600 shrink-0">-{fmt(percentageDiscount)}</span>
+                          </div>
+                        )}
+                        {fixedDiscount > 0 && (
+                          <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
+                            <span className="text-gray-500 font-semibold">Descuento fijo</span>
+                            <span className="font-bold text-emerald-600">-{fmt(fixedDiscount)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
+                          <span className="text-gray-500 font-semibold">Costo total de la reserva</span>
+                          <span className="font-bold text-gray-800">{fmt(finalTotal)}</span>
                         </div>
-                      )}
-                      <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
-                        <span className="text-gray-500 font-semibold">Costo total de la reserva</span>
-                        <span className="font-bold text-gray-800">{fmt(getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.totalAmount, 0))}</span>
-                      </div>
-                    </>
-                  )}
+                      </>
+                    )
+                  })()}
                 </div>
 
                 {/* 7. Historial de Pagos: cada abono con su fecha, método y número de operación */}
