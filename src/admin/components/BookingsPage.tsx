@@ -10,7 +10,7 @@ import { repartirNoches, precioEstancia } from '../../utils/seasonNights'
 import { supabase } from '../../lib/supabase'
 import type { Booking, BookingPayment } from '../types'
 import PrintableReservationsReport from './PrintableReservationsReport'
-import { parseLocalDate } from '../../utils/dateUtils'
+import { parseLocalDate, fechaLocalISO as formatLocalDate } from '../../utils/dateUtils'
 import { syncMarketingCustomer } from '../../utils/syncMarketingCustomer'
 import { useHotelSettings, getMealRates } from '../../utils/useHotelSettings'
 import { sendBookingConfirmationEmail } from '../../utils/sendBookingConfirmationEmail'
@@ -143,13 +143,6 @@ const cleanSavedGuestPhone = (phone?: string | null) =>
 
 const cleanSavedGuestEmail = (email?: string | null) =>
   email === 'cliente@estancialacanada.com' ? '' : email || ''
-
-const formatLocalDate = (date: Date) => {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
 
 const addDays = (date: Date, days: number) => {
   const nextDate = new Date(date)

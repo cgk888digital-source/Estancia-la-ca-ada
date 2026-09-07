@@ -9,7 +9,8 @@ const TOPE_MOVIMIENTOS = 500
 import type { Transaction, TransactionType, TransactionCategory, PaymentMethod, Employee } from '../types'
 import { supabase } from '../../lib/supabase'
 import ReceiptModal from './ReceiptModal'
-import { parseLocalDate } from '../../utils/dateUtils'
+import { parseLocalDate, fechaLocalISO } from '../../utils/dateUtils'
+import { useAuth } from '../context/AuthContext'
 
 interface Props {
   typeFilter?: TransactionType
@@ -84,6 +85,13 @@ function getDateRange(period: DatePeriod, customFrom: string, customTo: string):
 const PAGE_SIZE = 25
 
 const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
+  const { role } = useAuth()
+
+  // Quien atiende el hotel registra los ingresos, pero la propiedad no quiere que vea lo
+  // que factura la casa. Se le deja el dia en curso —para que compruebe lo que acaba de
+  // anotar y detecte un error suyo— y se le quitan el selector de periodo y el total.
+  const soloElDia = typeFilter === 'ingreso' && role === 'administracion'
+
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -95,20 +103,23 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   const [period, setPeriod] = useState<DatePeriod>('mes')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
+  // El periodo que se consulta de verdad. Con `soloElDia` no hay selector en pantalla,
+  // asi que no puede depender de lo que quede en `period`.
+  const periodoEfectivo: DatePeriod = soloElDia ? 'hoy' : period
   const [showModal, setShowModal] = useState(false)
   const [saved, setSaved] = useState(false)
   const [showCategoryMenu, setShowCategoryMenu] = useState(false)
   const [page, setPage] = useState(1)
 
-  const [form, setForm] = useState<Omit<Transaction, 'id'>>({
-    date: new Date().toISOString().split('T')[0],
+  const [form, setForm] = useState<Omit<Transaction, 'id'>>(() => ({
+    date: fechaLocalISO(),
     type: typeFilter ?? 'ingreso',
     category: typeFilter === 'egreso' ? 'empleados' : 'alojamiento',
     description: '',
     amount: 0,
     paymentMethod: 'transferencia',
     relatedTo: '',
-  })
+  }))
 
   useEffect(() => {
     let active = true
@@ -117,7 +128,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       setLoading(true)
 
       // Calcular rango de fechas para filtro server-side
-      const { from: dateFrom, to: dateTo } = getDateRange(period, customFrom, customTo)
+      const { from: dateFrom, to: dateTo } = getDateRange(periodoEfectivo, customFrom, customTo)
       
       let query = supabase
         .from('transactions')
@@ -126,12 +137,12 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       
       // Aplicar filtros de fecha server-side (solo si hay rango definido)
       if (dateFrom) {
-        query = query.gte('date', dateFrom.toISOString().substring(0, 10))
+        query = query.gte('date', fechaLocalISO(dateFrom))
       }
       if (dateTo) {
         const toDate = new Date(dateTo)
         toDate.setDate(toDate.getDate() + 1)
-        query = query.lt('date', toDate.toISOString().substring(0, 10))
+        query = query.lt('date', fechaLocalISO(toDate))
       }
       
       // Se pide una fila mas que el tope: si vuelve, es que el periodo tiene mas
@@ -161,7 +172,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
     return () => {
       active = false
     }
-  }, [period, customFrom, customTo])
+  }, [periodoEfectivo, customFrom, customTo])
 
   // Filtrado client-side solo para tipo, búsqueda y categoría (las fechas ya vienen filtradas del server)
   const filtered = useMemo(() => {
@@ -221,7 +232,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       setSaved(false)
       setShowModal(false)
       setForm({
-        date: new Date().toISOString().split('T')[0],
+        date: fechaLocalISO(),
         type: typeFilter ?? 'ingreso',
         category: typeFilter === 'egreso' ? 'empleados' : 'alojamiento',
         description: '',
@@ -300,8 +311,14 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
           <p className="text-sm text-gray-500 mt-1">
-            {filtered.length} registros · {typeFilter ? 'Total' : 'Balance'}:{' '}
-            <span className={`font-bold ${totalColor}`}>{fmt(Math.abs(total))}</span>
+            {soloElDia ? (
+              `${filtered.length} ${filtered.length === 1 ? 'registro' : 'registros'} de hoy`
+            ) : (
+              <>
+                {filtered.length} registros · {typeFilter ? 'Total' : 'Balance'}:{' '}
+                <span className={`font-bold ${totalColor}`}>{fmt(Math.abs(total))}</span>
+              </>
+            )}
           </p>
         </div>
         <button
@@ -314,61 +331,71 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       </div>
 
       {/* Date period selector */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-4">
-        <div className="flex items-center gap-2 mb-1">
-          <CalendarDays size={15} className="text-gray-400" />
-          <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Período</span>
+      {soloElDia ? (
+        <div className="rounded-2xl border border-gray-100 bg-white p-4">
+          <p className="text-xs leading-relaxed text-gray-500">
+            Se muestran los ingresos <strong className="font-bold text-gray-700">registrados hoy</strong>,
+            para que pueda comprobar lo que acaba de anotar. El histórico y los totales del
+            hotel los consulta la propiedad.
+          </p>
         </div>
-
-        <div className="flex flex-wrap gap-2">
-          {periods.map(p => (
-            <button
-              key={p}
-              onClick={() => {
-                setPeriod(p)
-                setPage(1)
-              }}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all
-                ${period === p
-                  ? 'text-white shadow-sm'
-                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
-              style={period === p ? { backgroundColor: accentColor } : {}}
-            >
-              {periodLabels[p]}
-            </button>
-          ))}
-        </div>
-
-        {/* Custom date range */}
-        {period === 'personalizado' && (
-          <div className="flex flex-wrap gap-3 pt-1">
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-bold text-gray-400 uppercase tracking-widest whitespace-nowrap">Desde</label>
-              <input
-                type="date"
-                value={customFrom}
-                onChange={e => {
-                  setCustomFrom(e.target.value)
-                  setPage(1)
-                }}
-                className="border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#C5A059] transition-colors"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-bold text-gray-400 uppercase tracking-widest whitespace-nowrap">Hasta</label>
-              <input
-                type="date"
-                value={customTo}
-                onChange={e => {
-                  setCustomTo(e.target.value)
-                  setPage(1)
-                }}
-                className="border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#C5A059] transition-colors"
-              />
-            </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-4">
+          <div className="flex items-center gap-2 mb-1">
+            <CalendarDays size={15} className="text-gray-400" />
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Período</span>
           </div>
-        )}
-      </div>
+
+          <div className="flex flex-wrap gap-2">
+            {periods.map(p => (
+              <button
+                key={p}
+                onClick={() => {
+                  setPeriod(p)
+                  setPage(1)
+                }}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all
+                  ${period === p
+                    ? 'text-white shadow-sm'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                style={period === p ? { backgroundColor: accentColor } : {}}
+              >
+                {periodLabels[p]}
+              </button>
+            ))}
+          </div>
+
+          {/* Custom date range */}
+          {period === 'personalizado' && (
+            <div className="flex flex-wrap gap-3 pt-1">
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-bold text-gray-400 uppercase tracking-widest whitespace-nowrap">Desde</label>
+                <input
+                  type="date"
+                  value={customFrom}
+                  onChange={e => {
+                    setCustomFrom(e.target.value)
+                    setPage(1)
+                  }}
+                  className="border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#C5A059] transition-colors"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-bold text-gray-400 uppercase tracking-widest whitespace-nowrap">Hasta</label>
+                <input
+                  type="date"
+                  value={customTo}
+                  onChange={e => {
+                    setCustomTo(e.target.value)
+                    setPage(1)
+                  }}
+                  className="border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#C5A059] transition-colors"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Search + Category filter */}
       <div className="flex flex-wrap gap-3">
@@ -489,8 +516,16 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                 <tr>
                   <td colSpan={5} className="text-center py-16">
                     <CalendarDays size={32} className="text-gray-200 mx-auto mb-3" />
-                    <p className="text-sm text-gray-400 font-medium">Sin registros para el período seleccionado</p>
-                    <p className="text-xs text-gray-300 mt-1">Prueba cambiando el filtro de fecha o categoría</p>
+                    <p className="text-sm text-gray-400 font-medium">
+                      {soloElDia
+                        ? 'Todavía no hay ningún ingreso registrado hoy'
+                        : 'Sin registros para el período seleccionado'}
+                    </p>
+                    <p className="text-xs text-gray-300 mt-1">
+                      {soloElDia
+                        ? 'Use el botón «Nuevo Ingreso» para anotar el primero'
+                        : 'Prueba cambiando el filtro de fecha o categoría'}
+                    </p>
                   </td>
                 </tr>
               ) : (

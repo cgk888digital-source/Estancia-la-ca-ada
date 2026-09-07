@@ -6,6 +6,7 @@ import { getMenu } from '../../utils/menuStore'
 import type { MenuSection, DishItem } from '../../data/weeklyMenu'
 import { buildTableLocations, roomLocations, getOrderingLocationUrl } from '../../data/orderingLocations'
 import { useHotelSettings } from '../../utils/useHotelSettings'
+import { fechaLocalISO } from '../../utils/dateUtils'
 
 interface OrderItem {
   name: string
@@ -305,7 +306,7 @@ const ComandasPage: React.FC = () => {
         description: `Consumo Restaurante - ${targetTable}`,
         amount: totalToPay,
         payment_method: checkoutPaymentMethod,
-        date: new Date().toISOString().substring(0, 10)
+        date: fechaLocalISO()
       })
 
     if (ingreso.error) {
