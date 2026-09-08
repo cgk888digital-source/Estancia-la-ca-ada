@@ -16,7 +16,7 @@ const navItems = [
   { to: '/admin/email-marketing', label: 'Email Marketing', icon: <Mail size={20} />, roles: ['propiedad', 'administracion'] },
   { to: '/admin/menu', label: 'Menú Restaurante', icon: <UtensilsCrossed size={20} />, roles: ['propiedad', 'restaurante'] },
   { to: '/admin/comandas', label: 'Comandas POS', icon: <ClipboardList size={20} />, roles: ['propiedad', 'restaurante'] },
-  { to: '/admin/empleados', label: 'Empleados & Nómina', icon: <Users size={20} />, roles: ['propiedad'] },
+  { to: '/admin/empleados', label: 'Empleados & Nómina', icon: <Users size={20} />, roles: ['propiedad', 'administracion'] },
   { to: '/admin/reportes', label: 'Reportes Analíticos', icon: <BarChart3 size={20} />, roles: ['propiedad'] },
   { to: '/admin/tarifas', label: 'Tarifas y Descuentos', icon: <DollarSign size={20} />, roles: ['propiedad'] },
 ]

@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { Plus, Check, X, UserCheck, UserX, DollarSign, Loader2, Users, Clock, Calendar, Receipt } from 'lucide-react'
+import { Plus, Check, X, UserCheck, UserX, DollarSign, Loader2, Users, Clock, Calendar, Receipt, Pencil, CheckSquare, Square, Coins } from 'lucide-react'
 import LoadErrorBanner from './LoadErrorBanner'
 import type { Employee } from '../types'
 import { supabase } from '../../lib/supabase'
 import { getBcvEuroRate } from '../../utils/exchangeRate'
 import { parseLocalDate } from '../../utils/dateUtils'
 import ReceiptModal from './ReceiptModal'
+import WeeklyTipsModal from './WeeklyTipsModal'
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
@@ -138,6 +139,7 @@ const EmployeesPage: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null)
   const [paidId, setPaidId] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [payEventualTarget, setPayEventualTarget] = useState<Employee | null>(null)
@@ -146,8 +148,14 @@ const EmployeesPage: React.FC = () => {
   const [receiptData, setReceiptData] = useState<{emp: Employee, amount: number, period: string, isHistory?: boolean, bcvRate?: number} | null>(null)
   const [bcvRate, setBcvRate] = useState<number>(36.50)
   
+  // Fondo y Reparto de Propinas
   const [globalTipsBalance, setGlobalTipsBalance] = useState<number>(0)
-  const [distributingTips, setDistributingTips] = useState(false)
+  const [showTipsModal, setShowTipsModal] = useState(false)
+
+  // Filtro de Frecuencia y Selección Múltiple para Nómina
+  const [frequencyFilter, setFrequencyFilter] = useState<'todas' | 'semanal' | 'quincenal' | 'por_dias'>('todas')
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [payingSelected, setPayingSelected] = useState(false)
 
   const [form, setForm] = useState({
     name: '',
@@ -174,7 +182,6 @@ const EmployeesPage: React.FC = () => {
       if (!active) return
 
       if (error) {
-        // Nunca rellenar con la plantilla de demostracion: se avisa y se deja vacio.
         console.error('Error fetching employees:', error)
         setLoadError(error.message)
       } else {
@@ -219,44 +226,34 @@ const EmployeesPage: React.FC = () => {
     const pendingFijosTotal = pendingFijos.reduce((s, e) => s + e.salary, 0)
     return { fijos, eventuales, activeFijos, activeEventuales, totalFijosPayroll, pendingFijos, pendingFijosTotal }
   }, [employees])
-  
-  const handleDistributeTips = async () => {
-    if (globalTipsBalance <= 0) return
-    const activeEmployees = employees.filter(e => e.status === 'activo')
-    if (activeEmployees.length === 0) {
-      alert("No hay empleados activos para repartir.")
-      return
-    }
 
-    const confirm = window.confirm(`¿Estás seguro de que deseas repartir $${globalTipsBalance} entre ${activeEmployees.length} empleados activos?`)
-    if (!confirm) return
+  // Filtrado por frecuencia
+  const filteredFijos = useMemo(() => {
+    return fijos.filter(e => {
+      if (frequencyFilter === 'todas') return true
+      return e.paymentFrequency === frequencyFilter
+    })
+  }, [fijos, frequencyFilter])
 
-    setDistributingTips(true)
-    
-    const amountPerEmployee = Number((globalTipsBalance / activeEmployees.length).toFixed(2))
-    const today = new Date().toISOString().split('T')[0]
-    
-    const transactionsToInsert = activeEmployees.map(emp => ({
-      date: today,
-      type: 'egreso',
-      category: 'propinas',
-      description: `Reparto Fondo de Propinas — ${emp.name} (Tasa BCV: ${bcvRate} Bs/€)`,
-      amount: amountPerEmployee,
-      payment_method: 'transferencia',
-      related_to: emp.name,
-    }))
+  const filteredEventuales = useMemo(() => {
+    return eventuales.filter(e => {
+      if (frequencyFilter === 'todas') return true
+      return e.paymentFrequency === frequencyFilter
+    })
+  }, [eventuales, frequencyFilter])
 
-    const { error } = await supabase.from('transactions').insert(transactionsToInsert)
-    
-    if (!error) {
-      setGlobalTipsBalance(prev => prev - (amountPerEmployee * activeEmployees.length))
-      alert(`Se han repartido $${amountPerEmployee} a cada empleado activo.`)
-    } else {
-      console.error(error)
-      alert("Hubo un error al registrar la repartición.")
-    }
-    setDistributingTips(false)
-  }
+  // Empleados seleccionados para pago
+  const selectedPendingEmployees = useMemo(() => {
+    return employees.filter(e => selectedIds.has(e.id) && e.status === 'activo' && e.pendingPayment)
+  }, [employees, selectedIds])
+
+  const totalSelectedPay = useMemo(() => {
+    return selectedPendingEmployees.reduce((sum, e) => {
+      if (e.employeeType === 'fijo') return sum + e.salary
+      const days = e.contractedDays || (e.paymentFrequency === 'semanal' ? 7 : 1)
+      return sum + (e.dailyRate * days)
+    }, 0)
+  }, [selectedPendingEmployees])
 
   // ── Pay fixed employee ────────────────────────────────────────────────────
   const handlePay = async (id: string) => {
@@ -272,11 +269,12 @@ const EmployeesPage: React.FC = () => {
     if (error) { console.error(error); setPaidId(null); return }
 
     if (emp) {
+      const periodLabel = emp.paymentFrequency === 'semanal' ? 'semanal' : 'quincenal'
       await supabase.from('transactions').insert([{
         date: today,
         type: 'egreso',
         category: 'empleados',
-        description: `Pago nómina fija — ${emp.name} (Tasa BCV: ${bcvRate} Bs/€)`,
+        description: `Pago nómina ${periodLabel} — ${emp.name} (Tasa BCV: ${bcvRate} Bs/€)`,
         amount: emp.salary,
         payment_method: 'transferencia',
         related_to: emp.name,
@@ -284,9 +282,68 @@ const EmployeesPage: React.FC = () => {
     }
 
     setEmployees(prev => prev.map(e => e.id === id ? { ...e, pendingPayment: false, lastPayment: today } : e))
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
     setPaidId(null)
     if (emp) {
-      setReceiptData({ emp, amount: emp.salary, period: 'Quincena' })
+      setReceiptData({ emp, amount: emp.salary, period: emp.paymentFrequency === 'semanal' ? 'Semana' : 'Quincena' })
+    }
+  }
+
+  // ── Pay Selected Employees ────────────────────────────────────────────────
+  const handlePaySelected = async () => {
+    if (selectedPendingEmployees.length === 0) return
+
+    const confirmMsg = `¿Deseas registrar el pago de nómina de ${selectedPendingEmployees.length} empleado(s) seleccionado(s) por un total de ${fmt(totalSelectedPay)}?`
+    if (!window.confirm(confirmMsg)) return
+
+    setPayingSelected(true)
+    const today = new Date().toISOString().split('T')[0]
+    const ids = selectedPendingEmployees.map(e => e.id)
+
+    const { error } = await supabase
+      .from('employees')
+      .update({ pending_payment: false, last_payment: today })
+      .in('id', ids)
+
+    if (error) {
+      console.error('Error al actualizar empleados:', error)
+      alert(`Hubo un error al actualizar el estado: ${error.message}`)
+      setPayingSelected(false)
+      return
+    }
+
+    const txs = selectedPendingEmployees.map(emp => {
+      const amount = emp.employeeType === 'fijo'
+        ? emp.salary
+        : emp.dailyRate * (emp.contractedDays || (emp.paymentFrequency === 'semanal' ? 7 : 1))
+      const periodLabel = emp.paymentFrequency === 'semanal' ? 'semanal' : emp.paymentFrequency === 'quincenal' ? 'quincenal' : 'por días'
+      return {
+        date: today,
+        type: 'egreso',
+        category: 'empleados',
+        description: `Pago nómina ${periodLabel} — ${emp.name} (Tasa BCV: ${bcvRate} Bs/€)`,
+        amount,
+        payment_method: 'transferencia',
+        related_to: emp.name,
+      }
+    })
+
+    await supabase.from('transactions').insert(txs)
+
+    setEmployees(prev => prev.map(e => ids.includes(e.id) ? { ...e, pendingPayment: false, lastPayment: today } : e))
+    setSelectedIds(new Set())
+    setPayingSelected(false)
+
+    if (selectedPendingEmployees.length === 1) {
+      const single = selectedPendingEmployees[0]
+      const amt = single.employeeType === 'fijo' ? single.salary : single.dailyRate * (single.contractedDays || 7)
+      setReceiptData({ emp: single, amount: amt, period: single.paymentFrequency === 'semanal' ? 'Semana' : 'Quincena' })
+    } else {
+      alert(`¡Se procesó exitosamente el pago de nómina de ${selectedPendingEmployees.length} empleados!`)
     }
   }
 
@@ -308,7 +365,7 @@ const EmployeesPage: React.FC = () => {
       date: today,
       type: 'egreso',
       category: 'empleados',
-      description: `Pago nómina fija — ${emp.name} (Tasa BCV: ${bcvRate} Bs/€)`,
+      description: `Pago nómina ${emp.paymentFrequency === 'semanal' ? 'semanal' : 'quincenal'} — ${emp.name} (Tasa BCV: ${bcvRate} Bs/€)`,
       amount: emp.salary,
       payment_method: 'transferencia',
       related_to: emp.name,
@@ -321,6 +378,7 @@ const EmployeesPage: React.FC = () => {
         : e
       )
     )
+    setSelectedIds(new Set())
   }
 
   // ── Pay eventual employee ─────────────────────────────────────────────────
@@ -341,7 +399,7 @@ const EmployeesPage: React.FC = () => {
       date: today,
       type: 'egreso',
       category: 'empleados',
-      description: `Pago eventual — ${emp.name} (${freqLabel} - Tasa BCV: ${bcvRate} Bs/€)`,
+      description: `Pago eventual (${freqLabel} - Tasa BCV: ${bcvRate} Bs/€) — ${emp.name}`,
       amount,
       payment_method: 'transferencia',
       related_to: emp.name,
@@ -373,7 +431,7 @@ const EmployeesPage: React.FC = () => {
     const matchRate = tx.description.match(/Tasa BCV: ([\d.]+) Bs\/\$/)
     const rate = matchRate ? Number(matchRate[1]) : bcvRate
     
-    let period = 'Quincena'
+    let period = emp.paymentFrequency === 'semanal' ? 'Semana' : 'Quincena'
     if (emp.employeeType === 'eventual') {
       const matchPeriod = tx.description.match(/\((.*?) - Tasa BCV/)
       if (matchPeriod) {
@@ -387,42 +445,132 @@ const EmployeesPage: React.FC = () => {
     setReceiptData({ emp, amount: tx.amount, period, isHistory: true, bcvRate: rate })
   }
 
-  // ── Save new employee ─────────────────────────────────────────────────────
+  // ── Open Modals ───────────────────────────────────────────────────────────
+  const handleOpenNew = () => {
+    setEditingEmployee(null)
+    setForm({
+      name: '',
+      role: '',
+      hireDate: new Date().toISOString().split('T')[0],
+      employeeType: activeTab === 'eventuales' ? 'eventual' : 'fijo',
+      salary: '',
+      paymentFrequency: 'quincenal',
+      dailyRate: '',
+      contractedDays: '',
+    })
+    setShowModal(true)
+  }
+
+  const handleOpenEdit = (emp: Employee) => {
+    setEditingEmployee(emp)
+    setForm({
+      name: emp.name,
+      role: emp.role,
+      hireDate: emp.hireDate || '',
+      employeeType: emp.employeeType,
+      salary: emp.salary ? String(emp.salary) : '',
+      paymentFrequency: emp.paymentFrequency,
+      dailyRate: emp.dailyRate ? String(emp.dailyRate) : '',
+      contractedDays: emp.contractedDays ? String(emp.contractedDays) : '',
+    })
+    setShowModal(true)
+  }
+
+  // ── Save/Update employee ──────────────────────────────────────────────────
   const handleSave = async () => {
     const isFijo = form.employeeType === 'fijo'
     if (!form.name || !form.role) return
     if (isFijo && !form.salary) return
     if (!isFijo && !form.dailyRate) return
 
-    const dbEmp = {
-      name: form.name,
-      role: form.role,
-      salary: isFijo ? Number(form.salary) : 0,
-      status: 'activo',
-      hire_date: form.hireDate || new Date().toISOString().split('T')[0],
-      last_payment: null,
-      pending_payment: isFijo,
-      employee_type: form.employeeType,
-      payment_frequency: isFijo ? 'quincenal' : form.paymentFrequency,
-      daily_rate: isFijo ? 0 : Number(form.dailyRate),
-      contracted_days: isFijo ? 0 : Number(form.contractedDays) || 0,
-    }
+    if (editingEmployee) {
+      // Modo Edición
+      const updatedDb = {
+        name: form.name,
+        role: form.role,
+        salary: isFijo ? Number(form.salary) : 0,
+        employee_type: form.employeeType,
+        payment_frequency: form.paymentFrequency,
+        daily_rate: isFijo ? 0 : Number(form.dailyRate),
+        contracted_days: isFijo ? 0 : Number(form.contractedDays) || 0,
+        hire_date: form.hireDate || editingEmployee.hireDate,
+      }
 
-    const { data, error } = await supabase.from('employees').insert([dbEmp]).select('*')
-    if (error) { console.error(error); return }
-    if (data && data[0]) {
-      setEmployees(prev => [mapDbEmployeeToReact(data[0]), ...prev])
+      const { data, error } = await supabase
+        .from('employees')
+        .update(updatedDb)
+        .eq('id', editingEmployee.id)
+        .select('*')
+
+      if (error) { console.error(error); alert(`Error al actualizar: ${error.message}`); return }
+      if (data && data[0]) {
+        setEmployees(prev => prev.map(e => e.id === editingEmployee.id ? mapDbEmployeeToReact(data[0]) : e))
+      }
+    } else {
+      // Modo Creación
+      const dbEmp = {
+        name: form.name,
+        role: form.role,
+        salary: isFijo ? Number(form.salary) : 0,
+        status: 'activo',
+        hire_date: form.hireDate || new Date().toISOString().split('T')[0],
+        last_payment: null,
+        pending_payment: true,
+        employee_type: form.employeeType,
+        payment_frequency: form.paymentFrequency,
+        daily_rate: isFijo ? 0 : Number(form.dailyRate),
+        contracted_days: isFijo ? 0 : Number(form.contractedDays) || 0,
+      }
+
+      const { data, error } = await supabase.from('employees').insert([dbEmp]).select('*')
+      if (error) { console.error(error); alert(`Error al crear: ${error.message}`); return }
+      if (data && data[0]) {
+        setEmployees(prev => [mapDbEmployeeToReact(data[0]), ...prev])
+      }
     }
 
     setSaved(true)
     setTimeout(() => {
       setSaved(false)
       setShowModal(false)
-      setForm({ name: '', role: '', hireDate: '', employeeType: 'fijo', salary: '', paymentFrequency: 'quincenal', dailyRate: '', contractedDays: '' })
-    }, 1200)
+      setEditingEmployee(null)
+    }, 900)
   }
 
   const isFormValid = form.name && form.role && (form.employeeType === 'fijo' ? !!form.salary : !!form.dailyRate)
+
+  // Toggle selection
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // Toggle all pending in current view
+  const currentPendingList = activeTab === 'fijos'
+    ? filteredFijos.filter(e => e.status === 'activo' && e.pendingPayment)
+    : filteredEventuales.filter(e => e.status === 'activo' && e.pendingPayment)
+
+  const isAllPendingSelected = currentPendingList.length > 0 && currentPendingList.every(e => selectedIds.has(e.id))
+
+  const handleToggleSelectAll = () => {
+    if (isAllPendingSelected) {
+      setSelectedIds(prev => {
+        const next = new Set(prev)
+        currentPendingList.forEach(e => next.delete(e.id))
+        return next
+      })
+    } else {
+      setSelectedIds(prev => {
+        const next = new Set(prev)
+        currentPendingList.forEach(e => next.add(e.id))
+        return next
+      })
+    }
+  }
 
   if (loading) {
     return (
@@ -436,89 +584,147 @@ const EmployeesPage: React.FC = () => {
   return (
     <div className="space-y-6">
       <LoadErrorBanner message={loadError} />
+      
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Nómina y Empleados</h1>
           <p className="text-sm text-gray-500 mt-1">
-            {activeFijos.length} fijos · {activeEventuales.length} eventuales
+            {activeFijos.length} fijos · {activeEventuales.length} eventuales · Tasa BCV: <strong>{bcvRate} Bs/€</strong>
           </p>
         </div>
         <button
-          onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-[#3D2B1F] hover:bg-[#2a1d14] text-white rounded-xl text-sm font-bold transition-all shadow-sm"
+          onClick={handleOpenNew}
+          className="flex items-center gap-2 px-4 py-2.5 bg-[#3D2B1F] hover:bg-[#2a1d14] text-white rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95"
         >
           <Plus size={16} />
           Nuevo Empleado
         </button>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1 flex items-center gap-1"><Users size={11} /> Fijos Activos</p>
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1 flex items-center gap-1"><Users size={11} /> Fijos</p>
           <p className="text-2xl font-bold text-gray-900">{activeFijos.length}</p>
-          <p className="text-xs text-gray-400 mt-1">Nómina: {fmt(totalFijosPayroll)}/quincena</p>
+          <p className="text-xs text-gray-400 mt-1">Nómina base: {fmt(totalFijosPayroll)}</p>
         </div>
+        
         <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1 flex items-center gap-1"><Clock size={11} /> Eventuales</p>
           <p className="text-2xl font-bold text-gray-900">{activeEventuales.length}</p>
-          <p className="text-xs text-gray-400 mt-1">activos</p>
+          <p className="text-xs text-gray-400 mt-1">activos contratados</p>
         </div>
+
         <div className="bg-amber-50 rounded-2xl p-5 border border-amber-100 shadow-sm">
           <p className="text-xs font-bold text-amber-600 uppercase tracking-widest mb-1">Sueldos Pendientes</p>
           <p className="text-2xl font-bold text-amber-700">{pendingFijos.length}</p>
           <p className="text-xs text-amber-500 mt-1">{fmt(pendingFijosTotal)}</p>
         </div>
+
         <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm flex flex-col justify-between">
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Pagar Todos (Fijos)</p>
           <button
             onClick={handlePayAll}
             disabled={pendingFijos.length === 0}
-            className={`mt-2 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all
+            className={`mt-2 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all justify-center
               ${pendingFijos.length > 0 ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-sm' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
           >
             <DollarSign size={15} />
             Pagar Todo
           </button>
         </div>
+
+        {/* Fondo de Propinas con Modal Semanal */}
         <div className="bg-emerald-50 rounded-2xl p-5 border border-emerald-100 shadow-sm flex flex-col justify-between">
           <div>
-            <p className="text-xs font-bold text-emerald-600 uppercase tracking-widest mb-1">Fondo de Propinas</p>
+            <p className="text-xs font-bold text-emerald-600 uppercase tracking-widest mb-1 flex items-center gap-1">
+              <Coins size={12} /> Fondo de Propinas
+            </p>
             <p className="text-2xl font-bold text-emerald-700">{fmt(globalTipsBalance)}</p>
           </div>
           <button
-            onClick={handleDistributeTips}
-            disabled={globalTipsBalance <= 0 || distributingTips}
-            className={`mt-2 flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold transition-all w-full justify-center
-              ${globalTipsBalance > 0 && !distributingTips ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm' : 'bg-emerald-200/50 text-emerald-500 cursor-not-allowed'}`}
+            onClick={() => setShowTipsModal(true)}
+            className="mt-2 flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold transition-all w-full justify-center bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white shadow-sm"
           >
-            {distributingTips ? <Loader2 size={14} className="animate-spin" /> : <DollarSign size={14} />}
-            Repartir a Todos
+            <Coins size={14} />
+            Reparto Semanal
           </button>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-2xl p-1 w-fit">
-        <button
-          onClick={() => setActiveTab('fijos')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === 'fijos' ? 'bg-white shadow-sm text-[#3D2B1F]' : 'text-gray-500 hover:text-gray-700'}`}
-        >
-          <Users size={15} />
-          Empleados Fijos
-          {pendingFijos.length > 0 && (
-            <span className="bg-amber-500 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-full">{pendingFijos.length}</span>
-          )}
-        </button>
-        <button
-          onClick={() => setActiveTab('eventuales')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === 'eventuales' ? 'bg-white shadow-sm text-[#3D2B1F]' : 'text-gray-500 hover:text-gray-700'}`}
-        >
-          <Clock size={15} />
-          Eventuales
-        </button>
+      {/* Tabs & Frequency Filter Bar */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        {/* Tab Fijos vs Eventuales */}
+        <div className="flex gap-1 bg-gray-100 rounded-2xl p-1 w-fit">
+          <button
+            onClick={() => { setActiveTab('fijos'); setSelectedIds(new Set()) }}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === 'fijos' ? 'bg-white shadow-sm text-[#3D2B1F]' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <Users size={15} />
+            Empleados Fijos
+            {pendingFijos.length > 0 && (
+              <span className="bg-amber-500 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-full">{pendingFijos.length}</span>
+            )}
+          </button>
+          <button
+            onClick={() => { setActiveTab('eventuales'); setSelectedIds(new Set()) }}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === 'eventuales' ? 'bg-white shadow-sm text-[#3D2B1F]' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <Clock size={15} />
+            Eventuales
+          </button>
+        </div>
+
+        {/* Frecuencia de Pago Filter */}
+        <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-2xl p-1">
+          <span className="text-xs text-gray-400 font-bold px-2 uppercase tracking-wider hidden md:inline">Frecuencia:</span>
+          {(['todas', 'semanal', 'quincenal'] as const).map(freq => (
+            <button
+              key={freq}
+              onClick={() => setFrequencyFilter(freq)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all capitalize ${
+                frequencyFilter === freq
+                  ? 'bg-[#3D2B1F] text-white shadow-sm'
+                  : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              {freq === 'todas' ? 'Todas' : freq === 'semanal' ? '🗓 Semanal' : '📅 Quincenal'}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {/* Floating Action Bar for Selected Employees */}
+      {selectedPendingEmployees.length > 0 && (
+        <div className="bg-violet-900 text-white p-4 px-6 rounded-2xl shadow-xl flex items-center justify-between gap-4 flex-wrap animate-in fade-in slide-in-from-bottom-2">
+          <div className="flex items-center gap-3">
+            <div className="bg-violet-800 text-violet-200 px-3 py-1 rounded-xl text-xs font-bold">
+              {selectedPendingEmployees.length} seleccionado{selectedPendingEmployees.length !== 1 ? 's' : ''}
+            </div>
+            <span className="text-sm font-medium text-violet-100">
+              Total a pagar: <strong className="text-white text-base font-bold">{fmt(totalSelectedPay)}</strong>
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="px-3 py-1.5 text-xs text-violet-300 hover:text-white transition-colors font-medium"
+            >
+              Deseleccionar
+            </button>
+            <button
+              onClick={handlePaySelected}
+              disabled={payingSelected}
+              className="flex items-center gap-2 px-5 py-2.5 bg-white text-violet-950 hover:bg-violet-50 rounded-xl text-xs font-bold shadow-md transition-all active:scale-95 disabled:opacity-50"
+            >
+              {payingSelected ? <Loader2 size={14} className="animate-spin" /> : <DollarSign size={14} />}
+              Pagar Seleccionados ({selectedPendingEmployees.length})
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── FIJOS TABLE ── */}
       {activeTab === 'fijos' && (
@@ -527,76 +733,156 @@ const EmployeesPage: React.FC = () => {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-6 py-4">Empleado</th>
+                  <th className="w-12 px-4 py-4 text-center">
+                    <button
+                      type="button"
+                      onClick={handleToggleSelectAll}
+                      disabled={currentPendingList.length === 0}
+                      className="text-gray-400 hover:text-violet-600 disabled:opacity-30 transition-colors"
+                      title={isAllPendingSelected ? "Deseleccionar pendientes" : "Seleccionar todos los pendientes"}
+                    >
+                      {isAllPendingSelected ? (
+                        <CheckSquare size={18} className="text-violet-600" />
+                      ) : (
+                        <Square size={18} />
+                      )}
+                    </button>
+                  </th>
+                  <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4">Empleado</th>
                   <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4 hidden sm:table-cell">Cargo</th>
+                  <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4">Modalidad</th>
                   <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4 hidden lg:table-cell">Último Pago</th>
                   <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4">Estado</th>
-                  <th className="text-right text-xs font-bold text-gray-400 uppercase tracking-widest px-6 py-4">Sueldo / Propinas</th>
-                  <th className="px-4 py-4" />
+                  <th className="text-right text-xs font-bold text-gray-400 uppercase tracking-widest px-6 py-4">Sueldo Base</th>
+                  <th className="px-4 py-4 text-right">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {fijos.length === 0 ? (
-                  <tr><td colSpan={6} className="text-center py-16 text-sm text-gray-400">No hay empleados fijos registrados</td></tr>
-                ) : fijos.map(emp => (
-                  <tr key={emp.id} className={`hover:bg-gray-50 transition-colors ${emp.status === 'inactivo' ? 'opacity-50' : ''}`}>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-[#C5A059]/15 text-[#C5A059] flex items-center justify-center font-bold text-sm shrink-0">
-                          {emp.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-gray-900">{emp.name}</p>
-                          <p className="text-xs text-gray-400 sm:hidden">{emp.role}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 hidden sm:table-cell"><span className="text-sm text-gray-600">{emp.role}</span></td>
-                    <td className="px-4 py-4 hidden lg:table-cell">
-                      {emp.lastPayment ? (
-                        <button
-                          onClick={() => handleViewLastReceipt(emp)}
-                          className="group flex items-center gap-1.5 px-2 py-1 -ml-2 rounded-lg hover:bg-gray-100 transition-colors"
-                          title="Ver recibo de pago"
-                        >
-                          <Receipt size={14} className="text-gray-400 group-hover:text-[#C5A059]" />
-                          <span className="text-sm text-gray-500 group-hover:text-gray-900 font-medium">
-                            {parseLocalDate(emp.lastPayment).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })}
-                          </span>
-                        </button>
-                      ) : (
-                        <span className="text-sm text-gray-500">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-4">
-                      {emp.status === 'inactivo' ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 text-gray-500 rounded-lg text-xs font-bold"><UserX size={12} /> Inactivo</span>
-                      ) : emp.pendingPayment ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold"><DollarSign size={12} /> Pendiente</span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold"><UserCheck size={12} /> Pagado</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex flex-col items-end">
-                        <span className="text-sm font-bold text-gray-900">{fmt(emp.salary)}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 text-right">
-                      <div className="flex justify-end gap-2">
-                        {emp.status === 'activo' && emp.pendingPayment && (
-                          <button
-                            onClick={() => handlePay(emp.id)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all
-                              ${paidId === emp.id ? 'bg-emerald-500 text-white' : 'bg-violet-100 text-violet-700 hover:bg-violet-600 hover:text-white'}`}
-                          >
-                            {paidId === emp.id ? <Check size={14} /> : 'Pagar Nómina'}
-                          </button>
-                        )}
-                      </div>
+                {filteredFijos.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="text-center py-16 text-sm text-gray-400">
+                      No hay empleados fijos con el filtro seleccionado
                     </td>
                   </tr>
-                ))}
+                ) : filteredFijos.map(emp => {
+                  const isSelected = selectedIds.has(emp.id)
+                  const isSelectable = emp.status === 'activo' && emp.pendingPayment
+
+                  return (
+                    <tr
+                      key={emp.id}
+                      className={`hover:bg-gray-50/80 transition-colors ${
+                        emp.status === 'inactivo' ? 'opacity-50' : ''
+                      } ${isSelected ? 'bg-violet-50/40' : ''}`}
+                    >
+                      {/* Checkbox de selección */}
+                      <td className="w-12 px-4 py-4 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSelect(emp.id)}
+                          disabled={!isSelectable}
+                          className="disabled:opacity-20 text-gray-400 hover:text-violet-600 transition-colors"
+                        >
+                          {isSelected ? (
+                            <CheckSquare size={18} className="text-violet-600" />
+                          ) : (
+                            <Square size={18} />
+                          )}
+                        </button>
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-[#C5A059]/15 text-[#C5A059] flex items-center justify-center font-bold text-sm shrink-0">
+                            {emp.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-gray-900">{emp.name}</p>
+                            <p className="text-xs text-gray-400 sm:hidden">{emp.role}</p>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-4 hidden sm:table-cell">
+                        <span className="text-sm text-gray-600">{emp.role}</span>
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold ${
+                          emp.paymentFrequency === 'semanal'
+                            ? 'bg-blue-50 text-blue-700 border border-blue-100'
+                            : 'bg-amber-50 text-amber-800 border border-amber-100'
+                        }`}>
+                          {emp.paymentFrequency === 'semanal' ? <Calendar size={11} /> : <Clock size={11} />}
+                          {FREQ_LABELS[emp.paymentFrequency] || emp.paymentFrequency}
+                        </span>
+                      </td>
+
+                      <td className="px-4 py-4 hidden lg:table-cell">
+                        {emp.lastPayment ? (
+                          <button
+                            onClick={() => handleViewLastReceipt(emp)}
+                            className="group flex items-center gap-1.5 px-2 py-1 -ml-2 rounded-lg hover:bg-gray-100 transition-colors"
+                            title="Ver recibo de pago"
+                          >
+                            <Receipt size={14} className="text-gray-400 group-hover:text-[#C5A059]" />
+                            <span className="text-sm text-gray-500 group-hover:text-gray-900 font-medium">
+                              {parseLocalDate(emp.lastPayment).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })}
+                            </span>
+                          </button>
+                        ) : (
+                          <span className="text-sm text-gray-400">—</span>
+                        )}
+                      </td>
+
+                      <td className="px-4 py-4">
+                        {emp.status === 'inactivo' ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 text-gray-500 rounded-lg text-xs font-bold">
+                            <UserX size={12} /> Inactivo
+                          </span>
+                        ) : emp.pendingPayment ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold">
+                            <DollarSign size={12} /> Pendiente
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold">
+                            <UserCheck size={12} /> Pagado
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="px-6 py-4 text-right">
+                        <span className="text-sm font-bold text-gray-900">{fmt(emp.salary)}</span>
+                        <p className="text-[10px] text-gray-400">/{emp.paymentFrequency === 'semanal' ? 'sem' : 'quinc'}</p>
+                      </td>
+
+                      <td className="px-4 py-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleOpenEdit(emp)}
+                            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                            title="Editar empleado y frecuencia"
+                          >
+                            <Pencil size={14} />
+                          </button>
+
+                          {emp.status === 'activo' && emp.pendingPayment && (
+                            <button
+                              onClick={() => handlePay(emp.id)}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                paidId === emp.id
+                                  ? 'bg-emerald-500 text-white'
+                                  : 'bg-violet-100 text-violet-700 hover:bg-violet-600 hover:text-white'
+                              }`}
+                            >
+                              {paidId === emp.id ? <Check size={14} /> : 'Pagar'}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -610,78 +896,155 @@ const EmployeesPage: React.FC = () => {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-6 py-4">Empleado</th>
+                  <th className="w-12 px-4 py-4 text-center">
+                    <button
+                      type="button"
+                      onClick={handleToggleSelectAll}
+                      disabled={currentPendingList.length === 0}
+                      className="text-gray-400 hover:text-violet-600 disabled:opacity-30 transition-colors"
+                      title={isAllPendingSelected ? "Deseleccionar pendientes" : "Seleccionar todos los pendientes"}
+                    >
+                      {isAllPendingSelected ? (
+                        <CheckSquare size={18} className="text-violet-600" />
+                      ) : (
+                        <Square size={18} />
+                      )}
+                    </button>
+                  </th>
+                  <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4">Empleado</th>
                   <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4 hidden sm:table-cell">Cargo</th>
                   <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4">Modalidad</th>
                   <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4 hidden md:table-cell">Días Contrato</th>
-                  <th className="text-right text-xs font-bold text-gray-400 uppercase tracking-widest px-6 py-4">Tarifa/Día / Propinas</th>
+                  <th className="text-right text-xs font-bold text-gray-400 uppercase tracking-widest px-6 py-4">Tarifa / Día</th>
                   <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4 hidden lg:table-cell">Último Pago</th>
-                  <th className="px-4 py-4" />
+                  <th className="px-4 py-4 text-right">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {eventuales.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center py-16 text-sm text-gray-400">No hay empleados eventuales registrados</td></tr>
-                ) : eventuales.map(emp => (
-                  <tr key={emp.id} className={`hover:bg-gray-50 transition-colors ${emp.status === 'inactivo' ? 'opacity-50' : ''}`}>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-[#5D6346]/15 text-[#5D6346] flex items-center justify-center font-bold text-sm shrink-0">
-                          {emp.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-gray-900">{emp.name}</p>
-                          <p className="text-xs text-gray-400 sm:hidden">{emp.role}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 hidden sm:table-cell"><span className="text-sm text-gray-600">{emp.role}</span></td>
-                    <td className="px-4 py-4">
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold
-                        ${emp.paymentFrequency === 'semanal' ? 'bg-blue-50 text-blue-700' : 'bg-orange-50 text-orange-700'}`}>
-                        {emp.paymentFrequency === 'semanal' ? <Calendar size={11} /> : <Clock size={11} />}
-                        {FREQ_LABELS[emp.paymentFrequency]}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4 hidden md:table-cell">
-                      <span className="text-sm text-gray-600">
-                        {emp.contractedDays > 0 ? `${emp.contractedDays} días` : '—'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right"><span className="text-sm font-bold text-gray-900">{fmt(emp.dailyRate)}</span></td>
-                    <td className="px-4 py-4 hidden lg:table-cell">
-                      {emp.lastPayment ? (
-                        <button
-                          onClick={() => handleViewLastReceipt(emp)}
-                          className="group flex items-center gap-1.5 px-2 py-1 -ml-2 rounded-lg hover:bg-gray-100 transition-colors"
-                          title="Ver recibo de pago"
-                        >
-                          <Receipt size={14} className="text-gray-400 group-hover:text-[#C5A059]" />
-                          <span className="text-sm text-gray-500 group-hover:text-gray-900 font-medium">
-                            {parseLocalDate(emp.lastPayment).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })}
-                          </span>
-                        </button>
-                      ) : (
-                        <span className="text-sm text-gray-500">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-4 text-right">
-                      {emp.status === 'activo' && (
-                        <button
-                          onClick={() => setPayEventualTarget(emp)}
-                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#C5A059]/10 text-[#3D2B1F] hover:bg-[#C5A059] hover:text-white transition-all"
-                        >
-                          Registrar Pago
-                        </button>
-                      )}
+                {filteredEventuales.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="text-center py-16 text-sm text-gray-400">
+                      No hay empleados eventuales con el filtro seleccionado
                     </td>
                   </tr>
-                ))}
+                ) : filteredEventuales.map(emp => {
+                  const isSelected = selectedIds.has(emp.id)
+                  const isSelectable = emp.status === 'activo' && emp.pendingPayment
+
+                  return (
+                    <tr
+                      key={emp.id}
+                      className={`hover:bg-gray-50/80 transition-colors ${
+                        emp.status === 'inactivo' ? 'opacity-50' : ''
+                      } ${isSelected ? 'bg-violet-50/40' : ''}`}
+                    >
+                      <td className="w-12 px-4 py-4 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSelect(emp.id)}
+                          disabled={!isSelectable}
+                          className="disabled:opacity-20 text-gray-400 hover:text-violet-600 transition-colors"
+                        >
+                          {isSelected ? (
+                            <CheckSquare size={18} className="text-violet-600" />
+                          ) : (
+                            <Square size={18} />
+                          )}
+                        </button>
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-[#5D6346]/15 text-[#5D6346] flex items-center justify-center font-bold text-sm shrink-0">
+                            {emp.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-gray-900">{emp.name}</p>
+                            <p className="text-xs text-gray-400 sm:hidden">{emp.role}</p>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-4 hidden sm:table-cell">
+                        <span className="text-sm text-gray-600">{emp.role}</span>
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold ${
+                          emp.paymentFrequency === 'semanal' ? 'bg-blue-50 text-blue-700' : 'bg-orange-50 text-orange-700'
+                        }`}>
+                          {emp.paymentFrequency === 'semanal' ? <Calendar size={11} /> : <Clock size={11} />}
+                          {FREQ_LABELS[emp.paymentFrequency] || emp.paymentFrequency}
+                        </span>
+                      </td>
+
+                      <td className="px-4 py-4 hidden md:table-cell">
+                        <span className="text-sm text-gray-600">
+                          {emp.contractedDays > 0 ? `${emp.contractedDays} días` : '—'}
+                        </span>
+                      </td>
+
+                      <td className="px-6 py-4 text-right">
+                        <span className="text-sm font-bold text-gray-900">{fmt(emp.dailyRate)}</span>
+                      </td>
+
+                      <td className="px-4 py-4 hidden lg:table-cell">
+                        {emp.lastPayment ? (
+                          <button
+                            onClick={() => handleViewLastReceipt(emp)}
+                            className="group flex items-center gap-1.5 px-2 py-1 -ml-2 rounded-lg hover:bg-gray-100 transition-colors"
+                            title="Ver recibo de pago"
+                          >
+                            <Receipt size={14} className="text-gray-400 group-hover:text-[#C5A059]" />
+                            <span className="text-sm text-gray-500 group-hover:text-gray-900 font-medium">
+                              {parseLocalDate(emp.lastPayment).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })}
+                            </span>
+                          </button>
+                        ) : (
+                          <span className="text-sm text-gray-400">—</span>
+                        )}
+                      </td>
+
+                      <td className="px-4 py-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleOpenEdit(emp)}
+                            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                            title="Editar empleado y frecuencia"
+                          >
+                            <Pencil size={14} />
+                          </button>
+
+                          {emp.status === 'activo' && (
+                            <button
+                              onClick={() => setPayEventualTarget(emp)}
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#C5A059]/10 text-[#3D2B1F] hover:bg-[#C5A059] hover:text-white transition-all"
+                            >
+                              Registrar Pago
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
         </div>
       )}
+
+      {/* ── Modal de Reparto Semanal de Propinas ── */}
+      <WeeklyTipsModal
+        isOpen={showTipsModal}
+        onClose={() => setShowTipsModal(false)}
+        employees={employees}
+        globalTipsBalance={globalTipsBalance}
+        bcvRate={bcvRate}
+        onDistributed={(distributedTotal) => {
+          setGlobalTipsBalance(prev => Math.max(0, prev - distributedTotal))
+        }}
+      />
 
       {/* ── Pay Eventual Modal ── */}
       {payEventualTarget && (
@@ -705,12 +1068,14 @@ const EmployeesPage: React.FC = () => {
         />
       )}
 
-      {/* ── Modal Nuevo Empleado ── */}
+      {/* ── Modal Crear / Editar Empleado ── */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 space-y-5 max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-gray-900">Nuevo Empleado</h2>
+              <h2 className="text-lg font-bold text-gray-900">
+                {editingEmployee ? 'Editar Empleado' : 'Nuevo Empleado'}
+              </h2>
               <button onClick={() => setShowModal(false)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
                 <X size={18} className="text-gray-500" />
               </button>
@@ -733,33 +1098,79 @@ const EmployeesPage: React.FC = () => {
             <div className="space-y-4">
               <div>
                 <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Nombre Completo</label>
-                <input type="text" placeholder="Nombre y apellido" value={form.name}
+                <input
+                  type="text"
+                  placeholder="Nombre y apellido"
+                  value={form.name}
                   onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]" />
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]"
+                />
               </div>
+
               <div>
                 <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Cargo</label>
-                <input type="text" placeholder="Cargo o función" value={form.role}
+                <input
+                  type="text"
+                  placeholder="Cargo o función"
+                  value={form.role}
                   onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]" />
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]"
+                />
               </div>
 
               {/* Fijo fields */}
               {form.employeeType === 'fijo' && (
-                <div className="grid grid-cols-2 gap-3">
+                <>
                   <div>
-                    <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Sueldo Quincenal ($)</label>
-                    <input type="number" placeholder="0" value={form.salary}
-                      onChange={e => setForm(f => ({ ...f, salary: e.target.value }))}
-                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]" />
+                    <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 block">
+                      Frecuencia de Pago (Nómina)
+                    </label>
+                    <div className="flex gap-2">
+                      {(['semanal', 'quincenal', 'mensual'] as const).map(freq => (
+                        <button
+                          key={freq}
+                          type="button"
+                          onClick={() => setForm(f => ({ ...f, paymentFrequency: freq }))}
+                          className={`flex-1 py-2.5 rounded-xl text-xs font-bold border transition-all ${
+                            form.paymentFrequency === freq
+                              ? 'bg-[#3D2B1F] text-white border-[#3D2B1F]'
+                              : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                          }`}
+                        >
+                          {freq === 'semanal' ? '🗓 Semanal' : freq === 'quincenal' ? '📅 Quincenal' : '📆 Mensual'}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Fecha de Ingreso</label>
-                    <input type="date" value={form.hireDate}
-                      onChange={e => setForm(f => ({ ...f, hireDate: e.target.value }))}
-                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]" />
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">
+                        {form.paymentFrequency === 'semanal'
+                          ? 'Sueldo Semanal ($)'
+                          : form.paymentFrequency === 'mensual'
+                          ? 'Sueldo Mensual ($)'
+                          : 'Sueldo Quincenal ($)'}
+                      </label>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={form.salary}
+                        onChange={e => setForm(f => ({ ...f, salary: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Fecha de Ingreso</label>
+                      <input
+                        type="date"
+                        value={form.hireDate}
+                        onChange={e => setForm(f => ({ ...f, hireDate: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]"
+                      />
+                    </div>
                   </div>
-                </div>
+                </>
               )}
 
               {/* Eventual fields */}
@@ -768,13 +1179,18 @@ const EmployeesPage: React.FC = () => {
                   <div>
                     <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 block">Modalidad de Pago</label>
                     <div className="flex gap-2">
-                      {(['semanal', 'por_dias'] as const).map(freq => (
-                        <button key={freq}
+                      {(['semanal', 'quincenal', 'por_dias'] as const).map(freq => (
+                        <button
+                          key={freq}
+                          type="button"
                           onClick={() => setForm(f => ({ ...f, paymentFrequency: freq }))}
-                          className={`flex-1 py-2.5 rounded-xl text-sm font-bold border transition-all
-                            ${form.paymentFrequency === freq ? 'bg-[#3D2B1F] text-white border-[#3D2B1F]' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}
+                          className={`flex-1 py-2.5 rounded-xl text-xs font-bold border transition-all ${
+                            form.paymentFrequency === freq
+                              ? 'bg-[#3D2B1F] text-white border-[#3D2B1F]'
+                              : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                          }`}
                         >
-                          {freq === 'semanal' ? '🗓 Semanal' : '📅 Por Días'}
+                          {freq === 'semanal' ? '🗓 Semanal' : freq === 'quincenal' ? '📅 Quincenal' : '⏱ Por Días'}
                         </button>
                       ))}
                     </div>
@@ -783,15 +1199,23 @@ const EmployeesPage: React.FC = () => {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Tarifa por Día ($)</label>
-                      <input type="number" placeholder="0" value={form.dailyRate}
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={form.dailyRate}
                         onChange={e => setForm(f => ({ ...f, dailyRate: e.target.value }))}
-                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]" />
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]"
+                      />
                     </div>
                     <div>
                       <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Días Contratado</label>
-                      <input type="number" placeholder="0" value={form.contractedDays}
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={form.contractedDays}
                         onChange={e => setForm(f => ({ ...f, contractedDays: e.target.value }))}
-                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]" />
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]"
+                      />
                     </div>
                   </div>
 
@@ -811,9 +1235,12 @@ const EmployeesPage: React.FC = () => {
 
                   <div>
                     <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Fecha de Ingreso</label>
-                    <input type="date" value={form.hireDate}
+                    <input
+                      type="date"
+                      value={form.hireDate}
                       onChange={e => setForm(f => ({ ...f, hireDate: e.target.value }))}
-                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]" />
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]"
+                    />
                   </div>
                 </>
               )}
@@ -825,9 +1252,15 @@ const EmployeesPage: React.FC = () => {
               className={`w-full py-3.5 rounded-2xl font-bold text-sm transition-all flex items-center justify-center gap-2
                 ${saved ? 'bg-emerald-500 text-white'
                   : !isFormValid ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                  : 'bg-[#3D2B1F] hover:bg-[#2a1d14] text-white shadow-lg'}`}
+                  : 'bg-[#3D2B1F] hover:bg-[#2a1d14] text-white shadow-lg active:scale-95'}`}
             >
-              {saved ? <><Check size={16} /> Empleado Agregado</> : 'Guardar Empleado'}
+              {saved ? (
+                <>
+                  <Check size={16} /> {editingEmployee ? 'Empleado Actualizado' : 'Empleado Guardado'}
+                </>
+              ) : (
+                editingEmployee ? 'Guardar Cambios' : 'Registrar Empleado'
+              )}
             </button>
           </div>
         </div>

@@ -10,6 +10,7 @@ import { supabase } from '../lib/supabase'
 import type { DishItem } from '../data/weeklyMenu'
 import { buildTableLocations, roomLocations } from '../data/orderingLocations'
 import { useHotelSettings } from '../utils/useHotelSettings'
+import { getBcvEuroRate } from '../utils/exchangeRate'
 
 const galleryPlatos = [
   { src: '/assets/restaurante/platos/ceviche.png',          label: 'Ceviche del Día' },
@@ -62,12 +63,23 @@ const RestaurantMenu: React.FC<{
     }
   }, [tableId])
 
+  const [guestRoom, setGuestRoom] = useState<string>(() => {
+    return localStorage.getItem('estancia_guest_room') || ''
+  })
+
   const [isCartOpen, setIsCartOpen] = useState(false)
   const [tableOrders, setTableOrders] = useState<any[]>([])
   const [isBillOpen, setIsBillOpen] = useState(false)
   const [fetchingBill, setFetchingBill] = useState(false)
   const [placingOrder, setPlacingOrder] = useState(false)
   const [orderSuccess, setOrderSuccess] = useState(false)
+  const [bcvRate, setBcvRate] = useState<number>(36.50)
+
+  useEffect(() => {
+    getBcvEuroRate().then(rate => {
+      if (rate > 0) setBcvRate(rate)
+    })
+  }, [])
 
   const fetchTableOrders = useCallback(async () => {
     if (!selectedTable) return
@@ -176,6 +188,8 @@ const RestaurantMenu: React.FC<{
       notes: item.notes || null
     }))
     
+    const assignedRoom = activeTable.startsWith('Mesa') ? (guestRoom || null) : activeTable
+
     const localOrder = {
       id: 'cmd_' + Date.now(),
       table_id: activeTable,
@@ -183,6 +197,7 @@ const RestaurantMenu: React.FC<{
       total_amount: totalAmount,
       status: 'preparando',
       payment_status: 'pendiente',
+      room_id: assignedRoom,
       created_at: new Date().toISOString()
     }
 
@@ -212,7 +227,8 @@ const RestaurantMenu: React.FC<{
           items: orderItems,
           total_amount: totalAmount,
           status: 'preparando',
-          payment_status: 'pendiente'
+          payment_status: 'pendiente',
+          room_id: assignedRoom
         })
         .select()
 
@@ -495,12 +511,12 @@ const RestaurantMenu: React.FC<{
         </div>
 
         {/* Tabs */}
-        <div className="flex bg-white p-1 rounded-2xl shadow-sm border border-brand-primary/5 mb-6">
+        <div className="flex bg-white p-1 rounded-2xl shadow-sm border border-brand-primary/5 mb-6 overflow-x-auto scrollbar-none gap-1">
           {menu.map(section => (
             <button
               key={section.id}
               onClick={() => setActiveTab(section.id)}
-              className={`flex-1 py-2.5 rounded-xl text-[10px] uppercase tracking-widest font-bold transition-all ${
+              className={`flex-1 min-w-fit px-3.5 py-2.5 rounded-xl text-[10px] uppercase tracking-widest font-bold transition-all whitespace-nowrap ${
                 activeTab === section.id
                   ? 'bg-brand-wood text-white shadow-lg'
                   : 'text-brand-primary/50 hover:text-brand-primary'
@@ -743,6 +759,36 @@ const RestaurantMenu: React.FC<{
                 ))}
               </div>
 
+              {/* Room linkage for restaurant tables */}
+              {selectedTable.startsWith('Mesa') && (
+                <div className="bg-white p-3 rounded-2xl border border-brand-primary/10 shadow-sm space-y-1.5 flex-none">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-brand-wood flex items-center gap-1">
+                      🏨 ¿Huésped del Hotel? (Opcional)
+                    </label>
+                    <span className="text-[9px] text-[#C5A059] font-bold">Cargar a cuenta</span>
+                  </div>
+                  <select
+                    value={guestRoom}
+                    onChange={e => {
+                      setGuestRoom(e.target.value)
+                      localStorage.setItem('estancia_guest_room', e.target.value)
+                    }}
+                    className="w-full bg-brand-neutral border border-brand-primary/10 rounded-xl px-3 py-2 text-xs font-bold text-brand-primary focus:outline-none focus:border-[#C5A059]"
+                  >
+                    <option value="">No / Cliente de paso o pago directo en mesa</option>
+                    <optgroup label="Cargar a Habitación o Cabaña:">
+                      {roomLocations.map(r => (
+                        <option key={r.slug} value={r.label}>{r.label}</option>
+                      ))}
+                    </optgroup>
+                  </select>
+                  <p className="text-[9px] text-brand-primary/45 leading-tight">
+                    Tu comanda se vinculará a tu habitación para pagarla al hacer Check-out en Recepción.
+                  </p>
+                </div>
+              )}
+
               {/* Summary and button */}
               <div className="pt-4 border-t border-brand-primary/5 mt-auto flex-none space-y-4 bg-brand-neutral">
                 <div className="flex items-center justify-between text-sm">
@@ -794,7 +840,9 @@ const RestaurantMenu: React.FC<{
               <div className="flex items-center justify-between pb-4 border-b border-brand-primary/5 mb-4 flex-none">
                 <div>
                   <h3 className="text-lg font-serif text-brand-wood">Cuenta de la Mesa</h3>
-                  <p className="text-[10px] uppercase tracking-widest text-brand-primary/40 font-bold">{selectedTable}</p>
+                  <p className="text-[10px] uppercase tracking-widest text-brand-primary/40 font-bold">
+                    {selectedTable} {guestRoom ? `· Cargar a: ${guestRoom}` : ''}
+                  </p>
                 </div>
                 <button
                   onClick={() => setIsBillOpen(false)}
@@ -854,28 +902,62 @@ const RestaurantMenu: React.FC<{
                 )}
               </div>
 
-              {/* Total and actions */}
-              {tableOrders.length > 0 && (
-                <div className="pt-4 border-t border-brand-primary/5 mt-auto flex-none space-y-4 bg-brand-neutral">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-brand-primary/60 font-bold">Total Acumulado</span>
-                    <span className="font-extrabold text-[#C5A059] text-xl">
-                      ${tableOrders.reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0)}
-                    </span>
-                  </div>
+              {/* Total and actions with 10% service */}
+              {tableOrders.length > 0 && (() => {
+                const subtotal = tableOrders.reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0)
+                const serviceFee = Number((subtotal * 0.10).toFixed(2))
+                const totalWithService = Number((subtotal + serviceFee).toFixed(2))
+                const totalBs = (totalWithService * bcvRate).toFixed(2)
 
-                  <button
-                    onClick={() => {
-                      alert(`Cuenta Solicitada\n\nEl mesero se acercará a la mesa ${selectedTable} en breve con tu cuenta física. ¡Gracias por preferir Estancia La Cañada!`);
-                      setIsBillOpen(false);
-                    }}
-                    className="w-full py-3.5 bg-brand-wood text-white rounded-xl font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2 hover:bg-brand-wood/90 active:scale-95 transition-all shadow-lg"
-                  >
-                    <Receipt size={14} />
-                    Pedir Cuenta Física
-                  </button>
-                </div>
-              )}
+                return (
+                  <div className="pt-3 border-t border-brand-primary/10 mt-auto flex-none space-y-3 bg-brand-neutral">
+                    <div className="bg-white rounded-2xl p-3.5 border border-brand-primary/10 space-y-2 shadow-sm">
+                      <div className="flex justify-between items-center text-xs text-brand-primary/70">
+                        <span>Subtotal Consumos</span>
+                        <span className="font-semibold text-brand-wood">${subtotal.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-brand-wood font-medium flex items-center gap-1">
+                          <span>10% de Servicio</span>
+                          <span className="text-[10px] text-brand-primary/50">(Comidas y Bebidas)</span>
+                        </span>
+                        <span className="font-bold text-emerald-700">+${serviceFee.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm pt-2 border-t border-brand-primary/10">
+                        <span className="font-serif font-bold text-brand-wood">Total a Pagar</span>
+                        <div className="text-right">
+                          <span className="font-extrabold text-[#C5A059] text-xl">
+                            ${totalWithService.toFixed(2)}
+                          </span>
+                          {bcvRate > 0 && (
+                            <p className="text-[10px] text-brand-primary/60 font-medium">
+                              ~Bs. {totalBs} <span className="text-[9px] text-brand-primary/40">(Tasa BCV {bcvRate})</span>
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        alert(
+                          `Cuenta Solicitada\n\n` +
+                          `Ubicación: ${selectedTable}\n` +
+                          `Subtotal: $${subtotal.toFixed(2)}\n` +
+                          `10% de Servicio: +$${serviceFee.toFixed(2)}\n` +
+                          `Total a Pagar: $${totalWithService.toFixed(2)} (~Bs. ${totalBs})\n\n` +
+                          `El mesero se acercará a la mesa con tu cuenta física. ¡Gracias por preferir Estancia La Cañada!`
+                        );
+                        setIsBillOpen(false);
+                      }}
+                      className="w-full py-3.5 bg-brand-wood text-white rounded-xl font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2 hover:bg-brand-wood/90 active:scale-95 transition-all shadow-lg"
+                    >
+                      <Receipt size={14} />
+                      Pedir Cuenta Física (${totalWithService.toFixed(2)})
+                    </button>
+                  </div>
+                )
+              })()}
             </motion.div>
           </>
         )}

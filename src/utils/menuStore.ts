@@ -13,7 +13,7 @@ export async function getMenu(): Promise<MenuSection[]> {
 
   if (error || !sections?.length) return weeklyMenu
 
-  return sections.map((s) => ({
+  const loadedSections: MenuSection[] = sections.map((s) => ({
     id: s.section_key,
     label: s.label,
     emoji: s.emoji,
@@ -34,6 +34,15 @@ export async function getMenu(): Promise<MenuSection[]> {
       tag: item.tag ?? undefined,
     })),
   }))
+
+  // Ensure any section defined in weeklyMenu (e.g. 'pasapalos') appears even before being saved to DB
+  for (const defaultSec of weeklyMenu) {
+    if (!loadedSections.some(s => s.id === defaultSec.id)) {
+      loadedSections.push(defaultSec)
+    }
+  }
+
+  return loadedSections
 }
 
 /** Error de guardado con un mensaje que se le pueda mostrar tal cual a la usuaria. */
@@ -56,11 +65,18 @@ const PERMISO =
  *    un insert rechazado dejaba la carta vacía y sin vuelta atrás.
  */
 export async function saveMenu(menu: MenuSection[]): Promise<void> {
-  for (const section of menu) {
+  for (let sIdx = 0; sIdx < menu.length; sIdx++) {
+    const section = menu[sIdx]
     const { data: sec, error: secErr } = await supabase
       .from('menu_sections')
       .upsert(
-        { section_key: section.id, label: section.label, emoji: section.emoji, included: section.included ?? null },
+        { 
+          section_key: section.id, 
+          label: section.label, 
+          emoji: section.emoji, 
+          included: section.included ?? null,
+          sort_order: sIdx
+        },
         { onConflict: 'section_key' }
       )
       .select('id')

@@ -3,6 +3,7 @@
 // ============================================================
 
 export interface DishItem {
+  id?: string
   name: string
   description?: string
   price?: string
@@ -155,6 +156,49 @@ export const weeklyMenu: MenuSection[] = [
         description: '1. Abreboca: Sorpresa de cortesía\n2. Entrada: Crema sedosa de auyama\n3. Plato principal: Trucha fresca del páramo preparada al ajillo o bañada en salsa cremosa de champiñones, acompañada de papitas salteadas al romero y vegetales frescos\n4. Postre, café o té: Pie de parchita.',
         tag: 'Día 7',
         image: 'platos/trucha-verduras.png'
+      }
+    ]
+  },
+  {
+    id: 'pasapalos',
+    label: 'Pasapalos y Merienda',
+    emoji: '🥟',
+    included: 'Servicio a la Carta · Ideales para compartir o disfrutar en la tarde',
+    items: [
+      {
+        name: 'Tequeños Tradicionales (6 unidades)',
+        description: 'Crujientes deditos de queso blanco llanero envueltos en masa artesanal dorada, acompañados de salsa tártara de la casa.',
+        price: '$8.00',
+        tag: 'Favorito',
+        image: 'platos/bocado-1.png'
+      },
+      {
+        name: 'Tabla de Quesos y Embutidos Andinos',
+        description: 'Selección de quesos frescos y madurados de la región, jamón serrano, frutos secos, aceitunas marinadas y mermelada casera de mora.',
+        price: '$16.00',
+        tag: 'Para Compartir',
+        image: 'platos/bocado-2.png'
+      },
+      {
+        name: 'Mini Pastelitos Andinos (4 unidades)',
+        description: 'Crujientes pastelitos de hojaldre andino rellenos de queso con bocadillo de guayaba, pollo criollo y carne molida sazonada.',
+        price: '$7.50',
+        tag: 'Típico',
+        image: 'platos/pizza-bowl.png'
+      },
+      {
+        name: 'Merienda Andina: Chocolate Caliente con Queso',
+        description: 'Espeso chocolate criollo caliente especiado con canela y clavos de olor, acompañado de queso blanco fresco y bizcocho artesanal.',
+        price: '$6.00',
+        tag: 'Merienda',
+        image: 'platos/postre-chocolate.png'
+      },
+      {
+        name: 'Fresas con Nata Batida del Páramo',
+        description: 'Fresas recién cosechadas de las faldas de Mucurubá con generosa nata batida dulce y lluvia de cacao.',
+        price: '$6.50',
+        tag: 'Postre',
+        image: 'platos/postre-fresas-2.png'
       }
     ]
   }

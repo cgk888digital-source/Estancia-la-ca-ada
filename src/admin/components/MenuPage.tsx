@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Pencil, Trash2, X, Check, ImageOff, Upload, AlertTriangle } from 'lucide-react'
+import { motion, AnimatePresence, Reorder } from 'framer-motion'
+import { Plus, Pencil, Trash2, X, Check, ImageOff, Upload, AlertTriangle, GripVertical, ChevronUp, ChevronDown } from 'lucide-react'
 import { getMenu, saveMenu } from '../../utils/menuStore'
 import type { MenuSection, DishItem } from '../../data/weeklyMenu'
 
@@ -65,7 +65,19 @@ export default function MenuPage() {
 
   const activeSection = menu.find(s => s.id === activeTab)
 
-  useEffect(() => { getMenu().then(setMenu) }, [])
+  useEffect(() => {
+    getMenu().then(sections => {
+      setMenu(
+        sections.map(s => ({
+          ...s,
+          items: s.items.map((item, idx) => ({
+            ...item,
+            id: item.id || `dish-${s.id}-${idx}-${Math.random().toString(36).substring(2, 7)}`,
+          })),
+        }))
+      )
+    })
+  }, [])
 
   if (!activeSection) {
     return (
@@ -112,9 +124,20 @@ export default function MenuPage() {
     ))
   }
 
+  function handleMove(index: number, direction: -1 | 1) {
+    if (!activeSection) return
+    const targetIndex = index + direction
+    if (targetIndex < 0 || targetIndex >= activeSection.items.length) return
+    const newItems = [...activeSection.items]
+    const [moved] = newItems.splice(index, 1)
+    newItems.splice(targetIndex, 0, moved)
+    setMenu(prev => prev.map(s => s.id === activeTab ? { ...s, items: newItems } : s))
+  }
+
   function handleModalSave() {
     if (!form.name.trim()) return
     const dish: DishItem = {
+      id: form.id || `dish-${Math.random().toString(36).substring(2, 9)}`,
       name: form.name.trim(),
       ...(form.description?.trim() && { description: form.description.trim() }),
       ...(form.price?.trim()       && { price: form.price.trim() }),
@@ -164,12 +187,12 @@ export default function MenuPage() {
       )}
 
       {/* Tabs */}
-      <div className="flex bg-gray-100 p-1 rounded-xl mb-6 gap-1">
+      <div className="flex bg-gray-100 p-1 rounded-xl mb-6 gap-1 overflow-x-auto custom-scrollbar">
         {menu.map(s => (
           <button
             key={s.id}
             onClick={() => setActiveTab(s.id)}
-            className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
+            className={`flex-1 min-w-fit px-3 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all whitespace-nowrap ${
               activeTab === s.id ? 'bg-white shadow text-gray-800' : 'text-gray-400 hover:text-gray-600'
             }`}
           >
@@ -193,28 +216,57 @@ export default function MenuPage() {
         />
       </div>
 
-      {/* Dish list */}
-      <div className="flex flex-col gap-3 mb-4">
-        <AnimatePresence>
+      {/* Helper text for Drag & Drop */}
+      <div className="flex items-center justify-between text-xs text-gray-500 mb-2 px-1">
+        <span className="flex items-center gap-1.5 font-medium">
+          <GripVertical size={14} className="text-[#C5A059]" />
+          Arrastra con el mouse para cambiar el orden de los platos
+        </span>
+        <span className="text-[11px] text-gray-400 font-bold uppercase">
+          {activeSection.items.length} {activeSection.items.length === 1 ? 'plato' : 'platos'}
+        </span>
+      </div>
+
+      {/* Reorderable Dish list */}
+      <div className="mb-4">
+        <Reorder.Group
+          axis="y"
+          values={activeSection.items}
+          onReorder={(newItems) => {
+            setMenu(prev => prev.map(s => s.id === activeTab ? { ...s, items: newItems } : s))
+          }}
+          className="flex flex-col gap-3"
+        >
           {activeSection.items.map((dish, i) => (
-            <motion.div
-              key={`${activeTab}-${i}`}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="bg-white border border-gray-100 rounded-2xl flex items-center gap-3 shadow-sm overflow-hidden"
+            <Reorder.Item
+              key={dish.id || `${activeTab}-${dish.name}-${i}`}
+              value={dish}
+              className="bg-white border border-gray-100 hover:border-[#C5A059]/40 rounded-2xl flex items-center gap-2 sm:gap-3 shadow-sm overflow-hidden select-none transition-all cursor-grab active:cursor-grabbing"
+              whileDrag={{
+                scale: 1.02,
+                boxShadow: "0 14px 28px -6px rgba(0, 0, 0, 0.15), 0 8px 12px -6px rgba(0, 0, 0, 0.1)",
+                zIndex: 50,
+              }}
             >
+              {/* Drag Handle */}
+              <div
+                className="pl-3 py-4 text-gray-300 hover:text-[#C5A059] flex items-center justify-center shrink-0 cursor-grab active:cursor-grabbing"
+                title="Arrastra para cambiar de posición"
+              >
+                <GripVertical size={18} />
+              </div>
+
               {/* Thumbnail */}
-              <div className="w-16 h-16 flex-none bg-gray-100 overflow-hidden">
+              <div className="w-14 h-14 sm:w-16 sm:h-16 flex-none bg-gray-100 overflow-hidden rounded-xl my-2">
                 {dish.image
-                  ? <img src={imgSrc(dish.image)} alt={dish.name} className="w-full h-full object-cover" />
+                  ? <img src={imgSrc(dish.image)} alt={dish.name} className="w-full h-full object-cover pointer-events-none" />
                   : <div className="w-full h-full flex items-center justify-center text-gray-300"><ImageOff size={20} /></div>
                 }
               </div>
 
               {/* Info */}
               <div className="flex-1 min-w-0 py-3">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-bold text-gray-800 text-sm truncate">{dish.name}</p>
                   {dish.tag && (
                     <span className="text-[9px] uppercase tracking-wider bg-amber-50 text-amber-600 border border-amber-200 px-2 py-0.5 rounded-full font-bold flex-none">
@@ -223,7 +275,7 @@ export default function MenuPage() {
                   )}
                 </div>
                 {dish.description && (
-                  <p className="text-gray-400 text-xs mt-0.5 truncate">{dish.description}</p>
+                  <p className="text-gray-400 text-xs mt-0.5 line-clamp-1">{dish.description}</p>
                 )}
                 {dish.price && (
                   <p className="text-[#C5A059] text-xs font-bold mt-0.5">{dish.price}</p>
@@ -231,23 +283,49 @@ export default function MenuPage() {
               </div>
 
               {/* Actions */}
-              <div className="flex items-center gap-1 pr-3">
+              <div className="flex items-center gap-1 pr-3 shrink-0">
+                {/* Flechas arriba / abajo para subir o bajar con un clic */}
+                <div className="flex flex-col -space-y-1 mr-1">
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleMove(i, -1); }}
+                    disabled={i === 0}
+                    className="p-1 rounded hover:bg-gray-100 text-gray-300 hover:text-gray-700 disabled:opacity-20 transition-colors"
+                    title="Mover hacia arriba"
+                  >
+                    <ChevronUp size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleMove(i, 1); }}
+                    disabled={i === activeSection.items.length - 1}
+                    className="p-1 rounded hover:bg-gray-100 text-gray-300 hover:text-gray-700 disabled:opacity-20 transition-colors"
+                    title="Mover hacia abajo"
+                  >
+                    <ChevronDown size={13} />
+                  </button>
+                </div>
+
                 <button
-                  onClick={() => openEdit(activeTab, i)}
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); openEdit(activeTab, i); }}
                   className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
+                  title="Editar plato"
                 >
                   <Pencil size={15} />
                 </button>
                 <button
-                  onClick={() => handleDelete(activeTab, i)}
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleDelete(activeTab, i); }}
                   className="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
+                  title="Eliminar plato"
                 >
                   <Trash2 size={15} />
                 </button>
               </div>
-            </motion.div>
+            </Reorder.Item>
           ))}
-        </AnimatePresence>
+        </Reorder.Group>
 
         {activeSection.items.length === 0 && (
           <div className="text-center py-10 text-gray-300 text-sm border-2 border-dashed border-gray-200 rounded-2xl">

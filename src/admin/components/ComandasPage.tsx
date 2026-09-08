@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { Plus, Check, Search, Utensils, Trash2, CheckCircle2, Bell, QrCode, Copy, Printer, Smartphone } from 'lucide-react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
+import { Plus, Check, Search, Utensils, Trash2, CheckCircle2, Bell, QrCode, Copy, Printer, Smartphone, Receipt, Award } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import confetti from 'canvas-confetti'
 import { getMenu } from '../../utils/menuStore'
@@ -7,6 +7,7 @@ import type { MenuSection, DishItem } from '../../data/weeklyMenu'
 import { buildTableLocations, roomLocations, getOrderingLocationUrl } from '../../data/orderingLocations'
 import { useHotelSettings } from '../../utils/useHotelSettings'
 import { fechaLocalISO } from '../../utils/dateUtils'
+import { getBcvEuroRate } from '../../utils/exchangeRate'
 
 interface OrderItem {
   name: string
@@ -23,6 +24,9 @@ interface Comanda {
   payment_status: 'pendiente' | 'pagado'
   total_amount: number
   created_at: string
+  waiter?: string | null
+  room_id?: string | null
+  service_fee?: number | null
 }
 
 
@@ -75,6 +79,16 @@ const ComandasPage: React.FC = () => {
   const [activeCheckoutTable, setActiveCheckoutTable] = useState<string | null>(null)
   const [checkoutPaymentMethod, setCheckoutPaymentMethod] = useState('efectivo')
   const [savingCheckout, setSavingCheckout] = useState(false)
+  const [bcvRate, setBcvRate] = useState<number>(36.50)
+  const [sendServiceToTips, setSendServiceToTips] = useState<boolean>(true)
+  const [showPreCuentaModal, setShowPreCuentaModal] = useState<boolean>(false)
+  const [preCuentaTable, setPreCuentaTable] = useState<string | null>(null)
+
+  useEffect(() => {
+    getBcvEuroRate().then(rate => {
+      if (rate > 0) setBcvRate(rate)
+    })
+  }, [])
 
   const { settings: hotelSettings } = useHotelSettings()
   const tableLocations = buildTableLocations(Number(hotelSettings.table_count) || 6)
@@ -91,6 +105,107 @@ const ComandasPage: React.FC = () => {
   const [selectedTable, setSelectedTable] = useState('Mesa 1')
   const [manualCart, setManualCart] = useState<OrderItem[]>([])
   const [manualNotes, setManualNotes] = useState('')
+
+  // Waiter & Room linkage states
+  const [employees, setEmployees] = useState<{ id: string; name: string; role?: string }[]>([])
+  const [manualWaiter, setManualWaiter] = useState<string>('Camarero 1')
+  const [manualRoom, setManualRoom] = useState<string>('')
+  const [checkoutWaiter, setCheckoutWaiter] = useState<string>('')
+  const [checkoutRoom, setCheckoutRoom] = useState<string>('')
+  const [showWaiterTipsModal, setShowWaiterTipsModal] = useState<boolean>(false)
+  const [waiterTipsData, setWaiterTipsData] = useState<{ waiter: string; tipsTotal: number; ordersCount: number; salesTotal: number }[]>([])
+  const [loadingTips, setLoadingTips] = useState<boolean>(false)
+
+  const defaultWaiters = useMemo(() => ['Camarero 1', 'Camarero 2', 'Camarero 3', 'Camarero 4', 'Camarero 5', 'Camarero 6'], [])
+  const waiterOptions = useMemo(() => {
+    const fromEmployees = employees
+      .filter(e => {
+        const r = (e.role || '').toLowerCase()
+        return r.includes('camarer') || r.includes('meson') || r.includes('restaurante') || r.includes('servicio')
+      })
+      .map(e => e.name)
+    return Array.from(new Set([...fromEmployees, ...defaultWaiters]))
+  }, [employees, defaultWaiters])
+
+  // Load employees to populate waiter list if available
+  useEffect(() => {
+    supabase.from('employees').select('id, name, role').eq('status', 'activo').then(({ data }) => {
+      if (data) setEmployees(data)
+    })
+  }, [])
+
+  // Auto-populate checkout waiter and room from the active table orders
+  useEffect(() => {
+    if (activeCheckoutTable) {
+      const tableOrders = comandas.filter(c => c.table_id === activeCheckoutTable)
+      const w = tableOrders.find(o => o.waiter)?.waiter || 'Camarero 1'
+      const r = tableOrders.find(o => o.room_id)?.room_id || ''
+      setCheckoutWaiter(w)
+      setCheckoutRoom(r)
+      if (r) {
+        setCheckoutPaymentMethod('habitacion')
+      } else {
+        setCheckoutPaymentMethod('efectivo')
+      }
+    }
+  }, [activeCheckoutTable, comandas])
+
+  const updateTableWaiter = async (tableId: string, waiter: string) => {
+    setComandas(prev => prev.map(c => c.table_id === tableId ? { ...c, waiter } : c))
+    try {
+      await supabase
+        .from('comandas')
+        .update({ waiter: waiter || null })
+        .eq('table_id', tableId)
+        .eq('payment_status', 'pendiente')
+    } catch (e) {
+      console.warn('Error updating waiter:', e)
+    }
+  }
+
+  const updateTableRoom = async (tableId: string, roomId: string) => {
+    setComandas(prev => prev.map(c => c.table_id === tableId ? { ...c, room_id: roomId } : c))
+    try {
+      await supabase
+        .from('comandas')
+        .update({ room_id: roomId || null })
+        .eq('table_id', tableId)
+        .eq('payment_status', 'pendiente')
+    } catch (e) {
+      console.warn('Error updating room link:', e)
+    }
+  }
+
+  const fetchWaiterTips = async () => {
+    setLoadingTips(true)
+    try {
+      const { data, error } = await supabase
+        .from('comandas')
+        .select('waiter, service_fee, total_amount, created_at')
+        .eq('payment_status', 'pagado')
+        .not('waiter', 'is', null)
+
+      if (!error && data) {
+        const summary: Record<string, { tipsTotal: number; ordersCount: number; salesTotal: number }> = {}
+        data.forEach(d => {
+          const w = d.waiter || 'Sin Asignar'
+          if (!summary[w]) summary[w] = { tipsTotal: 0, ordersCount: 0, salesTotal: 0 }
+          summary[w].tipsTotal += Number(d.service_fee) || 0
+          summary[w].salesTotal += Number(d.total_amount) || 0
+          summary[w].ordersCount += 1
+        })
+        setWaiterTipsData(
+          Object.entries(summary)
+            .map(([waiter, stats]) => ({ waiter, ...stats }))
+            .sort((a, b) => b.tipsTotal - a.tipsTotal)
+        )
+      }
+    } catch (e) {
+      console.warn('Error loading waiter tips:', e)
+    } finally {
+      setLoadingTips(false)
+    }
+  }
 
   const previousCountRef = useRef(0)
 
@@ -233,6 +348,10 @@ const ComandasPage: React.FC = () => {
       return sum + (parsePrice(item.price) * item.quantity)
     }, 0)
 
+    const isMesa = selectedTable.startsWith('Mesa')
+    const assignedWaiter = isMesa ? (manualWaiter || null) : null
+    const assignedRoom = isMesa ? (manualRoom || null) : selectedTable
+
     const tempId = 'cmd_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4)
     const newComanda: Comanda = {
       id: tempId,
@@ -241,6 +360,8 @@ const ComandasPage: React.FC = () => {
       total_amount: totalAmount,
       status: 'preparando',
       payment_status: 'pendiente',
+      waiter: assignedWaiter,
+      room_id: assignedRoom,
       created_at: new Date().toISOString()
     }
 
@@ -258,7 +379,9 @@ const ComandasPage: React.FC = () => {
           items: newComanda.items,
           total_amount: totalAmount,
           status: 'preparando',
-          payment_status: 'pendiente'
+          payment_status: 'pendiente',
+          waiter: assignedWaiter,
+          room_id: assignedRoom
         })
         .select('id')
         .single()
@@ -277,17 +400,23 @@ const ComandasPage: React.FC = () => {
     setSavingCheckout(true)
 
     const tableOrders = comandas.filter(c => c.table_id === activeCheckoutTable)
-    const totalToPay = tableOrders.reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0)
+    const subtotal = tableOrders.reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0)
+    const serviceFee = Number((subtotal * 0.10).toFixed(2))
+    const totalToPay = Number((subtotal + serviceFee).toFixed(2))
 
     const targetTable = activeCheckoutTable
+    const targetWaiter = checkoutWaiter || tableOrders.find(o => o.waiter)?.waiter || null
+    const targetRoom = checkoutRoom || tableOrders.find(o => o.room_id)?.room_id || null
 
-    // Se cobra PRIMERO y se celebra despues. Antes se limpiaba la pantalla y salia el
-    // confeti antes de guardar nada, y como Supabase devuelve el error en el resultado
-    // en vez de lanzarlo, el try/catch no saltaba nunca: si el ingreso no se guardaba,
-    // la venta desaparecia sin que nadie se enterara.
     const cobro = await supabase
       .from('comandas')
-      .update({ payment_status: 'pagado', updated_at: new Date().toISOString() })
+      .update({ 
+        payment_status: 'pagado', 
+        waiter: targetWaiter,
+        room_id: targetRoom,
+        service_fee: serviceFee,
+        updated_at: new Date().toISOString() 
+      })
       .eq('table_id', targetTable)
       .eq('payment_status', 'pendiente')
 
@@ -298,26 +427,53 @@ const ComandasPage: React.FC = () => {
       return
     }
 
-    const ingreso = await supabase
-      .from('transactions')
-      .insert({
+    const txsToInsert = []
+    const isChargedToRoom = checkoutPaymentMethod === 'habitacion'
+    const paymentLabel = isChargedToRoom ? 'Cargado a Habitación' : checkoutPaymentMethod
+
+    if (sendServiceToTips && serviceFee > 0) {
+      if (subtotal > 0) {
+        txsToInsert.push({
+          type: 'ingreso',
+          category: 'restaurante',
+          description: `Consumo Restaurante - ${targetTable}${targetRoom ? ` (Cargado a ${targetRoom})` : ''}${targetWaiter ? ` · Atendido por ${targetWaiter}` : ''}`,
+          amount: subtotal,
+          payment_method: paymentLabel,
+          related_to: targetRoom || targetTable,
+          date: fechaLocalISO()
+        })
+      }
+      txsToInsert.push({
         type: 'ingreso',
-        category: 'restaurante',
-        description: `Consumo Restaurante - ${targetTable}`,
-        amount: totalToPay,
-        payment_method: checkoutPaymentMethod,
+        category: 'propinas',
+        description: `10% Servicio Restaurante - ${targetTable} (${targetWaiter ? `Camarero: ${targetWaiter}` : 'Fondo General'}${targetRoom ? ` · Hab: ${targetRoom}` : ''})`,
+        amount: serviceFee,
+        payment_method: paymentLabel,
+        related_to: targetWaiter || targetTable,
+        notes: JSON.stringify({ waiter: targetWaiter, room: targetRoom, table: targetTable, date: fechaLocalISO() }),
         date: fechaLocalISO()
       })
+    } else {
+      txsToInsert.push({
+        type: 'ingreso',
+        category: 'restaurante',
+        description: `Consumo Restaurante - ${targetTable}${targetRoom ? ` (Cargado a ${targetRoom})` : ''}${targetWaiter ? ` · Atendido por ${targetWaiter}` : ''} (Subtotal: $${subtotal.toFixed(2)} + 10% Serv: $${serviceFee.toFixed(2)})`,
+        amount: totalToPay,
+        payment_method: paymentLabel,
+        related_to: targetRoom || targetTable,
+        notes: targetWaiter ? JSON.stringify({ waiter: targetWaiter }) : undefined,
+        date: fechaLocalISO()
+      })
+    }
+
+    const ingreso = await supabase.from('transactions').insert(txsToInsert)
 
     if (ingreso.error) {
       // La mesa ya quedo cobrada, asi que no se puede deshacer sin mas: lo que no
       // puede pasar es que el dinero se pierda en silencio.
       console.error('La mesa se cobro pero el ingreso no se registro:', ingreso.error)
       alert(
-        `La mesa se cerro, pero el ingreso de ${totalToPay} NO quedo registrado en la contabilidad.
-
-` +
-        'Anotelo a mano en Ingresos antes de cerrar la caja.'
+        `La mesa se cerro, pero el ingreso de ${totalToPay} NO quedo registrado en la contabilidad.\n\nAnotelo a mano en Ingresos antes de cerrar la caja.`
       )
     }
 
@@ -376,6 +532,16 @@ const ComandasPage: React.FC = () => {
           >
             <QrCode size={18} className="text-[#C5A059]" />
             <span className="hidden sm:inline">Códigos QR & NFC</span>
+          </button>
+          <button
+            onClick={() => {
+              fetchWaiterTips()
+              setShowWaiterTipsModal(true)
+            }}
+            className="flex items-center gap-2 bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100 px-4 py-2.5 rounded-xl font-bold transition-all text-sm shadow-sm"
+          >
+            <Award size={18} className="text-[#C5A059]" />
+            <span className="hidden sm:inline">Propinas Camareros</span>
           </button>
           <button
             onClick={() => setShowNewOrder(true)}
@@ -454,6 +620,47 @@ const ComandasPage: React.FC = () => {
                       <span className="text-xs font-semibold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-lg">Cocina</span>
                     </div>
 
+                    {c.table_id.startsWith('Mesa') && (
+                      <div className="pt-2 border-t border-gray-100 flex flex-col gap-1 text-[11px]">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Camarero:</span>
+                          <select
+                            value={c.waiter || ''}
+                            onChange={e => updateTableWaiter(c.table_id, e.target.value)}
+                            className={`text-[10px] font-bold rounded-lg px-2 py-0.5 border cursor-pointer ${
+                              c.waiter 
+                                ? 'bg-amber-50 text-amber-900 border-amber-300' 
+                                : 'bg-gray-50 text-gray-400 border-dashed border-gray-300'
+                            }`}
+                          >
+                            <option value="">-- Asignar --</option>
+                            {waiterOptions.map(w => (
+                              <option key={w} value={w}>🧑‍🍳 {w}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Cargar a:</span>
+                          <select
+                            value={c.room_id || ''}
+                            onChange={e => updateTableRoom(c.table_id, e.target.value)}
+                            className={`text-[10px] font-bold rounded-lg px-2 py-0.5 border max-w-[140px] truncate cursor-pointer ${
+                              c.room_id 
+                                ? 'bg-blue-50 text-blue-900 border-blue-300' 
+                                : 'bg-gray-50 text-gray-400 border-dashed border-gray-300'
+                            }`}
+                          >
+                            <option value="">-- Mesa Directo --</option>
+                            <optgroup label="Habitación / Cabaña:">
+                              {roomLocations.map(r => (
+                                <option key={r.slug} value={r.label}>🏨 {r.label}</option>
+                              ))}
+                            </optgroup>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Items list */}
                     <div className="space-y-1.5 border-t border-dashed border-gray-100 pt-2.5">
                       {c.items.map((it, idx) => (
@@ -501,6 +708,47 @@ const ComandasPage: React.FC = () => {
                       <span className="text-xs font-semibold px-2.5 py-1 bg-green-100 text-green-800 rounded-lg animate-pulse">¡LISTO!</span>
                     </div>
 
+                    {c.table_id.startsWith('Mesa') && (
+                      <div className="pt-2 border-t border-gray-100 flex flex-col gap-1 text-[11px]">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Camarero:</span>
+                          <select
+                            value={c.waiter || ''}
+                            onChange={e => updateTableWaiter(c.table_id, e.target.value)}
+                            className={`text-[10px] font-bold rounded-lg px-2 py-0.5 border cursor-pointer ${
+                              c.waiter 
+                                ? 'bg-amber-50 text-amber-900 border-amber-300' 
+                                : 'bg-gray-50 text-gray-400 border-dashed border-gray-300'
+                            }`}
+                          >
+                            <option value="">-- Asignar --</option>
+                            {waiterOptions.map(w => (
+                              <option key={w} value={w}>🧑‍🍳 {w}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Cargar a:</span>
+                          <select
+                            value={c.room_id || ''}
+                            onChange={e => updateTableRoom(c.table_id, e.target.value)}
+                            className={`text-[10px] font-bold rounded-lg px-2 py-0.5 border max-w-[140px] truncate cursor-pointer ${
+                              c.room_id 
+                                ? 'bg-blue-50 text-blue-900 border-blue-300' 
+                                : 'bg-gray-50 text-gray-400 border-dashed border-gray-300'
+                            }`}
+                          >
+                            <option value="">-- Mesa Directo --</option>
+                            <optgroup label="Habitación / Cabaña:">
+                              {roomLocations.map(r => (
+                                <option key={r.slug} value={r.label}>🏨 {r.label}</option>
+                              ))}
+                            </optgroup>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="space-y-1.5 border-t border-dashed border-gray-100 pt-2.5">
                       {c.items.map((it, idx) => (
                         <div key={idx} className="text-sm">
@@ -544,6 +792,47 @@ const ComandasPage: React.FC = () => {
                       <span className="text-xs font-semibold px-2 py-0.5 bg-blue-50 text-blue-800 rounded-lg">Servido</span>
                     </div>
 
+                    {c.table_id.startsWith('Mesa') && (
+                      <div className="pt-2 border-t border-gray-100 flex flex-col gap-1 text-[11px]">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Camarero:</span>
+                          <select
+                            value={c.waiter || ''}
+                            onChange={e => updateTableWaiter(c.table_id, e.target.value)}
+                            className={`text-[10px] font-bold rounded-lg px-2 py-0.5 border cursor-pointer ${
+                              c.waiter 
+                                ? 'bg-amber-50 text-amber-900 border-amber-300' 
+                                : 'bg-gray-50 text-gray-400 border-dashed border-gray-300'
+                            }`}
+                          >
+                            <option value="">-- Asignar --</option>
+                            {waiterOptions.map(w => (
+                              <option key={w} value={w}>🧑‍🍳 {w}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Cargar a:</span>
+                          <select
+                            value={c.room_id || ''}
+                            onChange={e => updateTableRoom(c.table_id, e.target.value)}
+                            className={`text-[10px] font-bold rounded-lg px-2 py-0.5 border max-w-[140px] truncate cursor-pointer ${
+                              c.room_id 
+                                ? 'bg-blue-50 text-blue-900 border-blue-300' 
+                                : 'bg-gray-50 text-gray-400 border-dashed border-gray-300'
+                            }`}
+                          >
+                            <option value="">-- Mesa Directo --</option>
+                            <optgroup label="Habitación / Cabaña:">
+                              {roomLocations.map(r => (
+                                <option key={r.slug} value={r.label}>🏨 {r.label}</option>
+                              ))}
+                            </optgroup>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="space-y-1 border-t border-dashed border-gray-100 pt-2">
                       {c.items.map((it, idx) => (
                         <div key={idx} className="text-xs flex justify-between">
@@ -555,8 +844,21 @@ const ComandasPage: React.FC = () => {
                   </div>
 
                   <div className="mt-3 pt-2 border-t border-gray-100 flex justify-between items-center text-xs">
-                    <span className="text-gray-400">Total:</span>
-                    <span className="font-bold text-[#C5A059]">${c.total_amount}</span>
+                    <span className="text-gray-400">Subtotal:</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-[#C5A059]">${c.total_amount}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreCuentaTable(c.table_id)
+                          setShowPreCuentaModal(true)
+                        }}
+                        className="text-[10px] font-bold text-gray-600 hover:text-[#C5A059] bg-gray-50 hover:bg-[#C5A059]/10 px-2 py-1 rounded-md transition-colors flex items-center gap-1 border border-gray-200/60"
+                        title="Ver / Imprimir Pre-Cuenta con 10% de Servicio"
+                      >
+                        <Receipt size={11} /> Pre-Cuenta
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -613,13 +915,101 @@ const ComandasPage: React.FC = () => {
                   ))}
               </div>
 
-              {/* Total amount summary */}
-              <div className="flex justify-between items-center bg-[#C5A059]/10 p-4 rounded-xl border border-[#C5A059]/25 mt-4">
-                <span className="font-bold text-gray-700">Total Neto a Cobrar</span>
-                <span className="text-xl font-extrabold text-[#C5A059]">
-                  ${comandas.filter(c => c.table_id === activeCheckoutTable).reduce((s, o) => s + (Number(o.total_amount) || 0), 0)}
-                </span>
-              </div>
+              {/* Total amount summary with 10% service */}
+              {(() => {
+                const tableOrders = comandas.filter(c => c.table_id === activeCheckoutTable)
+                const subtotal = tableOrders.reduce((s, o) => s + (Number(o.total_amount) || 0), 0)
+                const serviceFee = Number((subtotal * 0.10).toFixed(2))
+                const totalToPay = Number((subtotal + serviceFee).toFixed(2))
+
+                return (
+                  <div className="space-y-3 mt-4">
+                    <div className="bg-[#C5A059]/10 p-4 rounded-2xl border border-[#C5A059]/25 space-y-2">
+                      <div className="flex justify-between items-center text-xs text-gray-600">
+                        <span>Subtotal (Comidas & Bebidas)</span>
+                        <span className="font-bold text-gray-800">${subtotal.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs text-emerald-800 font-semibold">
+                        <span className="flex items-center gap-1">
+                          <span>10% de Servicio</span>
+                          <span className="text-[10px] text-gray-500 font-normal">(agregado automáticamente)</span>
+                        </span>
+                        <span>+${serviceFee.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-center pt-2.5 border-t border-[#C5A059]/20">
+                        <span className="font-bold text-gray-800 text-sm">Total a Cobrar</span>
+                        <div className="text-right">
+                          <span className="text-2xl font-extrabold text-[#C5A059]">
+                            ${totalToPay.toFixed(2)}
+                          </span>
+                          {bcvRate > 0 && (
+                            <p className="text-[11px] text-gray-500 font-medium mt-0.5">
+                              ~Bs. {(totalToPay * bcvRate).toFixed(2)} <span className="text-[9px] text-gray-400">(Tasa BCV {bcvRate})</span>
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <label className="flex items-start gap-2.5 p-3 bg-emerald-50/70 border border-emerald-200/80 rounded-xl text-xs text-emerald-900 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={sendServiceToTips}
+                        onChange={e => setSendServiceToTips(e.target.checked)}
+                        className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <div>
+                        <span className="font-bold">Abonar el 10% de servicio (+${serviceFee.toFixed(2)}) al Fondo de Propinas</span>
+                        <p className="text-[10px] text-emerald-700/80 mt-0.5">
+                          Se sumará automáticamente al fondo para el reparto semanal entre los trabajadores.
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+                )
+              })()}
+
+              {/* Waiter and Room selector in Checkout */}
+              {activeCheckoutTable.startsWith('Mesa') && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-50 p-3.5 rounded-2xl border border-gray-200/80 text-xs">
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                      🧑‍🍳 Camarero que Atendió:
+                    </label>
+                    <select
+                      value={checkoutWaiter}
+                      onChange={e => setCheckoutWaiter(e.target.value)}
+                      className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold text-gray-800 focus:outline-none focus:border-[#C5A059]"
+                    >
+                      <option value="">-- Sin asignar --</option>
+                      {waiterOptions.map(w => (
+                        <option key={w} value={w}>{w}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                      🏨 Cargar a Habitación:
+                    </label>
+                    <select
+                      value={checkoutRoom}
+                      onChange={e => {
+                        setCheckoutRoom(e.target.value)
+                        if (e.target.value) setCheckoutPaymentMethod('habitacion')
+                      }}
+                      className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold text-gray-800 focus:outline-none focus:border-[#C5A059]"
+                    >
+                      <option value="">-- Cobro Directo en Mesa --</option>
+                      <optgroup label="Habitación o Cabaña:">
+                        {roomLocations.map(r => (
+                          <option key={r.slug} value={r.label}>{r.label}</option>
+                        ))}
+                      </optgroup>
+                    </select>
+                  </div>
+                </div>
+              )}
 
               {/* Payment selector */}
               <div className="space-y-2">
@@ -629,40 +1019,66 @@ const ComandasPage: React.FC = () => {
                   onChange={e => setCheckoutPaymentMethod(e.target.value)}
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#C5A059] bg-white font-bold text-gray-700"
                 >
+                  <option value="habitacion">🏨 Cargar a Cuenta de Habitación (Pago al Check-out)</option>
                   <option value="efectivo">Efectivo ($ / Bs.)</option>
                   <option value="tarjeta">Punto de Venta / Tarjeta</option>
                   <option value="pago_movil">Pago Móvil</option>
                   <option value="zelle">Zelle</option>
                   <option value="transferencia">Transferencia Bancaria</option>
                 </select>
+
+                {checkoutPaymentMethod === 'habitacion' && (
+                  <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-xl text-xs text-blue-900 flex items-start gap-2.5">
+                    <span className="text-base leading-none">🏨</span>
+                    <div>
+                      <p className="font-bold">Consumo cargado a la cuenta del huésped</p>
+                      <p className="text-[11px] text-blue-700/90 mt-0.5 leading-relaxed">
+                        {checkoutRoom ? `Vinculado a: ${checkoutRoom}.` : 'Por favor asegúrate de seleccionar arriba la habitación correspondiente.'} El huésped cancelará el monto total en Recepción al momento de su Check-out.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
             {/* Modal footer */}
-            <div className="p-6 border-t border-gray-100 bg-gray-50 rounded-b-3xl flex justify-end gap-3">
-              <button 
+            <div className="p-6 border-t border-gray-100 bg-gray-50 rounded-b-3xl flex items-center justify-between gap-3 flex-wrap">
+              <button
+                type="button"
                 onClick={() => {
-                  setShowCheckout(false)
-                  setActiveCheckoutTable(null)
+                  setPreCuentaTable(activeCheckoutTable)
+                  setShowPreCuentaModal(true)
                 }}
-                disabled={savingCheckout}
-                className="px-5 py-2.5 rounded-xl font-bold text-gray-600 hover:bg-gray-200 transition-colors text-sm"
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-bold text-gray-700 bg-white border border-gray-200 hover:bg-gray-100 text-xs transition-colors shadow-sm"
               >
-                Cancelar
+                <Printer size={15} /> Imprimir Pre-Cuenta
               </button>
-              <button 
-                onClick={handleCheckout}
-                disabled={savingCheckout}
-                className="px-6 py-2.5 rounded-xl font-bold bg-green-500 text-white hover:bg-green-600 transition-colors flex items-center gap-2 text-sm shadow-sm"
-              >
-                {savingCheckout ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <>
-                    <CheckCircle2 size={16} /> Confirmar Cobro y Facturar
-                  </>
-                )}
-              </button>
+
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => {
+                    setShowCheckout(false)
+                    setActiveCheckoutTable(null)
+                  }}
+                  disabled={savingCheckout}
+                  className="px-4 py-2.5 rounded-xl font-bold text-gray-600 hover:bg-gray-200 transition-colors text-xs"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={handleCheckout}
+                  disabled={savingCheckout}
+                  className="px-5 py-2.5 rounded-xl font-bold bg-green-500 text-white hover:bg-green-600 transition-colors flex items-center gap-2 text-xs shadow-sm"
+                >
+                  {savingCheckout ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <CheckCircle2 size={15} /> Confirmar Cobro
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -721,14 +1137,52 @@ const ComandasPage: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Waiter & Room assignment for restaurant tables */}
+                {selectedTable.startsWith('Mesa') && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-amber-50/70 p-3 rounded-2xl border border-amber-200/70">
+                    <div>
+                      <label className="text-[10px] font-bold text-amber-900 uppercase tracking-widest block mb-1">
+                        🧑‍🍳 Camarero de Mesa
+                      </label>
+                      <select
+                        value={manualWaiter}
+                        onChange={e => setManualWaiter(e.target.value)}
+                        className="w-full border border-amber-200 rounded-xl px-3 py-2 text-xs font-bold text-gray-800 bg-white focus:outline-none focus:border-[#C5A059]"
+                      >
+                        {waiterOptions.map(w => (
+                          <option key={w} value={w}>{w}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-bold text-amber-900 uppercase tracking-widest block mb-1">
+                        🏨 Cargar a Habitación (Opcional)
+                      </label>
+                      <select
+                        value={manualRoom}
+                        onChange={e => setManualRoom(e.target.value)}
+                        className="w-full border border-amber-200 rounded-xl px-3 py-2 text-xs font-bold text-gray-800 bg-white focus:outline-none focus:border-[#C5A059]"
+                      >
+                        <option value="">-- Ninguna (Cobro en mesa) --</option>
+                        <optgroup label="Habitación o Cabaña:">
+                          {roomLocations.map(r => (
+                            <option key={r.slug} value={r.label}>{r.label}</option>
+                          ))}
+                        </optgroup>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
                 {/* Structured Menu Tabs */}
-                <div className="flex bg-gray-100 p-1 rounded-xl gap-1 text-[10px] uppercase tracking-wider font-bold">
+                <div className="flex bg-gray-100 p-1 rounded-xl gap-1 text-[10px] uppercase tracking-wider font-bold overflow-x-auto">
                   {menu.map(section => (
                     <button
                       key={section.id}
                       type="button"
                       onClick={() => setActiveMenuTab(section.id)}
-                      className={`flex-1 py-1.5 rounded-lg text-center transition-all ${
+                      className={`flex-1 min-w-fit px-2.5 py-1.5 rounded-lg text-center transition-all whitespace-nowrap ${
                         activeMenuTab === section.id
                           ? 'bg-white shadow text-gray-800'
                           : 'text-gray-400 hover:text-gray-600'
@@ -1002,6 +1456,241 @@ const ComandasPage: React.FC = () => {
                   <Printer size={16} /> Imprimir Tarjeta de Mesa
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: PRE-CUENTA / TICKET DE CONSUMO (IMPRIMIBLE) ── */}
+      {showPreCuentaModal && preCuentaTable && (() => {
+        const tableOrders = comandas.filter(c => c.table_id === preCuentaTable)
+        const subtotal = tableOrders.reduce((s, o) => s + (Number(o.total_amount) || 0), 0)
+        const serviceFee = Number((subtotal * 0.10).toFixed(2))
+        const totalToPay = Number((subtotal + serviceFee).toFixed(2))
+        const totalBs = (totalToPay * bcvRate).toFixed(2)
+        const activeWaiter = tableOrders.find(o => o.waiter)?.waiter || null
+        const activeRoom = tableOrders.find(o => o.room_id)?.room_id || null
+
+        return (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm print:p-0 print:bg-white print:static">
+            <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl flex flex-col overflow-hidden print:shadow-none print:w-full print:max-w-none">
+              
+              {/* Header (Hidden when printing) */}
+              <div className="p-5 border-b border-gray-100 flex items-center justify-between print:hidden bg-gray-50">
+                <div className="flex items-center gap-2 text-gray-800 font-bold text-sm">
+                  <Receipt size={18} className="text-[#C5A059]" />
+                  <span>Pre-Cuenta de Mesa / Habitación</span>
+                </div>
+                <button
+                  onClick={() => setShowPreCuentaModal(false)}
+                  className="p-1.5 text-gray-400 hover:bg-gray-200 rounded-full transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* TICKET BODY (Formatted for screen and thermal/standard print) */}
+              <div className="p-6 overflow-y-auto max-h-[75vh] font-mono text-xs space-y-4 print:p-0 print:overflow-visible">
+                <div className="text-center space-y-1 border-b border-dashed border-gray-300 pb-4">
+                  <h2 className="font-bold text-base font-serif text-gray-900 tracking-wider">ESTANCIA LA CAÑADA</h2>
+                  <p className="text-[10px] text-gray-500">BAR & RESTAURANTE</p>
+                  <p className="text-[10px] text-gray-500">Mérida, Venezuela</p>
+                  <div className="pt-2 flex flex-col items-center gap-1">
+                    <span className="inline-block bg-gray-100 px-3 py-1 rounded-full font-bold text-gray-800 text-xs">
+                      {preCuentaTable}
+                    </span>
+                    {activeWaiter && (
+                      <span className="text-[11px] font-bold text-amber-800">
+                        🧑‍🍳 Camarero: {activeWaiter}
+                      </span>
+                    )}
+                    {activeRoom && (
+                      <span className="text-[11px] font-bold text-blue-800 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+                        🏨 Cargar a: {activeRoom}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[9px] text-gray-400 pt-1">
+                    {new Date().toLocaleDateString('es-VE', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })} - {new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </div>
+
+                {/* Items list */}
+                <div className="space-y-2 py-2 border-b border-dashed border-gray-300">
+                  <div className="flex justify-between font-bold text-gray-400 text-[10px] uppercase tracking-wider pb-1">
+                    <span>Cant / Descripción</span>
+                    <span>Total</span>
+                  </div>
+                  {tableOrders.flatMap(o => o.items).map((it, idx) => (
+                    <div key={idx} className="flex justify-between items-start text-gray-800">
+                      <div className="pr-2">
+                        <span className="font-bold">{it.quantity}x</span> {it.name}
+                      </div>
+                      <span className="font-semibold shrink-0">
+                        {it.price === 'Incluido' ? 'Incluido' : it.price}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Totals Breakdown */}
+                <div className="space-y-1.5 pt-1 text-gray-700">
+                  <div className="flex justify-between text-xs">
+                    <span>Subtotal Consumos:</span>
+                    <span className="font-bold">${subtotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs font-bold text-emerald-800">
+                    <span>10% de Servicio {activeWaiter ? `(${activeWaiter})` : ''}:</span>
+                    <span>+${serviceFee.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-base font-extrabold text-gray-900 pt-2 border-t-2 border-gray-800">
+                    <span>TOTAL A PAGAR:</span>
+                    <span>${totalToPay.toFixed(2)}</span>
+                  </div>
+                  {bcvRate > 0 && (
+                    <div className="flex justify-between text-xs text-gray-500 pt-1">
+                      <span>Equivalente en Bolívares:</span>
+                      <span className="font-bold">Bs. {totalBs}</span>
+                    </div>
+                  )}
+                  {bcvRate > 0 && (
+                    <p className="text-[9px] text-gray-400 text-right">
+                      Tasa oficial BCV: {bcvRate} Bs/€
+                    </p>
+                  )}
+                </div>
+
+                {/* Guest signature box for room charges or table confirmation */}
+                <div className="pt-4 mt-2 border-t border-dashed border-gray-300 space-y-3">
+                  <div className="text-[10px] text-gray-600 font-bold text-center">
+                    {activeRoom ? `CARGO A CUENTA DE HABITACIÓN: ${activeRoom}` : 'FIRMA DE CONFORMIDAD DEL CLIENTE'}
+                  </div>
+                  <div className="pt-8 border-b border-gray-400"></div>
+                  <div className="flex justify-between text-[9px] text-gray-400">
+                    <span>Firma del Huésped / Room Signature</span>
+                    <span>{activeRoom ? `Hab: ${activeRoom}` : 'Mesa: ' + preCuentaTable}</span>
+                  </div>
+                  {activeRoom && (
+                    <p className="text-[8px] text-gray-400 text-center italic">
+                      El consumo será cargado a su habitación para cancelar al check-out en recepción.
+                    </p>
+                  )}
+                </div>
+
+                {/* Ticket footer note */}
+                <div className="text-center pt-4 border-t border-dashed border-gray-300 text-gray-400 text-[10px] space-y-1">
+                  <p className="font-bold text-gray-600">¡Muchas gracias por su visita!</p>
+                  <p>El 10% de servicio ha sido incluido en esta cuenta.</p>
+                </div>
+              </div>
+
+              {/* Actions footer (Hidden when printing) */}
+              <div className="p-5 border-t border-gray-100 bg-gray-50 flex items-center justify-between gap-3 print:hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowPreCuentaModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-gray-500 hover:bg-gray-200 transition-colors"
+                >
+                  Cerrar
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold bg-[#3D2B1F] text-white hover:bg-black transition-all shadow-sm"
+                  >
+                    <Printer size={15} /> Imprimir Cuenta
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPreCuentaModal(false)
+                      setActiveCheckoutTable(preCuentaTable)
+                      setShowCheckout(true)
+                    }}
+                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold bg-green-600 text-white hover:bg-green-700 transition-all shadow-sm"
+                  >
+                    <CheckCircle2 size={15} /> Proceder al Cobro
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ── MODAL: REPORTE DE PROPINAS POR CAMARERO ── */}
+      {showWaiterTipsModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl flex flex-col overflow-hidden">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-amber-50/60">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-[#C5A059]/20 rounded-2xl text-[#C5A059]">
+                  <Award size={24} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">Propinas por Camarero</h2>
+                  <p className="text-xs text-gray-500">10% de servicio acumulado por mesas cerradas en el Restaurante</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowWaiterTipsModal(false)}
+                className="p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-colors font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto max-h-[60vh] custom-scrollbar">
+              {loadingTips ? (
+                <div className="text-center py-12 text-gray-400 text-sm">Calculando propinas acumuladas...</div>
+              ) : waiterTipsData.length === 0 ? (
+                <div className="text-center py-12 text-gray-400 text-sm italic">
+                  Aún no hay comandas cerradas con camarero asignado.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {waiterTipsData.map((item, idx) => (
+                    <div key={idx} className="bg-gray-50 rounded-2xl p-4 border border-gray-100 flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-gray-800 text-sm">🧑‍🍳 {item.waiter}</span>
+                        </div>
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          {item.ordersCount} {item.ordersCount === 1 ? 'mesa atendida' : 'mesas atendidas'} · Consumos: ${item.salesTotal.toFixed(2)}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-base font-extrabold text-emerald-700">
+                          +${item.tipsTotal.toFixed(2)}
+                        </span>
+                        {bcvRate > 0 && (
+                          <p className="text-[10px] text-gray-400">
+                            ~Bs. {(item.tipsTotal * bcvRate).toFixed(2)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex justify-between items-center text-sm font-bold text-emerald-900 mt-4">
+                    <span>Total Propinas Restaurante:</span>
+                    <span className="text-lg font-extrabold text-emerald-700">
+                      ${waiterTipsData.reduce((s, i) => s + i.tipsTotal, 0).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end">
+              <button
+                onClick={() => setShowWaiterTipsModal(false)}
+                className="px-5 py-2.5 rounded-xl font-bold bg-[#3D2B1F] text-white hover:bg-black transition-colors text-sm"
+              >
+                Cerrar
+              </button>
             </div>
           </div>
         </div>
