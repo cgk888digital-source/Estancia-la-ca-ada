@@ -821,32 +821,59 @@ export default function BookingsPage() {
   // 1. Dynamic states calculation for TODAY's Day View
   const cabinStatesToday = useMemo(() => {
     return activeAccommodationOptions.map(acc => {
-      // Find any booking affecting this cabin today
-      // A booking occupies checkIn (inclusive) to checkOut (exclusive) or is checked out today
-      const todayBooking = bookings.find(b => {
-        if (b.accommodationId !== acc.id) return false
-        
-        // Match explicit status first
-        if (b.status === 'checkout_hoy' && b.checkOut === todayStr) return true
-        if (b.status === 'checkin_hoy' && b.checkIn === todayStr) return true
-        if (b.status === 'limpieza' && b.checkOut === todayStr) return true
-        
-        // Dates boundaries check
-        return todayStr >= b.checkIn && todayStr < b.checkOut
-      })
+      const accId = Number(acc.id)
+      const accBookings = bookings.filter(b => Number(b.accommodationId) === accId)
 
-      if (todayBooking) {
+      // 1) Explicit cleaning status (room needs cleaning / disinfection)
+      const cleaningBooking = accBookings.find(b => b.status === 'limpieza')
+      if (cleaningBooking) {
         return {
           accommodation: acc,
-          booking: todayBooking,
-          status: todayBooking.status
+          booking: cleaningBooking,
+          status: 'limpieza' as const
         }
-      } else {
+      }
+
+      // 2) Outgoing guest leaving today who has NOT completed checkout/cleaning
+      const checkoutBooking = accBookings.find(
+        b => b.checkOut === todayStr && b.status !== 'limpieza' && b.status !== 'checkout_hoy'
+      )
+      if (checkoutBooking) {
         return {
           accommodation: acc,
-          booking: null,
-          status: 'disponible' as const
+          booking: checkoutBooking,
+          status: 'checkout_hoy' as const
         }
+      }
+
+      // 3) Incoming guest arriving today
+      const checkinBooking = accBookings.find(b => b.checkIn === todayStr)
+      if (checkinBooking) {
+        const isOccupied = checkinBooking.status === 'ocupado'
+        return {
+          accommodation: acc,
+          booking: checkinBooking,
+          status: (isOccupied ? 'ocupado' : 'checkin_hoy') as 'ocupado' | 'checkin_hoy'
+        }
+      }
+
+      // 4) Guest currently staying through today (arrived before today, leaves after today)
+      const stayBooking = accBookings.find(
+        b => todayStr > b.checkIn && todayStr < b.checkOut
+      )
+      if (stayBooking) {
+        return {
+          accommodation: acc,
+          booking: stayBooking,
+          status: 'ocupado' as const
+        }
+      }
+
+      // 5) Otherwise: cabin is free and available
+      return {
+        accommodation: acc,
+        booking: null,
+        status: 'disponible' as const
       }
     })
   }, [bookings])
@@ -948,20 +975,43 @@ export default function BookingsPage() {
   // Key stats today
   const stats = useMemo(() => {
     const totalCabins = activeAccommodationOptions.length
-    const occupied = cabinStatesToday.filter(c => c.status === 'ocupado').length
-    const checkins = cabinStatesToday.filter(c => c.status === 'checkin_hoy').length
-    const checkouts = cabinStatesToday.filter(c => c.status === 'checkout_hoy').length
+    
+    // Check-ins today: all bookings arriving today that haven't checked in yet
+    const checkins = bookings.filter(
+      b => b.checkIn === todayStr && b.status !== 'ocupado'
+    ).length
+
+    // Check-outs today: all bookings scheduled to leave today that haven't completed checkout
+    const checkouts = bookings.filter(
+      b => b.checkOut === todayStr && b.status !== 'limpieza' && b.status !== 'checkout_hoy'
+    ).length
+
+    // Cleaning: cabins currently in cleaning
     const cleaning = cabinStatesToday.filter(c => c.status === 'limpieza').length
-    const available = cabinStatesToday.filter(c => c.status === 'disponible').length
+
+    // Occupied tonight: unique active cabins where a guest is staying tonight
+    // (includes both guests currently in-house and guests arriving today)
+    const activeAccIdSet = new Set(activeAccommodationOptions.map(a => Number(a.id)))
+    const occupiedCabinIds = new Set(
+      bookings
+        .filter(b => activeAccIdSet.has(Number(b.accommodationId)) && todayStr >= b.checkIn && todayStr < b.checkOut)
+        .map(b => Number(b.accommodationId))
+    )
+    const occupiedCount = occupiedCabinIds.size
+
+    // Free/available: active cabins that are neither occupied tonight nor in cleaning
+    const available = Math.max(0, totalCabins - occupiedCount - cleaning)
+
+    const occupancyRate = totalCabins > 0 ? Math.round((occupiedCount / totalCabins) * 100) : 0
 
     return {
-      occupancyRate: Math.round(((occupied + checkouts) / totalCabins) * 100),
+      occupancyRate,
       checkins,
       checkouts,
       cleaning,
       available
     }
-  }, [cabinStatesToday])
+  }, [bookings, cabinStatesToday])
 
   // Interactive operations
   const handleCheckIn = async (bookingId: string) => {
@@ -2289,11 +2339,17 @@ export default function BookingsPage() {
       {activeTab === 'dia' && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {cabinStatesToday.map(({ accommodation, booking, status }) => {
-            const conf = statusConfig[status]
+            const conf = statusConfig[status] || statusConfig.disponible
             let badgeBg = conf.bg
             
-            if (['checkin_hoy', 'checkout_hoy', 'disponible', 'limpieza'].includes(status)) {
-              badgeBg = 'bg-white border-gray-200 text-gray-800 shadow-sm'
+            if (status === 'disponible') {
+              badgeBg = 'bg-emerald-50 text-emerald-800 border-emerald-200 shadow-sm'
+            } else if (status === 'checkin_hoy') {
+              badgeBg = 'bg-amber-50 text-amber-800 border-amber-200 shadow-sm'
+            } else if (status === 'checkout_hoy') {
+              badgeBg = 'bg-orange-50 text-orange-800 border-orange-200 shadow-sm'
+            } else if (status === 'limpieza') {
+              badgeBg = 'bg-rose-50 text-rose-800 border-rose-200 shadow-sm'
             } else if (booking) {
               badgeBg = getBookingPaymentColors(booking).badge
             }
@@ -2332,7 +2388,11 @@ export default function BookingsPage() {
                 <div className="p-6 flex-1 flex flex-col justify-between gap-6">
                   {booking ? (
                     // Display current guest details
-                    <div className="space-y-4">
+                    <div
+                      className="space-y-4 cursor-pointer hover:opacity-90 transition-opacity"
+                      onClick={() => setSelectedBooking(booking)}
+                      title="Clic para ver detalles de la reserva"
+                    >
                       <div className="flex items-center justify-between border-b border-gray-50 pb-3">
                         <div>
                           <div className="flex items-center gap-2">
@@ -2384,27 +2444,43 @@ export default function BookingsPage() {
                   {/* Actions Section */}
                   <div className="border-t border-gray-50 pt-4 flex gap-2">
                     {status === 'checkin_hoy' && booking && (
-                      <button
-                        onClick={() => handleCheckIn(booking.id)}
-                        className="w-full flex items-center justify-center gap-1.5 py-3 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
-                      >
-                        <LogIn size={14} /> Registrar Entrada
-                      </button>
+                      <div className="flex gap-2 w-full">
+                        <button
+                          onClick={() => setSelectedBooking(booking)}
+                          className="flex-1 py-3 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
+                        >
+                          Ver Ficha
+                        </button>
+                        <button
+                          onClick={() => handleCheckIn(booking.id)}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-3 bg-[#C5A059] hover:bg-[#b8904a] text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
+                        >
+                          <LogIn size={14} /> Registrar Entrada
+                        </button>
+                      </div>
                     )}
 
                     {status === 'checkout_hoy' && booking && (
-                      <button
-                        onClick={() => handleCheckOut(booking.id)}
-                        className="w-full flex items-center justify-center gap-1.5 py-3 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
-                      >
-                        <LogOut size={14} /> Registrar Salida
-                      </button>
+                      <div className="flex gap-2 w-full">
+                        <button
+                          onClick={() => setSelectedBooking(booking)}
+                          className="flex-1 py-3 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
+                        >
+                          Ver Ficha
+                        </button>
+                        <button
+                          onClick={() => handleCheckOut(booking.id)}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
+                        >
+                          <LogOut size={14} /> Registrar Salida
+                        </button>
+                      </div>
                     )}
 
                     {status === 'ocupado' && booking && (
                       <button
                         onClick={() => setSelectedBooking(booking)}
-                        className={`w-full py-3 font-bold rounded-xl text-xs uppercase tracking-wider transition-all border ${getBookingPaymentColors(booking).badge}`}
+                        className={`w-full py-3 font-bold rounded-xl text-xs uppercase tracking-wider transition-all border shadow-sm ${getBookingPaymentColors(booking).badge}`}
                       >
                         Ver Detalles
                       </button>
@@ -2413,7 +2489,7 @@ export default function BookingsPage() {
                     {status === 'limpieza' && (
                       <button
                         onClick={() => handleMarkClean(accommodation.id)}
-                        className="w-full flex items-center justify-center gap-1.5 py-3 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
+                        className="w-full flex items-center justify-center gap-1.5 py-3 bg-white hover:bg-gray-50 text-rose-700 border border-rose-200 font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
                       >
                         <RefreshCw size={14} /> Marcar como Limpia
                       </button>
@@ -3795,7 +3871,7 @@ export default function BookingsPage() {
                 </button>
               )}
 
-              {selectedBooking.status === 'checkin_hoy' && (
+              {(selectedBooking.status === 'checkin_hoy' || (selectedBooking.status === 'confirmado' && todayStr >= selectedBooking.checkIn && todayStr < selectedBooking.checkOut)) && (
                 <button
                   onClick={() => handleCheckIn(selectedBooking.id)}
                   className="w-full flex items-center justify-center gap-1.5 py-3.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-2xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-lg shadow-amber-500/10"
@@ -3804,7 +3880,7 @@ export default function BookingsPage() {
                 </button>
               )}
 
-              {selectedBooking.status === 'checkout_hoy' && (
+              {(selectedBooking.status === 'checkout_hoy' || (selectedBooking.status === 'ocupado' && selectedBooking.checkOut === todayStr)) && (
                 <button
                   onClick={() => handleCheckOut(selectedBooking.id)}
                   className="w-full flex items-center justify-center gap-1.5 py-3.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-2xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-lg shadow-orange-500/10"
