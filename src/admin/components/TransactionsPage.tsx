@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react'
-import { Plus, Search, X, Check, CalendarDays, ChevronDown, ChevronUp, Loader2, Receipt, Building2, ArrowUpDown, ArrowUp, ArrowDown, Filter, RotateCcw, Calculator, Sparkles, Tag, RefreshCw, Pencil, Trash2, AlertTriangle } from 'lucide-react'
+import { Plus, Search, X, Check, CalendarDays, ChevronDown, Loader2, Receipt, Building2, ArrowUpDown, ArrowUp, ArrowDown, Filter, RotateCcw, Calculator, Tag, Pencil, Trash2 } from 'lucide-react'
 import { categoryLabels, categoryColors } from '../data/mockData'
 import LoadErrorBanner from './LoadErrorBanner'
 import { getBcvEuroRate, getBcvUsdRate } from '../../utils/exchangeRate'
@@ -264,7 +264,6 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   const [rateCurrency, setRateCurrency] = useState<'EUR' | 'USD'>('EUR')
   const [bcvEuro, setBcvEuro] = useState(708.39)
   const [bcvUsd, setBcvUsd] = useState(36.50)
-  const [loadingRates, setLoadingRates] = useState(false)
   const [appendRateNote, setAppendRateNote] = useState(true)
   const [mathExpression, setMathExpression] = useState('')
 
@@ -399,7 +398,6 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   useEffect(() => {
     let active = true
     const fetchRates = async () => {
-      setLoadingRates(true)
       try {
         const [eur, usd] = await Promise.all([getBcvEuroRate(), getBcvUsdRate()])
         if (!active) return
@@ -408,8 +406,6 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
         setExchangeRate(eur)
       } catch (e) {
         console.warn('Error obteniendo tasas BCV:', e)
-      } finally {
-        if (active) setLoadingRates(false)
       }
     }
     fetchRates()
@@ -549,7 +545,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
     if (!form.description.trim() || form.amount <= 0) return
     
     const cleanDesc = form.description.trim()
-    const cleanRelatedTo = form.relatedTo.trim()
+    const cleanRelatedTo = (form.relatedTo || '').trim()
 
     const dbTx = {
       date: form.date,
@@ -617,10 +613,9 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       } catch {}
 
       // Intento no bloqueante de guardar en tabla suppliers
-      supabase
+      void supabase
         .from('suppliers')
         .upsert({ name: cleanRelatedTo }, { onConflict: 'name' })
-        .catch(() => {})
     }
 
     setSaved(true)
@@ -1786,7 +1781,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-widest block">
                     Proveedor / Relacionado (opcional)
                   </label>
-                  {form.relatedTo.trim() && !suppliers.some(s => s.toLowerCase() === form.relatedTo.trim().toLowerCase()) && (
+                  {(form.relatedTo || '').trim() && !suppliers.some(s => s.toLowerCase() === (form.relatedTo || '').trim().toLowerCase()) && (
                     <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
                       ✨ Nuevo (se guardará)
                     </span>
@@ -1796,7 +1791,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                   <input
                     type="text"
                     placeholder={form.category === 'propinas' ? 'Ej. Mesa 4, Cliente Pérez (opcional)' : 'Escribe o selecciona un proveedor...'}
-                    value={form.relatedTo}
+                    value={form.relatedTo || ''}
                     onFocus={() => setShowSupplierDropdown(true)}
                     onChange={e => {
                       setForm(f => ({ ...f, relatedTo: e.target.value }))
@@ -1835,7 +1830,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                         type="button"
                         onClick={() => setForm(f => ({ ...f, relatedTo: sup }))}
                         className={`text-[11px] px-2 py-0.5 rounded-md border transition-all truncate max-w-[180px]
-                          ${form.relatedTo.toLowerCase() === sup.toLowerCase()
+                          ${(form.relatedTo || '').toLowerCase() === sup.toLowerCase()
                             ? 'bg-[#C5A059] text-white border-[#C5A059] font-semibold shadow-2xs'
                             : 'bg-gray-50 hover:bg-gray-100 text-gray-600 border-gray-200'}`}
                       >
@@ -1854,7 +1849,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                     />
                     <div className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-gray-200 rounded-2xl shadow-xl z-30 max-h-56 overflow-y-auto py-1.5 divide-y divide-gray-50">
                       {(() => {
-                        const term = form.relatedTo.trim().toLowerCase()
+                        const term = (form.relatedTo || '').trim().toLowerCase()
                         const matches = suppliers.filter(s =>
                           !term || s.toLowerCase().includes(term)
                         )
