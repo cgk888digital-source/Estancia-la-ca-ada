@@ -1226,6 +1226,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                   </tr>
                 ))
               )}
+            </tbody>
           </table>
           
           {totalPages > 1 && (
@@ -1413,7 +1414,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                                 }}
                                 className={`text-[9px] font-bold px-1.5 py-0.5 rounded transition-colors ${
                                   rateCurrency === 'EUR' ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                daylight saving?}`}
+                                }`}
                               >
                                 EUR €
                               </button>
