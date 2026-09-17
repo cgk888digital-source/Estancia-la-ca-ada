@@ -300,6 +300,7 @@ export default function BookingsPage() {
   const [savingRoom, setSavingRoom] = useState(false)
   const [editRoomForm, setEditRoomForm] = useState({ accommodationId: 0, adults: 0, children: 0, babies: 0, pets: 0 })
   const [editingDates, setEditingDates] = useState(false)
+  const [savingDates, setSavingDates] = useState(false)
   const [editDatesForm, setEditDatesForm] = useState({ checkIn: '', checkOut: '' })
   const [editingFinancials, setEditingFinancials] = useState(false)
   const [savingFinancials, setSavingFinancials] = useState(false)
@@ -1478,13 +1479,24 @@ export default function BookingsPage() {
   // Núcleo compartido: valida capacidad + colisión y persiste un cambio de fechas y/o
   // de habitación/cabaña asignada. Lo usan tanto el arrastre en la Semana como el
   // desplegable de "cambiar habitación" en el detalle de la reserva.
-  const reassignBooking = async (bookingId: string, newAccId: number, newCheckIn: string, newCheckOut: string) => {
+  const reassignBooking = async (
+    bookingId: string,
+    newAccId: number,
+    newCheckIn: string,
+    newCheckOut: string,
+    guestsOverride?: { adults: number; children: number; babies: number; pets: number }
+  ) => {
     const booking = bookings.find(b => b.id === bookingId)
     if (!booking) return false
 
-    if (newAccId !== booking.accommodationId) {
+    const adults = guestsOverride ? guestsOverride.adults : booking.guestsCount.adults
+    const children = guestsOverride ? guestsOverride.children : booking.guestsCount.children
+    const babies = guestsOverride ? guestsOverride.babies : booking.guestsCount.babies
+    const pets = guestsOverride ? guestsOverride.pets : booking.guestsCount.pets
+    const totalGuests = adults + children
+
+    if (newAccId !== booking.accommodationId || guestsOverride) {
       const maxCapacity = getMaxCapacity(newAccId)
-      const totalGuests = booking.guestsCount.adults + booking.guestsCount.children
       if (maxCapacity > 0 && totalGuests > maxCapacity) {
         alert(`Error: Capacidad excedida. Esa habitación/cabaña admite hasta ${maxCapacity} personas y esta reserva tiene ${totalGuests}.`)
         return false
@@ -1509,8 +1521,8 @@ export default function BookingsPage() {
       newAccId,
       newCheckIn,
       newCheckOut,
-      booking.guestsCount.adults,
-      booking.guestsCount.children
+      adults,
+      children
     )
     const newTotalAmount = getAdjustedBookingTotal(newStandardTotal, booking.specialNotes)
     const newPaymentStatus: Booking['paymentStatus'] = booking.amountPaid >= newTotalAmount
@@ -1519,15 +1531,23 @@ export default function BookingsPage() {
         ? 'parcial'
         : 'pendiente'
 
+    const updatePayload: Record<string, any> = {
+      accommodation_id: newAccId,
+      check_in: newCheckIn,
+      check_out: newCheckOut,
+      total_amount: newTotalAmount,
+      payment_status: newPaymentStatus
+    }
+    if (guestsOverride) {
+      updatePayload.adults = adults
+      updatePayload.children = children
+      updatePayload.babies = babies
+      updatePayload.pets = pets
+    }
+
     const { error } = await supabase
       .from('bookings')
-      .update({
-        accommodation_id: newAccId,
-        check_in: newCheckIn,
-        check_out: newCheckOut,
-        total_amount: newTotalAmount,
-        payment_status: newPaymentStatus
-      })
+      .update(updatePayload)
       .eq('id', bookingId)
 
     if (error) {
@@ -1536,12 +1556,15 @@ export default function BookingsPage() {
       return false
     }
 
-    const updatedFields = {
+    const updatedFields: Partial<Booking> = {
       accommodationId: newAccId,
       checkIn: newCheckIn,
       checkOut: newCheckOut,
       totalAmount: newTotalAmount,
       paymentStatus: newPaymentStatus
+    }
+    if (guestsOverride) {
+      updatedFields.guestsCount = { adults, children, babies, pets }
     }
     setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, ...updatedFields } : b))
     setSelectedBooking(prev => prev && prev.id === bookingId ? { ...prev, ...updatedFields } : prev)
@@ -1629,10 +1652,14 @@ export default function BookingsPage() {
       return
     }
 
+    const hasValidEditDates = editingDates && Boolean(editDatesForm.checkIn && editDatesForm.checkOut && editDatesForm.checkOut > editDatesForm.checkIn)
+    const effectiveCheckIn = hasValidEditDates ? editDatesForm.checkIn : roomBooking.checkIn
+    const effectiveCheckOut = hasValidEditDates ? editDatesForm.checkOut : roomBooking.checkOut
+
     const collision = bookings.find(item =>
       item.id !== roomBooking.id &&
       item.accommodationId === editRoomForm.accommodationId &&
-      roomBooking.checkIn < item.checkOut && roomBooking.checkOut > item.checkIn
+      effectiveCheckIn < item.checkOut && effectiveCheckOut > item.checkIn
     )
     if (collision) {
       alert(`${getAccommodation(editRoomForm.accommodationId)?.title || 'La habitación'} ya está ocupada en esas fechas.`)
@@ -1641,8 +1668,8 @@ export default function BookingsPage() {
 
     const standardTotal = getStandardRate(
       editRoomForm.accommodationId,
-      roomBooking.checkIn,
-      roomBooking.checkOut,
+      effectiveCheckIn,
+      effectiveCheckOut,
       editRoomForm.adults,
       editRoomForm.children
     )
@@ -1656,6 +1683,8 @@ export default function BookingsPage() {
       .from('bookings')
       .update({
         accommodation_id: editRoomForm.accommodationId,
+        check_in: effectiveCheckIn,
+        check_out: effectiveCheckOut,
         adults: editRoomForm.adults,
         children: editRoomForm.children,
         babies: editRoomForm.babies,
@@ -1672,8 +1701,10 @@ export default function BookingsPage() {
       return
     }
 
-    const updatedFields = {
+    const updatedFields: Partial<Booking> = {
       accommodationId: editRoomForm.accommodationId,
+      checkIn: effectiveCheckIn,
+      checkOut: effectiveCheckOut,
       guestsCount: {
         adults: editRoomForm.adults,
         children: editRoomForm.children,
@@ -1686,6 +1717,47 @@ export default function BookingsPage() {
     setBookings(prev => prev.map(item => item.id === roomBooking.id ? { ...item, ...updatedFields } : item))
     setSelectedBooking(prev => prev && prev.id === roomBooking.id ? { ...prev, ...updatedFields } : prev)
     setEditingRoomId(null)
+  }
+
+  const handleSaveDates = async () => {
+    if (!selectedBooking) return
+    if (!editDatesForm.checkIn || !editDatesForm.checkOut || editDatesForm.checkOut <= editDatesForm.checkIn) {
+      alert('Error: la fecha de check-out debe ser posterior al check-in.')
+      return
+    }
+
+    setSavingDates(true)
+    try {
+      const group = getBookingGroup(selectedBooking)
+      const results: boolean[] = []
+
+      for (const room of group) {
+        const isRoomBeingEdited = editingRoomId === room.id
+        const accId = isRoomBeingEdited ? editRoomForm.accommodationId : room.accommodationId
+        const guestsOverride = isRoomBeingEdited ? {
+          adults: editRoomForm.adults,
+          children: editRoomForm.children,
+          babies: editRoomForm.babies,
+          pets: editRoomForm.pets
+        } : undefined
+
+        const ok = await reassignBooking(
+          room.id,
+          accId,
+          editDatesForm.checkIn,
+          editDatesForm.checkOut,
+          guestsOverride
+        )
+        results.push(ok)
+      }
+
+      if (results.every(Boolean)) {
+        setEditingDates(false)
+        setEditingRoomId(null)
+      }
+    } finally {
+      setSavingDates(false)
+    }
   }
 
   const handleAddRoomsToBooking = async () => {
@@ -3195,10 +3267,17 @@ export default function BookingsPage() {
                     {getBookingGroup(selectedBooking).map(roomBooking => {
                       const acc = getAccommodation(roomBooking.accommodationId)
                       const isEditing = editingRoomId === roomBooking.id
+                      const hasValidEditDates = editingDates && Boolean(editDatesForm.checkIn && editDatesForm.checkOut && editDatesForm.checkOut > editDatesForm.checkIn)
+                      const effectiveCheckIn = hasValidEditDates ? editDatesForm.checkIn : roomBooking.checkIn
+                      const effectiveCheckOut = hasValidEditDates ? editDatesForm.checkOut : roomBooking.checkOut
+                      const effectiveNights = calculateNights(effectiveCheckIn, effectiveCheckOut)
+
                       const previewStandard = isEditing
-                        ? getStandardRate(editRoomForm.accommodationId, roomBooking.checkIn, roomBooking.checkOut, editRoomForm.adults, editRoomForm.children)
-                        : 0
+                        ? getStandardRate(editRoomForm.accommodationId, effectiveCheckIn, effectiveCheckOut, editRoomForm.adults, editRoomForm.children)
+                        : getStandardRate(roomBooking.accommodationId, effectiveCheckIn, effectiveCheckOut, roomBooking.guestsCount.adults, roomBooking.guestsCount.children)
                       const previewTotal = getAdjustedBookingTotal(previewStandard, roomBooking.specialNotes)
+                      const datesDiffer = hasValidEditDates && (editDatesForm.checkIn !== roomBooking.checkIn || editDatesForm.checkOut !== roomBooking.checkOut)
+
                       return (
                         <div key={roomBooking.id} className="bg-white p-3 border border-gray-100 rounded-2xl">
                           {isEditing ? (
@@ -3228,9 +3307,15 @@ export default function BookingsPage() {
                                   </div>
                                 ))}
                               </div>
-                              <div className="flex justify-between rounded-xl bg-gray-50 px-3 py-2 text-xs">
-                                <span className="font-semibold text-gray-500">Precio recalculado</span>
-                                <span className="font-bold text-gray-800">{fmt(previewTotal)}</span>
+                              <div className="flex justify-between items-center rounded-xl bg-amber-50/70 border border-amber-200/50 px-3 py-2 text-xs">
+                                <div className="flex flex-col">
+                                  <span className="font-semibold text-gray-700">Precio recalculado</span>
+                                  <span className="text-[10px] text-gray-500">
+                                    {effectiveNights} {effectiveNights === 1 ? 'noche' : 'noches'}
+                                    {hasValidEditDates ? ' (según fechas en edición)' : ''}
+                                  </span>
+                                </div>
+                                <span className="font-extrabold text-[#8A6D33] text-sm">{fmt(previewTotal)}</span>
                               </div>
                               <div className="flex gap-3">
                                 <button onClick={handleSaveRoomDetails} disabled={savingRoom} className="text-[10px] font-bold text-emerald-600 uppercase hover:underline disabled:opacity-40">
@@ -3244,11 +3329,21 @@ export default function BookingsPage() {
                               <img src={acc?.image} alt={acc?.title} className="w-14 h-14 object-cover rounded-xl" />
                               <div className="min-w-0 flex-1">
                                 <h4 className="text-xs font-bold text-gray-800">{acc?.title}</h4>
-                                <p className="text-[10px] text-gray-400 mt-1">
+                                <p className="text-[10px] text-gray-400 mt-0.5">
                                   {roomBooking.guestsCount.adults} adultos · {roomBooking.guestsCount.children} niños
                                   {roomBooking.guestsCount.babies > 0 && ` · ${roomBooking.guestsCount.babies} bebés`}
                                 </p>
-                                <p className="text-xs font-bold text-[#8A6D33] mt-1">{fmt(roomBooking.totalAmount)}</p>
+                                {datesDiffer ? (
+                                  <div className="flex items-baseline gap-1.5 mt-1">
+                                    <span className="text-xs font-extrabold text-emerald-700">{fmt(previewTotal)}</span>
+                                    <span className="text-[10px] text-gray-400 line-through">{fmt(roomBooking.totalAmount)}</span>
+                                    <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100/70 px-1.5 py-0.5 rounded-full">
+                                      {previewTotal - roomBooking.totalAmount >= 0 ? `+${fmt(previewTotal - roomBooking.totalAmount)}` : fmt(previewTotal - roomBooking.totalAmount)}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs font-bold text-[#8A6D33] mt-1">{fmt(roomBooking.totalAmount)}</p>
+                                )}
                               </div>
                               <div className="flex flex-col items-end gap-2">
                                 <button
@@ -3400,47 +3495,119 @@ export default function BookingsPage() {
                     )}
                   </div>
                   {editingDates ? (
-                    <div className="space-y-2">
+                    <div className="space-y-3 bg-amber-50/40 p-3.5 border border-amber-200/60 rounded-2xl">
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Check-In</label>
+                          <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Check-In</label>
                           <input
                             type="date"
                             value={editDatesForm.checkIn}
                             onChange={e => setEditDatesForm(f => ({ ...f, checkIn: e.target.value }))}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
                           />
                         </div>
                         <div>
-                          <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Check-Out</label>
+                          <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Check-Out</label>
                           <input
                             type="date"
                             value={editDatesForm.checkOut}
                             onChange={e => setEditDatesForm(f => ({ ...f, checkOut: e.target.value }))}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
                           />
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
+
+                      {/* Resumen en vivo de noches y tarifas recalculadas */}
+                      {(() => {
+                        const isValidRange = Boolean(editDatesForm.checkIn && editDatesForm.checkOut && editDatesForm.checkOut > editDatesForm.checkIn)
+                        if (!isValidRange) {
+                          return (
+                            <p className="text-[11px] font-semibold text-rose-600 bg-rose-50 border border-rose-200 p-2.5 rounded-xl">
+                              La fecha de check-out debe ser posterior al check-in.
+                            </p>
+                          )
+                        }
+
+                        const currentGroup = getBookingGroup(selectedBooking)
+                        const oldNights = calculateNights(selectedBooking.checkIn, selectedBooking.checkOut)
+                        const newNights = calculateNights(editDatesForm.checkIn, editDatesForm.checkOut)
+                        const diffNights = newNights - oldNights
+
+                        const oldTotal = currentGroup.reduce((sum, r) => sum + r.totalAmount, 0)
+                        const totalPaid = currentGroup.reduce((sum, r) => sum + r.amountPaid, 0)
+
+                        const newTotal = currentGroup.reduce((sum, room) => {
+                          const isRoomBeingEdited = editingRoomId === room.id
+                          const accId = isRoomBeingEdited ? editRoomForm.accommodationId : room.accommodationId
+                          const adults = isRoomBeingEdited ? editRoomForm.adults : room.guestsCount.adults
+                          const children = isRoomBeingEdited ? editRoomForm.children : room.guestsCount.children
+                          const standard = getStandardRate(accId, editDatesForm.checkIn, editDatesForm.checkOut, adults, children)
+                          return sum + getAdjustedBookingTotal(standard, room.specialNotes)
+                        }, 0)
+
+                        const diffAmount = newTotal - oldTotal
+                        const pendingBalance = Math.max(0, newTotal - totalPaid)
+
+                        return (
+                          <div className="bg-white border border-[#C5A059]/30 rounded-xl p-3 space-y-2 shadow-xs">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-gray-500 font-medium">Estadía:</span>
+                              <div className="flex items-center gap-1.5 font-bold">
+                                <span className="text-gray-800">{newNights} {newNights === 1 ? 'noche' : 'noches'}</span>
+                                {diffNights !== 0 && (
+                                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${diffNights > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                                    {diffNights > 0 ? `+${diffNights} ${diffNights === 1 ? 'noche' : 'noches'}` : `${diffNights} noches`}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between text-xs pt-1.5 border-t border-gray-100">
+                              <span className="text-gray-500 font-medium">Nueva tarifa recalculada:</span>
+                              <div className="flex items-center gap-2">
+                                {diffAmount !== 0 && (
+                                  <span className="text-[11px] text-gray-400 line-through">{fmt(oldTotal)}</span>
+                                )}
+                                <span className="font-extrabold text-[#8A6D33] text-sm">{fmt(newTotal)}</span>
+                              </div>
+                            </div>
+
+                            {diffAmount !== 0 && (
+                              <div className="flex items-center justify-between text-[11px] text-gray-600 bg-amber-500/10 px-2.5 py-1.5 rounded-lg font-medium">
+                                <span>{diffAmount > 0 ? 'Diferencia a cobrar:' : 'Diferencia a favor del huésped:'}</span>
+                                <span className={`font-bold ${diffAmount > 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                  {diffAmount > 0 ? `+${fmt(diffAmount)}` : fmt(diffAmount)}
+                                </span>
+                              </div>
+                            )}
+
+                            <div className="flex items-center justify-between text-xs pt-1.5 border-t border-gray-100 text-[11px]">
+                              <span className="text-gray-500">Ya pagado: <strong className="text-gray-700">{fmt(totalPaid)}</strong></span>
+                              <span className="text-gray-500">Saldo pendiente: <strong className={pendingBalance > 0 ? 'text-rose-600' : 'text-emerald-600'}>{fmt(pendingBalance)}</strong></span>
+                            </div>
+                          </div>
+                        )
+                      })()}
+
+                      <div className="flex items-center gap-3 pt-1">
                         <button
-                          onClick={async () => {
-                            if (editDatesForm.checkOut <= editDatesForm.checkIn) {
-                              alert('Error: la fecha de check-out debe ser posterior al check-in.')
-                              return
-                            }
-                            const results = []
-                            for (const room of getBookingGroup(selectedBooking)) {
-                              results.push(await reassignBooking(room.id, room.accommodationId, editDatesForm.checkIn, editDatesForm.checkOut))
-                            }
-                            if (results.every(Boolean)) setEditingDates(false)
-                          }}
-                          className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider hover:underline"
+                          onClick={handleSaveDates}
+                          disabled={savingDates}
+                          className="text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-2 rounded-xl uppercase tracking-wider transition-colors disabled:opacity-50 flex items-center gap-1.5"
                         >
-                          Guardar en toda la reserva
+                          {savingDates ? (
+                            <>
+                              <div className="w-3 h-3 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
+                              Guardando nuevas fechas...
+                            </>
+                          ) : (
+                            'Guardar en toda la reserva'
+                          )}
                         </button>
                         <button
                           onClick={() => setEditingDates(false)}
-                          className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:underline"
+                          disabled={savingDates}
+                          className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:underline disabled:opacity-40"
                         >
                           Cancelar
                         </button>
