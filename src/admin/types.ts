@@ -33,6 +33,21 @@ export interface Employee {
   accumulatedTips?: number
 }
 
+/** Bono extra que se paga a un empleado junto con la nomina. Se apunta cuando se decide
+ *  y queda pendiente hasta el dia del pago. */
+export interface EmployeeBonus {
+  id: string
+  employeeId: string
+  amount: number
+  /** Motivo del bono. Puede ir vacio. */
+  concept: string
+  /** Dia en que se concede. */
+  bonusDate: string
+  paid: boolean
+  /** Dia en que se cobro, null mientras siga pendiente. */
+  paidAt: string | null
+}
+
 export interface MonthlyData {
   month: string
   ingresos: number

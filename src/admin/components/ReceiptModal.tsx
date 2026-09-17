@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { X, Printer, CheckCircle2 } from 'lucide-react';
-import type { Employee } from '../types';
+import type { Employee, EmployeeBonus } from '../types';
 
 interface ReceiptModalProps {
   emp: Employee;
@@ -8,6 +8,9 @@ interface ReceiptModalProps {
   period: string; // e.g. "Quincena", "Semana", "5 días"
   bcvRate: number;
   isHistory?: boolean;
+  /** Bonos cobrados en este mismo pago. El recibo tiene que decirlo: el empleado firma
+   *  una cantidad y tiene derecho a ver de que se compone. */
+  bonuses?: EmployeeBonus[];
   onClose: () => void;
 }
 
@@ -17,8 +20,12 @@ const fmtUsd = (n: number) =>
 const fmtBs = (n: number) =>
   new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'VES', maximumFractionDigits: 2 }).format(n);
 
-const ReceiptModal: React.FC<ReceiptModalProps> = ({ emp, amountUsd, period, bcvRate, isHistory, onClose }) => {
+const ReceiptModal: React.FC<ReceiptModalProps> = ({ emp, amountUsd, period, bcvRate, isHistory, bonuses, onClose }) => {
   const amountBs = amountUsd * bcvRate;
+  const listaBonos = bonuses ?? [];
+  const totalBonos = listaBonos.reduce((s, b) => s + b.amount, 0);
+  // `amountUsd` ya viene con los bonos sumados; el sueldo es lo que queda al quitarlos.
+  const sueldoUsd = amountUsd - totalBonos;
   const [date] = useState(new Date().toLocaleDateString('es-ES', { 
     year: 'numeric', 
     month: 'long', 
@@ -73,6 +80,23 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({ emp, amountUsd, period, bcv
             <span className="text-gray-500 text-sm font-medium">Período</span>
             <span className="font-bold text-gray-900 capitalize">{period}</span>
           </div>
+          {totalBonos > 0 && (
+            <div className="pt-4 border-t border-gray-200 space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-gray-500 text-sm font-medium">Sueldo del período</span>
+                <span className="font-bold text-gray-900">{fmtUsd(sueldoUsd)}</span>
+              </div>
+              {listaBonos.map(b => (
+                <div key={b.id} className="flex justify-between items-center gap-3">
+                  <span className="text-gray-500 text-sm font-medium truncate">
+                    Bono{b.concept ? ' — ' + b.concept : ''}
+                  </span>
+                  <span className="font-bold text-emerald-600 shrink-0">{fmtUsd(b.amount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="pt-4 border-t border-gray-200 flex flex-col gap-1 items-end">
             <div className="flex justify-between items-center w-full">
               <span className="text-gray-500 text-sm font-bold uppercase tracking-wider">Total Pagado</span>
@@ -135,6 +159,26 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({ emp, amountUsd, period, bcv
             <p className="text-lg">
               Por concepto de honorarios / salario correspondiente al período: <strong>{period}</strong>.
             </p>
+            {totalBonos > 0 && (
+              <table className="w-full text-left border border-gray-400">
+                <tbody>
+                  <tr className="border-b border-gray-300">
+                    <td className="px-4 py-2">Sueldo del período</td>
+                    <td className="px-4 py-2 text-right font-bold">{fmtUsd(sueldoUsd)}</td>
+                  </tr>
+                  {listaBonos.map(b => (
+                    <tr key={b.id} className="border-b border-gray-300">
+                      <td className="px-4 py-2">Bono{b.concept ? ' — ' + b.concept : ''}</td>
+                      <td className="px-4 py-2 text-right font-bold">{fmtUsd(b.amount)}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td className="px-4 py-2 font-bold uppercase tracking-wider">Total</td>
+                    <td className="px-4 py-2 text-right font-bold">{fmtUsd(amountUsd)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            )}
           </div>
 
           {/* Details Table */}

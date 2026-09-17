@@ -1,15 +1,23 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { Plus, Check, X, UserCheck, UserX, DollarSign, Loader2, Users, Clock, Calendar, Receipt, Pencil, CheckSquare, Square, Coins } from 'lucide-react'
+import { Plus, Check, X, UserCheck, UserX, DollarSign, Loader2, Users, Clock, Calendar, Receipt, Pencil, CheckSquare, Square, Coins, Gift, Trash2 } from 'lucide-react'
 import LoadErrorBanner from './LoadErrorBanner'
-import type { Employee } from '../types'
+import type { Employee, EmployeeBonus } from '../types'
 import { supabase } from '../../lib/supabase'
 import { getBcvEuroRate } from '../../utils/exchangeRate'
-import { parseLocalDate } from '../../utils/dateUtils'
+import { parseLocalDate, fechaLocalISO } from '../../utils/dateUtils'
 import ReceiptModal from './ReceiptModal'
 import WeeklyTipsModal from './WeeklyTipsModal'
+import {
+  cargarBonos, crearBono, borrarBonoPendiente, pagarBonosPendientes,
+  sumaDeBonos, bonosPagadosEn, esApunteDeBono,
+} from '../../utils/employeeBonuses'
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
+
+// Los sueldos son cifras redondas, los bonos no: 12,50 no puede salir como 13.
+const fmtBono = (n: number) =>
+  new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n)
 
 interface DbEmployee {
   id: string
@@ -145,7 +153,7 @@ const EmployeesPage: React.FC = () => {
   const [payEventualTarget, setPayEventualTarget] = useState<Employee | null>(null)
   const [payingEventual, setPayingEventual] = useState(false)
   const [activeTab, setActiveTab] = useState<'fijos' | 'eventuales'>('fijos')
-  const [receiptData, setReceiptData] = useState<{emp: Employee, amount: number, period: string, isHistory?: boolean, bcvRate?: number} | null>(null)
+  const [receiptData, setReceiptData] = useState<{emp: Employee, amount: number, period: string, isHistory?: boolean, bcvRate?: number, bonuses?: EmployeeBonus[]} | null>(null)
   const [bcvRate, setBcvRate] = useState<number>(36.50)
   
   // Fondo y Reparto de Propinas
@@ -156,6 +164,12 @@ const EmployeesPage: React.FC = () => {
   const [frequencyFilter, setFrequencyFilter] = useState<'todas' | 'semanal' | 'quincenal' | 'por_dias'>('todas')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [payingSelected, setPayingSelected] = useState(false)
+
+  // ── Bonos ─────────────────────────────────────────────────────────────────
+  const [bonuses, setBonuses] = useState<EmployeeBonus[]>([])
+  const [bonusTarget, setBonusTarget] = useState<Employee | null>(null)
+  const [savingBonus, setSavingBonus] = useState(false)
+  const [bonusForm, setBonusForm] = useState(() => ({ amount: '', concept: '', date: fechaLocalISO() }))
 
   const [form, setForm] = useState({
     name: '',
@@ -209,7 +223,17 @@ const EmployeesPage: React.FC = () => {
       setGlobalTipsBalance(total)
     }
     fetchTips()
-    
+
+    const fetchBonuses = async () => {
+      const { bonos, error } = await cargarBonos()
+      if (!active) return
+      // Si esto fallara, la nomina sigue funcionando sin bonos. Lo que no puede pasar es
+      // enseñar media lista y que la dueña pague de menos creyendo que estan todos.
+      if (error) { console.error('Error cargando bonos:', error); return }
+      setBonuses(bonos)
+    }
+    fetchBonuses()
+
     return () => { active = false }
   }, [])
 
@@ -248,17 +272,56 @@ const EmployeesPage: React.FC = () => {
   }, [employees, selectedIds])
 
   const totalSelectedPay = useMemo(() => {
+    // El total que se anuncia antes de confirmar tiene que ser el que se va a pagar de
+    // verdad, bonos incluidos, o la dueña aprueba una cifra y sale otra.
+    const bonoPorEmpleado = new Map<string, number>()
+    for (const b of bonuses) {
+      if (b.paid) continue
+      bonoPorEmpleado.set(b.employeeId, (bonoPorEmpleado.get(b.employeeId) ?? 0) + b.amount)
+    }
     return selectedPendingEmployees.reduce((sum, e) => {
-      if (e.employeeType === 'fijo') return sum + e.salary
-      const days = e.contractedDays || (e.paymentFrequency === 'semanal' ? 7 : 1)
-      return sum + (e.dailyRate * days)
+      const base = e.employeeType === 'fijo'
+        ? e.salary
+        : e.dailyRate * (e.contractedDays || (e.paymentFrequency === 'semanal' ? 7 : 1))
+      return sum + base + (bonoPorEmpleado.get(e.id) ?? 0)
     }, 0)
-  }, [selectedPendingEmployees])
+  }, [selectedPendingEmployees, bonuses])
+
+  // Bonos pendientes agrupados por empleado, para no recorrer la lista entera en cada
+  // fila de la tabla.
+  const bonosPendientesPorEmpleado = useMemo(() => {
+    const mapa = new Map<string, EmployeeBonus[]>()
+    for (const b of bonuses) {
+      if (b.paid) continue
+      const lista = mapa.get(b.employeeId)
+      if (lista) lista.push(b)
+      else mapa.set(b.employeeId, [b])
+    }
+    return mapa
+  }, [bonuses])
+
+  const bonosPendientesDe = (id: string) => bonosPendientesPorEmpleado.get(id) ?? []
+  const totalBonosPendientes = (id: string) => sumaDeBonos(bonosPendientesDe(id))
+
+  /** Cobra los bonos pendientes de un empleado y deja el estado en pantalla al dia. */
+  const cobrarBonos = async (emp: Employee, fecha: string): Promise<EmployeeBonus[]> => {
+    const pendientes = bonosPendientesDe(emp.id)
+    if (pendientes.length === 0) return []
+
+    const { pagados, error } = await pagarBonosPendientes(emp, pendientes, fecha, bcvRate)
+    if (pagados.length > 0) {
+      const ids = new Set(pagados.map(b => b.id))
+      setBonuses(prev => prev.map(b => ids.has(b.id) ? { ...b, paid: true, paidAt: fecha } : b))
+    }
+    // El error se enseña siempre: es dinero que puede quedar sin apuntar en Egresos.
+    if (error) alert(error)
+    return pagados
+  }
 
   // ── Pay fixed employee ────────────────────────────────────────────────────
   const handlePay = async (id: string) => {
     setPaidId(id)
-    const today = new Date().toISOString().split('T')[0]
+    const today = fechaLocalISO()
     const emp = employees.find(e => e.id === id)
 
     const { error } = await supabase
@@ -281,6 +344,8 @@ const EmployeesPage: React.FC = () => {
       }])
     }
 
+    const bonosCobrados = emp ? await cobrarBonos(emp, today) : []
+
     setEmployees(prev => prev.map(e => e.id === id ? { ...e, pendingPayment: false, lastPayment: today } : e))
     setSelectedIds(prev => {
       const next = new Set(prev)
@@ -289,7 +354,12 @@ const EmployeesPage: React.FC = () => {
     })
     setPaidId(null)
     if (emp) {
-      setReceiptData({ emp, amount: emp.salary, period: emp.paymentFrequency === 'semanal' ? 'Semana' : 'Quincena' })
+      setReceiptData({
+        emp,
+        amount: emp.salary + sumaDeBonos(bonosCobrados),
+        period: emp.paymentFrequency === 'semanal' ? 'Semana' : 'Quincena',
+        bonuses: bonosCobrados,
+      })
     }
   }
 
@@ -301,7 +371,7 @@ const EmployeesPage: React.FC = () => {
     if (!window.confirm(confirmMsg)) return
 
     setPayingSelected(true)
-    const today = new Date().toISOString().split('T')[0]
+    const today = fechaLocalISO()
     const ids = selectedPendingEmployees.map(e => e.id)
 
     const { error } = await supabase
@@ -334,6 +404,12 @@ const EmployeesPage: React.FC = () => {
 
     await supabase.from('transactions').insert(txs)
 
+    // Los bonos pendientes se cobran con la nomina, cada uno con su apunte aparte.
+    const bonosPorEmpleado = new Map<string, EmployeeBonus[]>()
+    for (const emp of selectedPendingEmployees) {
+      bonosPorEmpleado.set(emp.id, await cobrarBonos(emp, today))
+    }
+
     setEmployees(prev => prev.map(e => ids.includes(e.id) ? { ...e, pendingPayment: false, lastPayment: today } : e))
     setSelectedIds(new Set())
     setPayingSelected(false)
@@ -341,14 +417,20 @@ const EmployeesPage: React.FC = () => {
     if (selectedPendingEmployees.length === 1) {
       const single = selectedPendingEmployees[0]
       const amt = single.employeeType === 'fijo' ? single.salary : single.dailyRate * (single.contractedDays || 7)
-      setReceiptData({ emp: single, amount: amt, period: single.paymentFrequency === 'semanal' ? 'Semana' : 'Quincena' })
+      const bonos = bonosPorEmpleado.get(single.id) ?? []
+      setReceiptData({
+        emp: single,
+        amount: amt + sumaDeBonos(bonos),
+        period: single.paymentFrequency === 'semanal' ? 'Semana' : 'Quincena',
+        bonuses: bonos,
+      })
     } else {
       alert(`¡Se procesó exitosamente el pago de nómina de ${selectedPendingEmployees.length} empleados!`)
     }
   }
 
   const handlePayAll = async () => {
-    const today = new Date().toISOString().split('T')[0]
+    const today = fechaLocalISO()
     const pending = activeFijos.filter(e => e.pendingPayment)
     if (pending.length === 0) return
 
@@ -372,6 +454,8 @@ const EmployeesPage: React.FC = () => {
     }))
     await supabase.from('transactions').insert(txs)
 
+    for (const emp of pending) await cobrarBonos(emp, today)
+
     setEmployees(prev =>
       prev.map(e => e.employeeType === 'fijo' && e.status === 'activo' && e.pendingPayment
         ? { ...e, pendingPayment: false, lastPayment: today }
@@ -384,7 +468,7 @@ const EmployeesPage: React.FC = () => {
   // ── Pay eventual employee ─────────────────────────────────────────────────
   const handlePayEventual = async (emp: Employee, days: number) => {
     setPayingEventual(true)
-    const today = new Date().toISOString().split('T')[0]
+    const today = fechaLocalISO()
     const amount = emp.dailyRate * days
 
     const { error } = await supabase
@@ -405,10 +489,17 @@ const EmployeesPage: React.FC = () => {
       related_to: emp.name,
     }])
 
+    const bonosCobrados = await cobrarBonos(emp, today)
+
     setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, lastPayment: today, pendingPayment: false } : e))
     setPayingEventual(false)
     setPayEventualTarget(null)
-    setReceiptData({ emp, amount, period: freqLabel })
+    setReceiptData({
+      emp,
+      amount: amount + sumaDeBonos(bonosCobrados),
+      period: freqLabel,
+      bonuses: bonosCobrados,
+    })
   }
 
   const handleViewLastReceipt = async (emp: Employee) => {
@@ -420,14 +511,16 @@ const EmployeesPage: React.FC = () => {
       .eq('related_to', emp.name)
       .eq('date', emp.lastPayment)
       .order('created_at', { ascending: false })
-      .limit(1)
+      .limit(10)
 
-    if (error || !data || data.length === 0) {
+    // Un bono es otro apunte del mismo empleado y la misma fecha. Sin saltarlos, al pedir
+    // el recibo saldria el del bono en lugar del del sueldo.
+    const tx = (data || []).find(t => !esApunteDeBono(t.notes))
+
+    if (error || !tx) {
       alert('No se encontró el comprobante de este pago.')
       return
     }
-
-    const tx = data[0]
     const matchRate = tx.description.match(/Tasa BCV: ([\d.]+) Bs\/\$/)
     const rate = matchRate ? Number(matchRate[1]) : bcvRate
     
@@ -442,7 +535,49 @@ const EmployeesPage: React.FC = () => {
       }
     }
 
-    setReceiptData({ emp, amount: tx.amount, period, isHistory: true, bcvRate: rate })
+    const bonos = await bonosPagadosEn(emp.id, emp.lastPayment)
+    setReceiptData({
+      emp,
+      amount: Number(tx.amount) + sumaDeBonos(bonos),
+      period,
+      isHistory: true,
+      bcvRate: rate,
+      bonuses: bonos,
+    })
+  }
+
+  // ── Bonos: apuntar, quitar ────────────────────────────────────────────────
+  const handleOpenBonus = (emp: Employee) => {
+    setBonusTarget(emp)
+    setBonusForm({ amount: '', concept: '', date: fechaLocalISO() })
+  }
+
+  const handleAddBonus = async () => {
+    if (!bonusTarget) return
+    const monto = Number(String(bonusForm.amount).replace(',', '.'))
+    if (!Number.isFinite(monto) || monto <= 0) {
+      alert('Escriba un monto mayor que cero.')
+      return
+    }
+
+    setSavingBonus(true)
+    const { bono, error } = await crearBono(bonusTarget.id, monto, bonusForm.concept, bonusForm.date)
+    setSavingBonus(false)
+
+    if (error || !bono) {
+      alert('No se pudo guardar el bono: ' + (error ?? 'la base de datos no devolvió nada'))
+      return
+    }
+
+    setBonuses(prev => [bono, ...prev])
+    setBonusForm({ amount: '', concept: '', date: fechaLocalISO() })
+  }
+
+  const handleDeleteBonus = async (bono: EmployeeBonus) => {
+    if (!window.confirm(`¿Eliminar el bono de ${fmtBono(bono.amount)}?`)) return
+    const error = await borrarBonoPendiente(bono.id)
+    if (error) { alert('No se pudo eliminar el bono: ' + error); return }
+    setBonuses(prev => prev.filter(b => b.id !== bono.id))
   }
 
   // ── Open Modals ───────────────────────────────────────────────────────────
@@ -451,7 +586,7 @@ const EmployeesPage: React.FC = () => {
     setForm({
       name: '',
       role: '',
-      hireDate: new Date().toISOString().split('T')[0],
+      hireDate: fechaLocalISO(),
       employeeType: activeTab === 'eventuales' ? 'eventual' : 'fijo',
       salary: '',
       paymentFrequency: 'quincenal',
@@ -513,7 +648,7 @@ const EmployeesPage: React.FC = () => {
         role: form.role,
         salary: isFijo ? Number(form.salary) : 0,
         status: 'activo',
-        hire_date: form.hireDate || new Date().toISOString().split('T')[0],
+        hire_date: form.hireDate || fechaLocalISO(),
         last_payment: null,
         pending_payment: true,
         employee_type: form.employeeType,
@@ -854,10 +989,27 @@ const EmployeesPage: React.FC = () => {
                       <td className="px-6 py-4 text-right">
                         <span className="text-sm font-bold text-gray-900">{fmt(emp.salary)}</span>
                         <p className="text-[10px] text-gray-400">/{emp.paymentFrequency === 'semanal' ? 'sem' : 'quinc'}</p>
+                        {totalBonosPendientes(emp.id) > 0 && (
+                          <p className="text-[10px] font-bold text-emerald-600 mt-1">
+                            + {fmtBono(totalBonosPendientes(emp.id))} en bonos
+                          </p>
+                        )}
                       </td>
 
                       <td className="px-4 py-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleOpenBonus(emp)}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              totalBonosPendientes(emp.id) > 0
+                                ? 'text-emerald-600 hover:bg-emerald-50'
+                                : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'
+                            }`}
+                            title="Bonos del empleado"
+                          >
+                            <Gift size={14} />
+                          </button>
+
                           <button
                             onClick={() => handleOpenEdit(emp)}
                             className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
@@ -986,6 +1138,11 @@ const EmployeesPage: React.FC = () => {
 
                       <td className="px-6 py-4 text-right">
                         <span className="text-sm font-bold text-gray-900">{fmt(emp.dailyRate)}</span>
+                        {totalBonosPendientes(emp.id) > 0 && (
+                          <p className="text-[10px] font-bold text-emerald-600 mt-1">
+                            + {fmtBono(totalBonosPendientes(emp.id))} en bonos
+                          </p>
+                        )}
                       </td>
 
                       <td className="px-4 py-4 hidden lg:table-cell">
@@ -1007,6 +1164,18 @@ const EmployeesPage: React.FC = () => {
 
                       <td className="px-4 py-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleOpenBonus(emp)}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              totalBonosPendientes(emp.id) > 0
+                                ? 'text-emerald-600 hover:bg-emerald-50'
+                                : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'
+                            }`}
+                            title="Bonos del empleado"
+                          >
+                            <Gift size={14} />
+                          </button>
+
                           <button
                             onClick={() => handleOpenEdit(emp)}
                             className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
@@ -1056,6 +1225,147 @@ const EmployeesPage: React.FC = () => {
         />
       )}
 
+      {/* ── Modal de Bonos del Empleado ── */}
+      {bonusTarget && (() => {
+        const suyos = bonuses
+          .filter(b => b.employeeId === bonusTarget.id)
+          .sort((a, b) => b.bonusDate.localeCompare(a.bonusDate))
+        const pendientes = suyos.filter(b => !b.paid)
+        const pagados = suyos.filter(b => b.paid)
+        const totalPendiente = sumaDeBonos(pendientes)
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto p-6 space-y-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <Gift size={18} className="text-emerald-600" />
+                    Bonos
+                  </h2>
+                  <p className="text-sm text-gray-500 mt-0.5">{bonusTarget.name}</p>
+                </div>
+                <button
+                  onClick={() => setBonusTarget(null)}
+                  className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors shrink-0"
+                >
+                  <X size={18} className="text-gray-500" />
+                </button>
+              </div>
+
+              {totalPendiente > 0 && (
+                <div className="rounded-2xl bg-emerald-50 border border-emerald-100 px-4 py-3">
+                  <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Pendiente de pago</p>
+                  <p className="text-xl font-bold text-emerald-700">{fmtBono(totalPendiente)}</p>
+                  <p className="text-xs text-emerald-800 mt-1">
+                    Se cobrará solo al pagar la próxima nómina, con su apunte aparte en Egresos.
+                  </p>
+                </div>
+              )}
+
+              {/* Apuntar un bono nuevo */}
+              <div className="space-y-3 rounded-2xl border border-gray-100 p-4">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Nuevo bono</p>
+
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Monto (USD)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      inputMode="decimal"
+                      value={bonusForm.amount}
+                      onChange={e => setBonusForm(prev => ({ ...prev, amount: e.target.value }))}
+                      placeholder="0.00"
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#C5A059] transition-colors"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Fecha</label>
+                    <input
+                      type="date"
+                      value={bonusForm.date}
+                      onChange={e => setBonusForm(prev => ({ ...prev, date: e.target.value }))}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#C5A059] transition-colors"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Motivo (opcional)</label>
+                  <input
+                    type="text"
+                    value={bonusForm.concept}
+                    onChange={e => setBonusForm(prev => ({ ...prev, concept: e.target.value }))}
+                    placeholder="Buen servicio, temporada alta..."
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#C5A059] transition-colors"
+                  />
+                </div>
+
+                <button
+                  onClick={handleAddBonus}
+                  disabled={savingBonus}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2"
+                >
+                  {savingBonus ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+                  Apuntar bono
+                </button>
+              </div>
+
+              {/* Pendientes */}
+              <div className="space-y-2">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+                  Pendientes ({pendientes.length})
+                </p>
+                {pendientes.length === 0 ? (
+                  <p className="text-sm text-gray-400 py-2">No hay bonos pendientes.</p>
+                ) : pendientes.map(b => (
+                  <div key={b.id} className="flex items-center gap-3 rounded-xl border border-gray-100 px-3 py-2.5">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-gray-900">{fmtBono(b.amount)}</p>
+                      <p className="text-xs text-gray-400 truncate">
+                        {parseLocalDate(b.bonusDate).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })}
+                        {b.concept ? ' · ' + b.concept : ''}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteBonus(b)}
+                      className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors shrink-0"
+                      title="Eliminar bono"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Historial */}
+              {pagados.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+                    Ya pagados ({pagados.length}) · {fmtBono(sumaDeBonos(pagados))}
+                  </p>
+                  {pagados.slice(0, 10).map(b => (
+                    <div key={b.id} className="flex items-center gap-3 px-3 py-2">
+                      <Check size={14} className="text-emerald-500 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-gray-600">{fmtBono(b.amount)}</p>
+                        <p className="text-xs text-gray-400 truncate">
+                          Pagado el {b.paidAt
+                            ? parseLocalDate(b.paidAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })
+                            : '—'}
+                          {b.concept ? ' · ' + b.concept : ''}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })()}
       {/* ── Receipt Modal ── */}
       {receiptData && (
         <ReceiptModal
@@ -1064,6 +1374,7 @@ const EmployeesPage: React.FC = () => {
           period={receiptData.period}
           bcvRate={receiptData.bcvRate || bcvRate}
           isHistory={receiptData.isHistory}
+          bonuses={receiptData.bonuses}
           onClose={() => setReceiptData(null)}
         />
       )}
