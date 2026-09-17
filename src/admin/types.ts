@@ -15,6 +15,10 @@ export interface Transaction {
   amount: number
   paymentMethod: PaymentMethod
   relatedTo?: string
+  /** Bolivares por dolar a los que se cambio. Null cuando se pago en dolares. */
+  exchangeRate?: number | null
+  /** Importe original en bolivares. `amount` es siempre el equivalente en dolares. */
+  amountBs?: number | null
 }
 
 export interface Employee {

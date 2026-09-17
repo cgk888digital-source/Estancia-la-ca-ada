@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react'
 import { Plus, Search, X, Check, CalendarDays, ChevronDown, Loader2, Receipt, Building2, ArrowUpDown, ArrowUp, ArrowDown, Filter, RotateCcw, Calculator, Tag, Pencil, Trash2 } from 'lucide-react'
 import { categoryLabels, categoryColors } from '../data/mockData'
 import LoadErrorBanner from './LoadErrorBanner'
-import { getBcvEuroRate, getBcvUsdRate } from '../../utils/exchangeRate'
+import { getBcvUsdRate, getParallelUsdRate } from '../../utils/exchangeRate'
 
 /** Cuantos movimientos se traen de una vez. Al superarlo se avisa en pantalla en vez
  *  de recortar en silencio, que era lo que hacia antes. */
@@ -154,6 +154,8 @@ interface DbTransaction {
   amount: number | string
   payment_method: string
   related_to?: string | null
+  exchange_rate?: number | string | null
+  amount_bs?: number | string | null
 }
 
 const mapDbTransactionToReact = (db: DbTransaction): Transaction => ({
@@ -164,7 +166,9 @@ const mapDbTransactionToReact = (db: DbTransaction): Transaction => ({
   description: db.description,
   amount: Number(db.amount) || 0,
   paymentMethod: db.payment_method as PaymentMethod,
-  relatedTo: db.related_to || ''
+  relatedTo: db.related_to || '',
+  exchangeRate: db.exchange_rate == null ? null : Number(db.exchange_rate),
+  amountBs: db.amount_bs == null ? null : Number(db.amount_bs),
 })
 
 function getDateRange(period: DatePeriod, customFrom: string, customTo: string): { from: Date | null; to: Date | null } {
@@ -191,6 +195,14 @@ function getDateRange(period: DatePeriod, customFrom: string, customTo: string):
     default:
       return { from: null, to: null }
   }
+}
+
+/** "Bs. 15.000,00 a 942,53 Bs/$" — como se enseña un movimiento pagado en bolivares. */
+const textoDeLaTasa = (amountBs?: number | null, rate?: number | null) => {
+  if (!amountBs || !rate || amountBs <= 0 || rate <= 0) return null
+  const bs = amountBs.toLocaleString('es-VE', { maximumFractionDigits: 2 })
+  const tasa = rate.toLocaleString('es-VE', { maximumFractionDigits: 2 })
+  return `Bs. ${bs} a ${tasa} Bs/$`
 }
 
 const PAGE_SIZE = 25
@@ -260,11 +272,15 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   const [showCalculator, setShowCalculator] = useState(false)
   const [calcTab, setCalcTab] = useState<'bcv' | 'math'>('bcv')
   const [amountBs, setAmountBs] = useState('')
-  const [exchangeRate, setExchangeRate] = useState(708.39)
-  const [rateCurrency, setRateCurrency] = useState<'EUR' | 'USD'>('EUR')
-  const [bcvEuro, setBcvEuro] = useState(708.39)
-  const [bcvUsd, setBcvUsd] = useState(36.50)
-  const [appendRateNote, setAppendRateNote] = useState(true)
+  // La tasa la escribe quien hizo el cambio. Las del BCV y la paralela solo se enseñan
+  // como referencia, para tocarlas de un golpe cuando coincida.
+  //
+  // Antes habia un selector EUR/USD: al elegir euro el resultado eran EUROS, y se
+  // guardaba en un campo que toda la app lee como DOLARES. Segun el boton que se tocara,
+  // el mismo gasto quedaba apuntado por una cifra distinta.
+  const [exchangeRate, setExchangeRate] = useState(0)
+  const [bcvUsd, setBcvUsd] = useState(0)
+  const [paraleloUsd, setParaleloUsd] = useState(0)
   const [mathExpression, setMathExpression] = useState('')
 
   // Lista de distribuidores/proveedores con conteo de movimientos para el menú de filtro
@@ -305,7 +321,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       
       let query = supabase
         .from('transactions')
-        .select('id, date, type, category, description, amount, payment_method, related_to')
+        .select('id, date, type, category, description, amount, payment_method, related_to, exchange_rate, amount_bs')
         .order('date', { ascending: false })
       
       // Aplicar filtros de fecha server-side (solo si hay rango definido)
@@ -394,18 +410,20 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
     filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
   , [filtered, page])
 
-  // Cargar tasas oficiales del BCV (Euro y Dólar)
+  // Tasas de referencia del dia: la del BCV y la paralela.
   useEffect(() => {
     let active = true
     const fetchRates = async () => {
       try {
-        const [eur, usd] = await Promise.all([getBcvEuroRate(), getBcvUsdRate()])
+        const [usd, paralelo] = await Promise.all([getBcvUsdRate(), getParallelUsdRate()])
         if (!active) return
-        setBcvEuro(eur)
         setBcvUsd(usd)
-        setExchangeRate(eur)
+        setParaleloUsd(paralelo)
+        // No se rellena la tasa sola: la dueña tiene que escribir a como cambio ella.
+        // Poner una por defecto invita a aceptarla sin mirar, y es justo lo que hace que
+        // el gasto quede apuntado a una tasa que nadie pago.
       } catch (e) {
-        console.warn('Error obteniendo tasas BCV:', e)
+        console.warn('Error obteniendo tasas de referencia:', e)
       }
     }
     fetchRates()
@@ -494,6 +512,8 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       amount: 0,
       paymentMethod: 'transferencia',
       relatedTo: '',
+      exchangeRate: null,
+      amountBs: null,
     })
     setShowCalculator(false)
     setShowModal(true)
@@ -509,6 +529,8 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       amount: tx.amount,
       paymentMethod: tx.paymentMethod,
       relatedTo: tx.relatedTo || '',
+      exchangeRate: tx.exchangeRate ?? null,
+      amountBs: tx.amountBs ?? null,
     })
     setShowCalculator(false)
     setShowModal(true)
@@ -554,7 +576,9 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       description: cleanDesc,
       amount: form.amount,
       payment_method: form.paymentMethod,
-      related_to: cleanRelatedTo || null
+      related_to: cleanRelatedTo || null,
+      exchange_rate: form.exchangeRate ?? null,
+      amount_bs: form.amountBs ?? null,
     }
 
     if (editingTx) {
@@ -1136,6 +1160,11 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
 
                     <td className="px-4 py-4">
                       <p className="text-sm font-semibold text-gray-900">{tx.description}</p>
+                      {textoDeLaTasa(tx.amountBs, tx.exchangeRate) && (
+                        <p className="text-[11px] text-gray-400 mt-0.5">
+                          {textoDeLaTasa(tx.amountBs, tx.exchangeRate)}
+                        </p>
+                      )}
                       {/* En móvil se muestra el distribuidor debajo con botón para filtrar */}
                       {tx.relatedTo && (
                         <div className="sm:hidden mt-1">
@@ -1308,7 +1337,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">
-                      Monto ($ / €)
+                      Monto ($)
                     </label>
                     <button
                       type="button"
@@ -1318,10 +1347,10 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                           ? 'bg-amber-600 text-white shadow-xs'
                           : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200'
                       }`}
-                      title="Abrir calculadora y conversor de Bolívares a Euro / Dólar"
+                      title="Abrir calculadora y conversor de Bolívares a dólares"
                     >
                       <Calculator size={13} />
-                      <span>{showCalculator ? 'Cerrar Calc' : '🧮 Calc / Bs a €'}</span>
+                      <span>{showCalculator ? 'Cerrar Calc' : '🧮 Calc / Bs a $'}</span>
                     </button>
                   </div>
                   <div className="relative">
@@ -1334,6 +1363,21 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                       className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-semibold outline-none focus:border-[#C5A059] transition-colors"
                     />
                   </div>
+                  {textoDeLaTasa(form.amountBs, form.exchangeRate) && (
+                    <div className="mt-1.5 flex items-center justify-between gap-2">
+                      <p className="text-[11px] text-gray-500">
+                        {textoDeLaTasa(form.amountBs, form.exchangeRate)}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, amountBs: null, exchangeRate: null }))}
+                        className="text-[11px] font-bold text-gray-400 hover:text-red-500 transition-colors shrink-0"
+                        title="Quitar la tasa de este movimiento"
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1352,7 +1396,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                             : 'bg-amber-100/70 text-amber-900 hover:bg-amber-200/70'
                         }`}
                       >
-                        <span>Bs → Euro / $</span>
+                        <span>Bs → Dólares</span>
                       </button>
                       <button
                         type="button"
@@ -1396,40 +1440,15 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                         </div>
 
                         <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
-                              Tasa ({rateCurrency === 'EUR' ? 'Bs/€' : 'Bs/$'})
-                            </label>
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setRateCurrency('EUR')
-                                  setExchangeRate(bcvEuro)
-                                }}
-                                className={`text-[9px] font-bold px-1.5 py-0.5 rounded transition-colors ${
-                                  rateCurrency === 'EUR' ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                }`}
-                              >
-                                EUR €
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setRateCurrency('USD')
-                                  setExchangeRate(bcvUsd)
-                                }}
-                                className={`text-[9px] font-bold px-1.5 py-0.5 rounded transition-colors ${
-                                  rateCurrency === 'USD' ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                }`}
-                              >
-                                USD $
-                              </button>
-                            </div>
-                          </div>
+                          <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1">
+                            Tasa a la que cambió (Bs por $)
+                          </label>
                           <input
                             type="number"
                             step="any"
+                            min="0"
+                            inputMode="decimal"
+                            placeholder="Ej. 942,53"
                             value={exchangeRate || ''}
                             onChange={e => setExchangeRate(Number(e.target.value))}
                             className="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-sm font-semibold outline-none focus:border-amber-500"
@@ -1437,31 +1456,30 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                         </div>
                       </div>
 
-                      {/* Botones de tasas oficiales BCV de acceso rápido */}
+                      {/* Referencias de hoy. Son un atajo, no una imposicion: la tasa
+                          buena es la que se pago de verdad. */}
                       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                        <span className="text-gray-400 font-medium">Tasas BCV oficiales:</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setRateCurrency('EUR')
-                            setExchangeRate(bcvEuro)
-                          }}
-                          className="px-2 py-0.5 rounded bg-white hover:bg-amber-50 text-amber-900 border border-amber-200 font-semibold flex items-center gap-1 shadow-2xs"
-                        >
-                          <span>🇪🇺 Euro:</span>
-                          <span className="font-bold">{bcvEuro.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setRateCurrency('USD')
-                            setExchangeRate(bcvUsd)
-                          }}
-                          className="px-2 py-0.5 rounded bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-medium flex items-center gap-1 shadow-2xs"
-                        >
-                          <span>🇺🇸 Dólar:</span>
-                          <span>{bcvUsd.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs</span>
-                        </button>
+                        <span className="text-gray-400 font-medium">Referencias de hoy:</span>
+                        {bcvUsd > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setExchangeRate(bcvUsd)}
+                            className="px-2 py-0.5 rounded bg-white hover:bg-amber-50 text-amber-900 border border-amber-200 font-semibold flex items-center gap-1 shadow-2xs"
+                          >
+                            <span>BCV:</span>
+                            <span className="font-bold">{bcvUsd.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs/$</span>
+                          </button>
+                        )}
+                        {paraleloUsd > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setExchangeRate(paraleloUsd)}
+                            className="px-2 py-0.5 rounded bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-semibold flex items-center gap-1 shadow-2xs"
+                          >
+                            <span>Paralelo:</span>
+                            <span className="font-bold">{paraleloUsd.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs/$</span>
+                          </button>
+                        )}
                       </div>
 
                       {/* Desglose y resultado del cálculo */}
@@ -1481,23 +1499,22 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                                     <span>{exchangeRate}</span>
                                     {' = '}
                                     <span className="text-sm font-extrabold text-emerald-600">
-                                      {result.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {rateCurrency === 'EUR' ? '€' : '$'}
+                                      {result.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $
                                     </span>
                                   </>
                                 ) : (
                                   <span className="text-gray-400 italic">Escribe el monto en Bs para convertir</span>
                                 )}
                               </p>
-                              {numBs > 0 && (
-                                <label className="flex items-center gap-1.5 mt-1 cursor-pointer text-[11px] text-gray-600">
-                                  <input
-                                    type="checkbox"
-                                    checked={appendRateNote}
-                                    onChange={e => setAppendRateNote(e.target.checked)}
-                                    className="rounded text-amber-600 focus:ring-amber-500"
-                                  />
-                                  <span>Incluir detalle de la tasa en descripción</span>
-                                </label>
+                              {numBs > 0 && exchangeRate <= 0 && (
+                                <p className="text-[11px] text-amber-700 font-medium mt-1">
+                                  Falta la tasa a la que cambió.
+                                </p>
+                              )}
+                              {result > 0 && (
+                                <p className="text-[11px] text-gray-500 mt-1">
+                                  Se guardan los bolívares y la tasa junto al movimiento.
+                                </p>
                               )}
                             </div>
 
@@ -1506,20 +1523,15 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                               disabled={result <= 0}
                               onClick={() => {
                                 if (result <= 0) return
-                                setForm(f => {
-                                  let newDesc = f.description
-                                  if (appendRateNote) {
-                                    const note = `(Bs. ${numBs.toLocaleString('es-VE', { maximumFractionDigits: 2 })} @ ${exchangeRate} Bs/${rateCurrency === 'EUR' ? '€' : '$'})`
-                                    if (!newDesc.includes(note)) {
-                                      newDesc = newDesc.trim() ? `${newDesc.trim()} ${note}` : note
-                                    }
-                                  }
-                                  return {
-                                    ...f,
-                                    amount: result,
-                                    description: newDesc
-                                  }
-                                })
+                                // Los bolivares y la tasa van a sus propios campos, no
+                                // pegados a la descripcion: asi no se pierden si luego se
+                                // edita el texto del movimiento.
+                                setForm(f => ({
+                                  ...f,
+                                  amount: result,
+                                  amountBs: numBs,
+                                  exchangeRate,
+                                }))
                                 setShowCalculator(false)
                               }}
                               className={`px-3 py-2 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center justify-center gap-1.5 ${
