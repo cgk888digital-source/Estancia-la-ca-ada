@@ -28,6 +28,10 @@ export interface BookingPaymentIncome {
   date: string
   method: string
   reference?: string | null
+  /** Si se cobro en bolivares: lo que entro y a que tasa. El apunte contable lo
+   *  guarda igual que el abono, para que las dos caras digan lo mismo. */
+  exchangeRate?: number | null
+  amountBs?: number | null
 }
 
 /**
@@ -67,6 +71,8 @@ export async function registrarIngresoDeAbono(
     // Apuntarla contra una reserva de `bookings` hace fallar el insert con un 23503.
     // El enlace con el abono lo lleva `notes`, que es lo que se consulta para no
     // duplicar y para poder retirar el ingreso.
+    exchange_rate: p.exchangeRate ?? null,
+    amount_bs: p.amountBs ?? null,
     notes: marca,
   })
 

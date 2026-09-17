@@ -12,6 +12,9 @@ import type { Booking, BookingPayment } from '../types'
 import PrintableReservationsReport from './PrintableReservationsReport'
 import { parseLocalDate, fechaLocalISO as formatLocalDate } from '../../utils/dateUtils'
 import { syncMarketingCustomer } from '../../utils/syncMarketingCustomer'
+import CobroEnBolivares from './CobroEnBolivares'
+import { dolaresDeBolivares, textoEnBolivares } from '../../utils/bolivares'
+import { getBcvEuroRate } from '../../utils/exchangeRate'
 import { useHotelSettings, getMealRates } from '../../utils/useHotelSettings'
 import { sendBookingConfirmationEmail } from '../../utils/sendBookingConfirmationEmail'
 import { sendBookingVoucherEmail } from '../../utils/sendBookingVoucherEmail'
@@ -107,6 +110,8 @@ interface DbBookingPayment {
   method: string
   reference?: string | null
   status: string
+  exchange_rate?: number | string | null
+  amount_bs?: number | string | null
 }
 
 const mapDbPaymentToReact = (db: DbBookingPayment): BookingPayment => ({
@@ -117,7 +122,9 @@ const mapDbPaymentToReact = (db: DbBookingPayment): BookingPayment => ({
   currency: db.currency || 'USD',
   method: (db.method || 'transferencia') as BookingPayment['method'],
   reference: db.reference || '',
-  status: (db.status || 'verificado') as BookingPayment['status']
+  status: (db.status || 'verificado') as BookingPayment['status'],
+  exchangeRate: db.exchange_rate == null ? null : Number(db.exchange_rate),
+  amountBs: db.amount_bs == null ? null : Number(db.amount_bs),
 })
 
 interface DbAccommodation {
@@ -176,7 +183,7 @@ const mapDbBookingToReact = (db: DbBooking): Booking => ({
   totalAmount: Number(db.total_amount) || 0,
   amountPaid: Number(db.amount_paid) || 0,
   paymentStatus: (db.payment_status || 'pendiente') as 'completo' | 'parcial' | 'pendiente',
-  paymentMethod: (db.payment_method || 'transferencia') as 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque' | 'zelle',
+  paymentMethod: (db.payment_method || 'transferencia') as 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque' | 'zelle' | 'pago_movil',
   paymentReference: db.payment_reference || '',
   status: (db.status || 'confirmado') as 'checkout_hoy' | 'checkin_hoy' | 'ocupado' | 'confirmado' | 'limpieza',
   confirmed: db.confirmed ?? true,
@@ -301,6 +308,13 @@ export default function BookingsPage() {
   const [editRoomForm, setEditRoomForm] = useState({ accommodationId: 0, adults: 0, children: 0, babies: 0, pets: 0 })
   const [editingDates, setEditingDates] = useState(false)
   const [savingDates, setSavingDates] = useState(false)
+
+  // Cobro en bolivares. La tasa del euro del BCV es la que usa la posada, pero se
+  // ofrece como referencia de un toque, no como valor impuesto: quien cobra escribe
+  // la que aplico de verdad.
+  const [bcvEuro, setBcvEuro] = useState<number | null>(null)
+  const [nuevoAbonoBs, setNuevoAbonoBs] = useState({ activo: false, bolivares: '', tasa: '' })
+  const [abonoInicialBs, setAbonoInicialBs] = useState({ activo: false, bolivares: '', tasa: '' })
   const [editDatesForm, setEditDatesForm] = useState({ checkIn: '', checkOut: '' })
   const [editingFinancials, setEditingFinancials] = useState(false)
   const [savingFinancials, setSavingFinancials] = useState(false)
@@ -317,7 +331,7 @@ export default function BookingsPage() {
   const [paymentForm, setPaymentForm] = useState({
     amount: '',
     date: todayStr,
-    method: 'transferencia' as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' | 'zelle',
+    method: 'transferencia' as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' | 'zelle' | 'pago_movil',
     reference: ''
   })
   const [weekAnchor, setWeekAnchor] = useState(() => new Date(todayDate))
@@ -374,7 +388,7 @@ export default function BookingsPage() {
     // dinero NO entro hoy. Sin este campo todos los abonos caian con la fecha de carga y
     // el mes en que se hizo la migracion aparecia inflado en Ingresos.
     paymentDate: todayStr,
-    paymentMethod: 'transferencia' as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' | 'zelle',
+    paymentMethod: 'transferencia' as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' | 'zelle' | 'pago_movil',
     paymentReference: '',
     specialNotes: DEFAULT_SPECIAL_NOTES
   })
@@ -813,6 +827,12 @@ export default function BookingsPage() {
     }
 
     fetchBookings()
+
+    // Referencia para cobrar en bolivares. Si falla se queda en null y el bloque de
+    // bolivares sigue funcionando: solo se pierde el atajo de la tasa del dia.
+    getBcvEuroRate()
+      .then(tasa => { if (active && tasa > 0) setBcvEuro(tasa) })
+      .catch(() => { /* sin referencia, se escribe a mano */ })
 
     return () => {
       active = false
@@ -1333,9 +1353,17 @@ export default function BookingsPage() {
 
   const handleAddPayment = async () => {
     if (!selectedBooking) return
-    const amount = Number(paymentForm.amount)
+
+    // Cobrado en bolivares: el monto en dolares NO se escribe, se calcula. Asi el
+    // saldo de la reserva y lo que entro en el banco no pueden separarse.
+    const enBs = nuevoAbonoBs.activo
+    const amount = enBs
+      ? dolaresDeBolivares(nuevoAbonoBs.bolivares, nuevoAbonoBs.tasa)
+      : Number(paymentForm.amount)
     if (!amount || amount <= 0) {
-      alert('Error: ingresa un monto de abono válido.')
+      alert(enBs
+        ? 'Escriba los bolívares recibidos y la tasa aplicada.'
+        : 'Error: ingresa un monto de abono válido.')
       return
     }
 
@@ -1355,7 +1383,9 @@ export default function BookingsPage() {
       currency: 'USD',
       method: paymentForm.method,
       reference: paymentForm.reference.trim() || null,
-      status: 'verificado'
+      status: 'verificado',
+      exchange_rate: enBs ? Number(String(nuevoAbonoBs.tasa).replace(',', '.')) : null,
+      amount_bs: enBs ? Number(String(nuevoAbonoBs.bolivares).replace(',', '.')) : null,
     }
 
     const { data, error } = await supabase
@@ -1386,6 +1416,8 @@ export default function BookingsPage() {
         date: paymentForm.date,
         method: paymentForm.method,
         reference: paymentForm.reference.trim() || null,
+        exchangeRate: payment.exchangeRate ?? null,
+        amountBs: payment.amountBs ?? null,
       })
       if (ingreso.error) {
         console.error('El abono se guardó pero no llegó a Ingresos:', ingreso.error)
@@ -2097,13 +2129,19 @@ export default function BookingsPage() {
           currency: 'USD',
           method: form.paymentMethod,
           reference: form.paymentReference.trim() || null,
-          status: 'verificado'
+          status: 'verificado',
+          exchange_rate: abonoInicialBs.activo
+            ? Number(String(abonoInicialBs.tasa).replace(',', '.'))
+            : null,
+          amount_bs: abonoInicialBs.activo
+            ? Number(String(abonoInicialBs.bolivares).replace(',', '.'))
+            : null,
         }
 
         const { data: pagosIniciales, error: paymentError } = await supabase
           .from('booking_payments')
           .insert(paymentRow)
-          .select('id, booking_id, amount')
+          .select('id, booking_id, amount, exchange_rate, amount_bs')
 
         if (paymentError) {
           console.error('Error adding initial payment:', paymentError)
@@ -2120,6 +2158,8 @@ export default function BookingsPage() {
               date: form.paymentDate || todayStr,
               method: form.paymentMethod,
               reference: form.paymentReference.trim() || null,
+              exchangeRate: payment.exchange_rate ?? null,
+              amountBs: payment.amount_bs ?? null,
             })
             if (ingreso.error) console.error('El abono inicial no llegó a Ingresos:', ingreso.error)
           }
@@ -3895,6 +3935,11 @@ export default function BookingsPage() {
                             </div>
                             <p className="text-[10px] text-gray-400 mt-0.5 truncate">
                               {parseLocalDate(p.paymentDate).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
+                              {textoEnBolivares(p.amountBs, p.exchangeRate) && (
+                                <span className="block text-[10px] text-gray-400">
+                                  {textoEnBolivares(p.amountBs, p.exchangeRate)}
+                                </span>
+                              )}
                               {' · '}<span className="capitalize">{p.method}</span>
                               {p.reference && <> · <span className="select-all">{p.reference}</span></>}
                             </p>
@@ -3952,10 +3997,14 @@ export default function BookingsPage() {
                           <input
                             type="number"
                             min={0}
-                            value={paymentForm.amount}
+                            value={nuevoAbonoBs.activo
+                              ? (dolaresDeBolivares(nuevoAbonoBs.bolivares, nuevoAbonoBs.tasa) || '')
+                              : paymentForm.amount}
                             onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))}
+                            disabled={nuevoAbonoBs.activo}
                             placeholder="0"
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059]"
+                            title={nuevoAbonoBs.activo ? 'Sale de los bolívares y la tasa' : undefined}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] disabled:bg-gray-50 disabled:text-gray-500"
                           />
                         </div>
                         <div>
@@ -3977,6 +4026,7 @@ export default function BookingsPage() {
                             className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white capitalize"
                           >
                             <option value="transferencia">Transferencia</option>
+                            <option value="pago_movil">Pago Móvil</option>
                             <option value="zelle">Zelle</option>
                             <option value="efectivo">Efectivo</option>
                             <option value="tarjeta">Tarjeta</option>
@@ -3994,6 +4044,20 @@ export default function BookingsPage() {
                           />
                         </div>
                       </div>
+                      <CobroEnBolivares
+                        compacto
+                        activo={nuevoAbonoBs.activo}
+                        onActivo={v => {
+                          setNuevoAbonoBs(prev => ({ ...prev, activo: v }))
+                          if (v) setPaymentForm(prev => ({ ...prev, amount: '' }))
+                        }}
+                        bolivares={nuevoAbonoBs.bolivares}
+                        onBolivares={v => setNuevoAbonoBs(prev => ({ ...prev, bolivares: v }))}
+                        tasa={nuevoAbonoBs.tasa}
+                        onTasa={v => setNuevoAbonoBs(prev => ({ ...prev, tasa: v }))}
+                        referencia={bcvEuro}
+                      />
+
                       <div className="flex items-center gap-3 pt-1">
                         <button onClick={handleAddPayment} className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider hover:underline">
                           Guardar Abono
@@ -4483,10 +4547,11 @@ export default function BookingsPage() {
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Método</label>
                   <select
                     value={form.paymentMethod}
-                    onChange={e => setForm(f => ({ ...f, paymentMethod: e.target.value as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' | 'zelle' }))}
+                    onChange={e => setForm(f => ({ ...f, paymentMethod: e.target.value as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' | 'zelle' | 'pago_movil' }))}
                     className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white capitalize"
                   >
                     <option value="transferencia">Transferencia</option>
+                    <option value="pago_movil">Pago Móvil</option>
                     <option value="zelle">Zelle</option>
                     <option value="efectivo">Efectivo</option>
                     <option value="tarjeta">Tarjeta</option>
@@ -4495,11 +4560,38 @@ export default function BookingsPage() {
                 </div>
               </div>
 
+              <CobroEnBolivares
+                  activo={abonoInicialBs.activo}
+                  onActivo={v => {
+                    setAbonoInicialBs(prev => ({ ...prev, activo: v }))
+                    if (!v) return
+                    // Al activarlo, el monto en dolares pasa a salir de los bolivares.
+                    setForm(prevForm => ({ ...prevForm, amountPaid: 0 }))
+                  }}
+                  bolivares={abonoInicialBs.bolivares}
+                  onBolivares={v => {
+                    setAbonoInicialBs(prev => ({ ...prev, bolivares: v }))
+                    setForm(prevForm => ({
+                      ...prevForm,
+                      amountPaid: dolaresDeBolivares(v, abonoInicialBs.tasa),
+                    }))
+                  }}
+                  tasa={abonoInicialBs.tasa}
+                  onTasa={v => {
+                    setAbonoInicialBs(prev => ({ ...prev, tasa: v }))
+                    setForm(prevForm => ({
+                      ...prevForm,
+                      amountPaid: dolaresDeBolivares(abonoInicialBs.bolivares, v),
+                    }))
+                  }}
+                referencia={bcvEuro}
+              />
+
               {/* Código de pago — solo aplica a métodos bancarios que se puedan verificar contra el banco */}
-              {(form.paymentMethod === 'transferencia' || form.paymentMethod === 'zelle') && (
+              {(form.paymentMethod === 'transferencia' || form.paymentMethod === 'zelle' || form.paymentMethod === 'pago_movil') && (
                 <div>
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">
-                    Código de Pago / Referencia {form.paymentMethod === 'zelle' ? '(Zelle)' : '(Transferencia)'}
+                    Código de Pago / Referencia {form.paymentMethod === 'zelle' ? '(Zelle)' : form.paymentMethod === 'pago_movil' ? '(Pago Móvil)' : '(Transferencia)'}
                   </label>
                   <input
                     type="text"
