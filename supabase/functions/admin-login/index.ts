@@ -1,25 +1,24 @@
 /**
  * Cambia un PIN por una sesión, sin que el navegador vea nunca las contraseñas.
  *
- * Hoy el mapa PIN -> correo + contraseña vive en el JavaScript del panel, así que las
- * tres contraseñas viajan al navegador de cualquiera que abra la web. Aquí el mapa vive
- * en los secretos de la función: el navegador manda el PIN, recibe una sesión, y las
- * contraseñas no salen nunca del servidor.
+ * Antes el mapa PIN -> correo + contraseña vivía en el JavaScript del panel, así que las
+ * tres contraseñas viajaban al navegador de cualquiera que abriera la web: se veían en la
+ * pestaña de red, sin necesidad de saber nada. Ahora el mapa vive en la tabla
+ * `admin_pin_map`, que tiene RLS y cero políticas y ningún permiso para anon ni
+ * authenticated: solo la lee esta función, con la clave de servicio. El navegador manda el
+ * PIN y recibe una sesión; las contraseñas no salen del servidor.
  *
- * Además limita los intentos por IP. Un PIN de cuatro cifras son diez mil
- * combinaciones; el limite del navegador se salta llamando a la API directamente, este
- * no.
+ * Además limita los intentos por IP. Un PIN de cuatro cifras son diez mil combinaciones, y
+ * el límite que hay en el navegador se salta llamando a la API directamente. Este no.
  *
- * DESPLIEGUE
- *   supabase secrets set ADMIN_PIN_MAP='{"1234":{"email":"propiedad@estancialacanada.com","password":"..."},"2222":{...},"3333":{...}}'
- *   supabase functions deploy admin-login --no-verify-jwt
- *
- * El flag --no-verify-jwt hace falta: quien llama todavía no tiene sesión.
+ * DESPLIEGUE: sin verificación de JWT, porque quien llama todavía no tiene sesión. Es la
+ * excepción normal de un endpoint de login: la autorización la hace la propia función.
  */
 
 interface Credencial {
   email: string
   password: string
+  role: string
 }
 
 const CORS = {
@@ -31,8 +30,8 @@ const CORS = {
 const INTENTOS_MAXIMOS = 10
 const VENTANA_MS = 5 * 60 * 1000
 
-/** Intentos recientes por IP. Se pierde si la función se reinicia, y no pasa nada:
- *  es un freno contra el que prueba en bucle, no un registro de auditoría. */
+/** Intentos recientes por IP. Se pierde si la función se reinicia, y no pasa nada: es un
+ *  freno contra quien prueba en bucle, no un registro de auditoría. */
 const intentos = new Map<string, number[]>()
 
 function demasiadosIntentos(ip: string): boolean {
@@ -71,37 +70,37 @@ Deno.serve(async (req: Request) => {
     return responder({ error: 'Petición inválida' }, 400)
   }
 
-  const crudo = Deno.env.get('ADMIN_PIN_MAP')
-  if (!crudo) {
-    console.error('Falta el secreto ADMIN_PIN_MAP')
-    return responder({ error: 'Configuración incompleta del servidor' }, 500)
-  }
-
-  let mapa: Record<string, Credencial>
-  try {
-    mapa = JSON.parse(crudo)
-  } catch {
-    console.error('ADMIN_PIN_MAP no es un JSON válido')
-    return responder({ error: 'Configuración incompleta del servidor' }, 500)
-  }
-
-  const credencial = mapa[pin]
-
-  // Se anota el intento siempre, acierte o falle: si solo se contaran los fallos,
-  // bastaría con intercalar un acierto para seguir probando sin límite.
-  anotarIntento(ip)
-
-  // La misma respuesta para "PIN que no existe" y "PIN que existe pero falló":
-  // así no se puede averiguar cuáles son válidos probando.
-  const rechazo = () => responder({ error: 'PIN incorrecto' }, 401)
-  if (!credencial) return rechazo()
-
   const url = Deno.env.get('SUPABASE_URL')
   const anon = Deno.env.get('SUPABASE_ANON_KEY')
-  if (!url || !anon) {
-    console.error('Faltan SUPABASE_URL o SUPABASE_ANON_KEY')
+  const servicio = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (!url || !anon || !servicio) {
+    console.error('Faltan variables de entorno de Supabase')
     return responder({ error: 'Configuración incompleta del servidor' }, 500)
   }
+
+  // Se anota el intento siempre, acierte o falle: si solo se contaran los fallos, bastaría
+  // con intercalar un acierto para seguir probando sin límite.
+  anotarIntento(ip)
+
+  // La misma respuesta para "PIN que no existe" y "PIN que existe pero falló": así no se
+  // puede averiguar cuáles son válidos probando.
+  const rechazo = () => responder({ error: 'PIN incorrecto' }, 401)
+
+  // El PIN va como parámetro de filtro, no concatenado en ninguna consulta: PostgREST lo
+  // trata como valor. Y solo se piden las tres columnas que hacen falta.
+  const consulta = await fetch(
+    `${url}/rest/v1/admin_pin_map?pin=eq.${encodeURIComponent(pin)}&select=email,password,role`,
+    { headers: { apikey: servicio, Authorization: `Bearer ${servicio}` } },
+  )
+
+  if (!consulta.ok) {
+    console.error('No se pudo leer el mapa de PINes:', consulta.status)
+    return responder({ error: 'Configuración incompleta del servidor' }, 500)
+  }
+
+  const filas = await consulta.json() as Credencial[]
+  const credencial = Array.isArray(filas) ? filas[0] : undefined
+  if (!credencial) return rechazo()
 
   const auth = await fetch(`${url}/auth/v1/token?grant_type=password`, {
     method: 'POST',
@@ -116,11 +115,12 @@ Deno.serve(async (req: Request) => {
 
   const sesion = await auth.json()
 
-  // Solo lo que el navegador necesita para montar la sesión. Ni el correo ni la
-  // contraseña salen de aquí.
+  // Solo lo que el navegador necesita para montar la sesión y saber qué puede ver. Ni el
+  // correo ni la contraseña salen de aquí.
   return responder({
     access_token: sesion.access_token,
     refresh_token: sesion.refresh_token,
     expires_in: sesion.expires_in,
+    role: credencial.role,
   })
 })

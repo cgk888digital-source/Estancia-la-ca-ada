@@ -15,11 +15,27 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-// Configuración de PINs para los 3 niveles de acceso
-const PINS: Record<string, { email: string; role: Role; pass: string; label: string }> = {
-  '1234': { email: 'propiedad@estancialacanada.com', role: 'propiedad', pass: 'password1234', label: 'La Propiedad' },
-  '2222': { email: 'admin@estancialacanada.com', role: 'administracion', pass: 'password2222', label: 'Administración' },
-  '3333': { email: 'restaurante@estancialacanada.com', role: 'restaurante', pass: 'password3333', label: 'Restaurante & Cocina' },
+/**
+ * Cambia un PIN por una sesión, en el servidor.
+ *
+ * Aquí vivía el mapa PIN -> correo + contraseña. Como este fichero acaba dentro del
+ * JavaScript que sirve la web, las tres contraseñas se podían leer desde la pestaña de
+ * red de cualquier navegador, sin saber nada de nada. Ahora el mapa está en una tabla
+ * que solo lee la función `admin-login` con la clave de servicio, y aquí no queda
+ * ninguna contraseña: se manda el PIN y vuelve una sesión ya hecha.
+ */
+interface SesionDelPin {
+  access_token: string
+  refresh_token: string
+  role: Role
+}
+
+async function pedirSesion(pin: string): Promise<SesionDelPin | null> {
+  const { data, error } = await supabase.functions.invoke('admin-login', { body: { pin } })
+  // Un PIN incorrecto vuelve como error HTTP, igual que un fallo de red. Desde aquí no
+  // se distinguen, y tampoco hace falta: en los dos casos no se entra.
+  if (error || !data?.access_token || !data?.refresh_token || !data?.role) return null
+  return data as SesionDelPin
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -66,15 +82,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const savedPin = localStorage.getItem('adminPin')
       const savedRole = localStorage.getItem('adminRole')
 
-      if (savedPin && PINS[savedPin]) {
+      if (savedPin) {
         const { data: { session } } = await supabase.auth.getSession()
         if (!session) {
-          const user = PINS[savedPin]
-          const { error } = await supabase.auth.signInWithPassword({
-            email: user.email,
-            password: user.pass,
-          })
-          if (error && active) {
+          const nueva = await pedirSesion(savedPin)
+          if (nueva) {
+            await supabase.auth.setSession({
+              access_token: nueva.access_token,
+              refresh_token: nueva.refresh_token,
+            })
+          } else if (active) {
             clearStored()
             setRole(null)
             setSessionExpired(true)
@@ -106,28 +123,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [])
 
   const login = useCallback(async (pin: string): Promise<Role | null> => {
-    const user = PINS[pin]
-    if (!user) return null
+    const sesion = await pedirSesion(pin)
+    if (!sesion) return null
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email: user.email,
-      password: user.pass,
+    const { error } = await supabase.auth.setSession({
+      access_token: sesion.access_token,
+      refresh_token: sesion.refresh_token,
     })
 
     if (error) {
-      console.error('Error authenticating admin user:', error)
+      console.error('No se pudo montar la sesión del panel:', error)
       return null
     }
 
-    setRole(user.role)
+    setRole(sesion.role)
     setSessionReady(true)
     setSessionExpired(false)
     try {
-      localStorage.setItem('adminRole', user.role)
+      localStorage.setItem('adminRole', sesion.role)
       localStorage.setItem('adminPin', pin)
     } catch { /* modo privado del navegador */ }
 
-    return user.role
+    return sesion.role
   }, [])
 
   const logout = useCallback(async () => {
