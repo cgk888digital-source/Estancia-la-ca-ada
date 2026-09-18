@@ -19,6 +19,7 @@ const RatesPage = lazy(() => import('./admin/components/RatesPage.tsx'))
 const ComandasPage = lazy(() => import('./admin/components/ComandasPage.tsx'))
 const CustomersPage = lazy(() => import('./admin/components/CustomersPage.tsx'))
 const EmailMarketingPage = lazy(() => import('./admin/components/EmailMarketingPage.tsx'))
+const CajasChicasPage = lazy(() => import('./admin/components/CajasChicasPage.tsx'))
 
 registerSW({ immediate: true })
 
@@ -60,6 +61,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="email-marketing" element={<EmailMarketingPage />} />
             <Route path="ingresos" element={<TransactionsPage typeFilter="ingreso" />} />
             <Route path="egresos" element={<TransactionsPage typeFilter="egreso" />} />
+            <Route path="cajas" element={<CajasChicasPage />} />
             <Route path="empleados" element={<EmployeesPage />} />
             <Route path="reportes" element={<ReportsPage />} />
             <Route path="menu" element={<MenuPage />} />

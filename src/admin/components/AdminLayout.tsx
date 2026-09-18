@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ArrowDownCircle, ArrowUpCircle,
-  Users, BarChart3, Menu, X, LogOut, UtensilsCrossed, Calendar, DollarSign, ClipboardList, Mail, ContactRound
+  Users, BarChart3, Menu, X, LogOut, UtensilsCrossed, Calendar, DollarSign, ClipboardList, Mail, ContactRound, Wallet
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import LoginPage from './LoginPage'
@@ -13,6 +13,7 @@ const navItems = [
   { to: '/admin/clientes', label: 'Clientes', icon: <ContactRound size={20} />, roles: ['propiedad', 'administracion'] },
   { to: '/admin/ingresos', label: 'Ingresos & Propinas', icon: <ArrowDownCircle size={20} />, roles: ['propiedad', 'administracion'] },
   { to: '/admin/egresos', label: 'Egresos', icon: <ArrowUpCircle size={20} />, roles: ['propiedad', 'administracion'] },
+  { to: '/admin/cajas', label: 'Cajas Chicas', icon: <Wallet size={20} />, roles: ['propiedad', 'administracion'] },
   { to: '/admin/email-marketing', label: 'Email Marketing', icon: <Mail size={20} />, roles: ['propiedad', 'administracion'] },
   { to: '/admin/menu', label: 'Menú Restaurante', icon: <UtensilsCrossed size={20} />, roles: ['propiedad', 'restaurante'] },
   { to: '/admin/comandas', label: 'Comandas POS', icon: <ClipboardList size={20} />, roles: ['propiedad', 'restaurante'] },

@@ -5,6 +5,7 @@ import Dashboard from './components/Dashboard'
 import TransactionsPage from './components/TransactionsPage'
 import EmployeesPage from './components/EmployeesPage'
 import ReportsPage from './components/ReportsPage'
+import CajasChicasPage from './components/CajasChicasPage'
 
 const AdminApp: React.FC = () => (
   <Routes>
@@ -12,6 +13,7 @@ const AdminApp: React.FC = () => (
       <Route index element={<Dashboard />} />
       <Route path="ingresos" element={<TransactionsPage typeFilter="ingreso" />} />
       <Route path="egresos" element={<TransactionsPage typeFilter="egreso" />} />
+      <Route path="cajas" element={<CajasChicasPage />} />
       <Route path="empleados" element={<EmployeesPage />} />
       <Route path="reportes" element={<ReportsPage />} />
     </Route>

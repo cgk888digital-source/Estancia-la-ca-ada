@@ -156,6 +156,7 @@ interface DbTransaction {
   related_to?: string | null
   exchange_rate?: number | string | null
   amount_bs?: number | string | null
+  cash_box?: string | null
 }
 
 const mapDbTransactionToReact = (db: DbTransaction): Transaction => ({
@@ -169,6 +170,7 @@ const mapDbTransactionToReact = (db: DbTransaction): Transaction => ({
   relatedTo: db.related_to || '',
   exchangeRate: db.exchange_rate == null ? null : Number(db.exchange_rate),
   amountBs: db.amount_bs == null ? null : Number(db.amount_bs),
+  cashBox: (db.cash_box as 'usd' | 'bs' | null) ?? null,
 })
 
 function getDateRange(period: DatePeriod, customFrom: string, customTo: string): { from: Date | null; to: Date | null } {
@@ -321,7 +323,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       
       let query = supabase
         .from('transactions')
-        .select('id, date, type, category, description, amount, payment_method, related_to, exchange_rate, amount_bs')
+        .select('id, date, type, category, description, amount, payment_method, related_to, exchange_rate, amount_bs, cash_box')
         .order('date', { ascending: false })
       
       // Aplicar filtros de fecha server-side (solo si hay rango definido)
@@ -514,6 +516,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       relatedTo: '',
       exchangeRate: null,
       amountBs: null,
+      cashBox: null,
     })
     setShowCalculator(false)
     setShowModal(true)
@@ -531,6 +534,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       relatedTo: tx.relatedTo || '',
       exchangeRate: tx.exchangeRate ?? null,
       amountBs: tx.amountBs ?? null,
+      cashBox: tx.cashBox ?? null,
     })
     setShowCalculator(false)
     setShowModal(true)
@@ -565,6 +569,12 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
 
   const handleSave = async () => {
     if (!form.description.trim() || form.amount <= 0) return
+
+    if (form.cashBox === 'bs' && !(form.amountBs && form.amountBs > 0)) {
+      alert('Para descontarlo de la caja en bolívares hace falta saber cuántos bolívares fueron.'
+        + ' Abra la calculadora y anote los bolívares y la tasa.')
+      return
+    }
     
     const cleanDesc = form.description.trim()
     const cleanRelatedTo = (form.relatedTo || '').trim()
@@ -579,6 +589,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       related_to: cleanRelatedTo || null,
       exchange_rate: form.exchangeRate ?? null,
       amount_bs: form.amountBs ?? null,
+      cash_box: form.cashBox ?? null,
     }
 
     if (editingTx) {
@@ -1158,6 +1169,11 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                           {textoDeLaTasa(tx.amountBs, tx.exchangeRate)}
                         </p>
                       )}
+                      {tx.cashBox && (
+                        <p className="text-[11px] text-[#C5A059] font-semibold mt-0.5">
+                          Caja chica en {tx.cashBox === 'usd' ? 'dólares' : 'bolívares'}
+                        </p>
+                      )}
                       {/* En móvil se muestra el distribuidor debajo con botón para filtrar */}
                       {tx.relatedTo && (
                         <div className="sm:hidden mt-1">
@@ -1654,6 +1670,31 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                   </select>
                 </div>
               </div>
+
+              {form.type === 'egreso' && (
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">
+                    ¿De dónde salió el dinero?
+                  </label>
+                  <select
+                    value={form.cashBox ?? ''}
+                    onChange={e => setForm(f => ({
+                      ...f,
+                      cashBox: (e.target.value || null) as 'usd' | 'bs' | null,
+                    }))}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059] transition-colors bg-white"
+                  >
+                    <option value="">Del banco o de otra parte</option>
+                    <option value="usd">Caja chica en dólares</option>
+                    <option value="bs">Caja chica en bolívares</option>
+                  </select>
+                  {form.cashBox === 'bs' && !(form.amountBs && form.amountBs > 0) && (
+                    <p className="text-[11px] text-amber-700 mt-1.5">
+                      Anote los bolívares con la calculadora para poder descontarlos de la caja.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Descripción con autocompletado y catálogo guardado */}
               <div className="relative">
