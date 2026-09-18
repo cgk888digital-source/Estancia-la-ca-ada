@@ -3,10 +3,13 @@ import { supabase } from '../lib/supabase'
 /**
  * Las dos cajas chicas de la posada.
  *
- * La de DOLARES se llena sola con el efectivo en dolares que entra en el hotel, y de ella
- * salen los gastos que hay que pagar en efectivo. La de BOLIVARES la repone la propiedad
- * desde la cuenta del hotel cada semana o cada quincena, y de ella salen los pagos en
- * bolivares.
+ * La de DOLARES es un cajon con billetes: se llena sola con el efectivo en dolares que
+ * pagan los huespedes en el hotel, y de ella salen los gastos que hay que pagar en mano.
+ *
+ * La de BOLIVARES no es efectivo, aunque se le llame caja: es un saldo en bolivares que
+ * la propiedad pasa por transferencia desde las cuentas del hotel cada semana o cada
+ * quincena, y del que se paga por pago movil o transferencia. Por eso no la alimenta
+ * ningun cobro: solo entra lo que la propiedad repone.
  *
  * Una caja NO es una categoria de gasto. Reponerla no es gastar —el dinero solo cambia de
  * sitio— y la compra que se paga desde ella sigue siendo alimentos, o mantenimiento, o lo
@@ -100,12 +103,18 @@ export async function borrarMovimientoDeCaja(id: string): Promise<string | null>
   return error ? error.message : null
 }
 
-/** Un ingreso en efectivo con bolivares apuntados entro en la caja de bolivares; sin
- *  ellos, en la de dolares. */
+/**
+ * Solo el efectivo en dolares entra en una caja, y entra en la de dolares.
+ *
+ * Un cobro en efectivo hecho en bolivares NO alimenta la caja de bolivares: esa no es un
+ * cajon, es un saldo bancario que solo mueve la propiedad. Esos billetes se quedan fuera
+ * de las dos cajas, que es donde estan de verdad.
+ */
 export const cajaQueAlimenta = (apunte: ApunteParaCaja): Caja | null => {
   if (apunte.type !== 'ingreso') return null
   if ((apunte.paymentMethod ?? '') !== 'efectivo') return null
-  return apunte.amountBs && apunte.amountBs > 0 ? 'bs' : 'usd'
+  if (apunte.amountBs && apunte.amountBs > 0) return null
+  return 'usd'
 }
 
 export interface SaldosDeCaja {
@@ -129,9 +138,7 @@ export function calcularSaldos(
   let egresosBsSinImporte = 0
 
   for (const a of apuntes) {
-    const entra = cajaQueAlimenta(a)
-    if (entra === 'usd') usd += a.amount
-    else if (entra === 'bs') bs += a.amountBs || 0
+    if (cajaQueAlimenta(a) === 'usd') usd += a.amount
 
     if (a.type === 'egreso' && a.cashBox === 'usd') usd -= a.amount
     if (a.type === 'egreso' && a.cashBox === 'bs') {
@@ -154,7 +161,7 @@ export function calcularSaldos(
 
 export const etiquetaDeCaja: Record<Caja, string> = {
   usd: 'Caja chica en dólares',
-  bs: 'Caja chica en bolívares',
+  bs: 'Fondo en bolívares',
 }
 
 export const etiquetaDeMovimiento: Record<TipoMovimiento, string> = {

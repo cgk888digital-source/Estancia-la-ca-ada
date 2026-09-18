@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { Wallet, Plus, Loader2, Trash2, X, ArrowDownCircle, ArrowUpCircle, Scale } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
-import { useAuth } from '../context/AuthContext'
 import LoadErrorBanner from './LoadErrorBanner'
 import { parseLocalDate, fechaLocalISO } from '../../utils/dateUtils'
 import {
@@ -41,17 +40,15 @@ interface LineaDeCaja {
 }
 
 const CajasChicasPage: React.FC = () => {
-  const { role } = useAuth()
-  // La caja en dolares se llena con el efectivo que entra, asi que su saldo deja ver
-  // cuanto factura la casa. Se queda para la propiedad, igual que los totales de Ingresos.
-  const puedeVerUsd = role === 'propiedad'
+  // Las dos cajas las ven los dos accesos: la administradora es la que esta en el hotel
+  // y la que las mueve a diario; la propiedad va una vez al mes.
 
   const [apuntes, setApuntes] = useState<ApunteCompleto[]>([])
   const [movimientos, setMovimientos] = useState<MovimientoDeCaja[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  const [cajaVisible, setCajaVisible] = useState<Caja>(role === 'propiedad' ? 'usd' : 'bs')
+  const [cajaVisible, setCajaVisible] = useState<Caja>('usd')
   const [modal, setModal] = useState<{ caja: Caja; tipo: TipoMovimiento } | null>(null)
   const [guardando, setGuardando] = useState(false)
   const [form, setForm] = useState(() => ({ importe: '', fecha: fechaLocalISO(), origen: '', nota: '' }))
@@ -108,7 +105,7 @@ const CajasChicasPage: React.FC = () => {
           fecha: a.date,
           concepto: a.description,
           detalle: 'Cobro en efectivo',
-          importe: caja === 'bs' ? (a.amountBs || 0) : a.amount,
+          importe: a.amount,
           manual: null,
         })
       }
@@ -188,7 +185,6 @@ const CajasChicasPage: React.FC = () => {
     setMovimientos(prev => prev.filter(x => x.id !== m.id))
   }
 
-  const cajasVisibles: Caja[] = puedeVerUsd ? ['usd', 'bs'] : ['bs']
   const dinero = (caja: Caja, n: number) => (caja === 'bs' ? fmtBs(n) : fmtUsd(n))
 
   if (loading) {
@@ -206,7 +202,7 @@ const CajasChicasPage: React.FC = () => {
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Cajas Chicas</h1>
         <p className="text-sm text-gray-500 mt-1">
-          El dinero en efectivo que hay en el hotel ahora mismo.
+          El efectivo que hay en el hotel y el saldo en bolívares para los pagos del día a día.
         </p>
       </div>
 
@@ -223,8 +219,8 @@ const CajasChicasPage: React.FC = () => {
       )}
 
       {/* Saldos */}
-      <div className={`grid gap-3 ${puedeVerUsd ? 'sm:grid-cols-2' : ''}`}>
-        {cajasVisibles.map(caja => {
+      <div className="grid gap-3 sm:grid-cols-2">
+        {(['usd', 'bs'] as Caja[]).map(caja => {
           const saldo = caja === 'bs' ? saldos.bs : saldos.usd
           return (
             <button
@@ -239,7 +235,7 @@ const CajasChicasPage: React.FC = () => {
               <div className="flex items-center gap-2 mb-2">
                 <Wallet size={16} className="text-[#C5A059]" />
                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                  {caja === 'usd' ? 'Efectivo en dólares' : 'Efectivo en bolívares'}
+                  {caja === 'usd' ? 'Efectivo en dólares' : 'Fondo en bolívares'}
                 </span>
               </div>
               <p className={`text-2xl font-bold ${saldo < 0 ? 'text-red-600' : 'text-gray-900'}`}>
@@ -247,15 +243,15 @@ const CajasChicasPage: React.FC = () => {
               </p>
               <p className="text-[11px] text-gray-400 mt-1">
                 {caja === 'usd'
-                  ? 'Se llena con los cobros en efectivo en dólares.'
-                  : 'La repone la propiedad desde la cuenta del hotel.'}
+                  ? 'Billetes. Se llena con los cobros en efectivo en dólares.'
+                  : 'Saldo que la propiedad transfiere desde las cuentas del hotel.'}
               </p>
             </button>
           )
         })}
       </div>
 
-      {saldos.usd < 0 && puedeVerUsd && cajaVisible === 'usd' && (
+      {saldos.usd < 0 && cajaVisible === 'usd' && (
         <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
           El saldo está en negativo: se ha pagado desde la caja más de lo que entró. Revise si
           falta registrar algún cobro en efectivo o alguna reposición.
@@ -298,8 +294,8 @@ const CajasChicasPage: React.FC = () => {
             <p className="text-sm text-gray-400 font-medium">Esta caja todavía no tiene movimientos</p>
             <p className="text-xs text-gray-300 mt-1">
               {cajaVisible === 'bs'
-                ? 'Use «Reponer» cuando la propiedad le pase el dinero'
-                : 'Entrará sola con el primer cobro en efectivo'}
+                ? 'Use «Reponer» cuando la propiedad transfiera el dinero'
+                : 'Entrará solo con el primer cobro en efectivo'}
             </p>
           </div>
         ) : (
@@ -341,7 +337,7 @@ const CajasChicasPage: React.FC = () => {
               <div>
                 <h2 className="text-lg font-bold text-gray-900">{etiquetaDeMovimiento[modal.tipo]}</h2>
                 <p className="text-sm text-gray-500 mt-0.5">
-                  {modal.caja === 'usd' ? 'Caja chica en dólares' : 'Caja chica en bolívares'}
+                  {modal.caja === 'usd' ? 'Caja chica en dólares' : 'Fondo en bolívares'}
                 </p>
               </div>
               <button onClick={() => setModal(null)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
@@ -351,8 +347,9 @@ const CajasChicasPage: React.FC = () => {
 
             {modal.tipo === 'ajuste' && (
               <p className="text-xs leading-relaxed text-gray-500 bg-gray-50 rounded-xl p-3">
-                Para cuadrar la caja con lo que hay de verdad dentro. Escriba la diferencia:
-                en positivo si sobra dinero, con un menos delante si falta.
+                Para cuadrar con lo que hay de verdad — los billetes contados, o el saldo que
+                dice el banco. Escriba la diferencia: en positivo si sobra, con un menos
+                delante si falta.
               </p>
             )}
 
@@ -389,7 +386,7 @@ const CajasChicasPage: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  placeholder={modal.tipo === 'reposicion' ? 'Ej. Cuenta Bancamiga del hotel' : 'Ej. Depósito en el banco'}
+                  placeholder={modal.tipo === 'reposicion' ? 'Ej. Transferencia desde Bancamiga del hotel' : 'Ej. Devuelto a la cuenta del hotel'}
                   value={form.origen}
                   onChange={e => setForm(f => ({ ...f, origen: e.target.value }))}
                   className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]"

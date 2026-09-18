@@ -134,7 +134,12 @@ const fmt = (n: number) =>
 
 const incomeCategories: TransactionCategory[] = ['alojamiento', 'restaurante', 'bebidas', 'almuerzos', 'pasapalos', 'excursiones', 'bar_cava', 'otros_ingresos', 'propinas']
 const expenseCategories: TransactionCategory[] = ['empleados', 'alimentos', 'mantenimiento', 'servicios', 'comisiones', 'otros_egresos']
-const paymentMethods: PaymentMethod[] = ['efectivo', 'transferencia', 'tarjeta', 'cheque']
+const paymentMethods: PaymentMethod[] = ['efectivo', 'transferencia', 'pago_movil', 'tarjeta', 'cheque']
+
+// `pago_movil` se guarda con guion bajo; en pantalla no puede salir asi.
+const etiquetaDeMetodo: Partial<Record<PaymentMethod, string>> = {
+  pago_movil: 'Pago Móvil',
+}
 
 const periodLabels: Record<DatePeriod, string> = {
   hoy: 'Hoy',
@@ -1218,7 +1223,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                     </td>
 
                     <td className="px-4 py-4 hidden lg:table-cell">
-                      <span className="text-xs text-gray-500 capitalize">{tx.paymentMethod}</span>
+                      <span className="text-xs text-gray-500 capitalize">{etiquetaDeMetodo[tx.paymentMethod] ?? tx.paymentMethod}</span>
                     </td>
 
                     <td className="px-4 sm:px-6 py-4 text-right whitespace-nowrap">
@@ -1665,7 +1670,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                     className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059] transition-colors bg-white capitalize"
                   >
                     {paymentMethods.map(m => (
-                      <option key={m} value={m} className="capitalize">{m}</option>
+                      <option key={m} value={m} className="capitalize">{etiquetaDeMetodo[m] ?? m}</option>
                     ))}
                   </select>
                 </div>
