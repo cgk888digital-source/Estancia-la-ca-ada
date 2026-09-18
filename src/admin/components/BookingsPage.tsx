@@ -13,6 +13,7 @@ import PrintableReservationsReport from './PrintableReservationsReport'
 import { parseLocalDate, fechaLocalISO as formatLocalDate } from '../../utils/dateUtils'
 import { syncMarketingCustomer } from '../../utils/syncMarketingCustomer'
 import CobroEnBolivares from './CobroEnBolivares'
+import { useEnvioUnico } from '../../utils/useEnvioUnico'
 import { dolaresDeBolivares, textoEnBolivares } from '../../utils/bolivares'
 import { getBcvEuroRate } from '../../utils/exchangeRate'
 import { useHotelSettings, getMealRates } from '../../utils/useHotelSettings'
@@ -308,6 +309,7 @@ export default function BookingsPage() {
   const [editRoomForm, setEditRoomForm] = useState({ accommodationId: 0, adults: 0, children: 0, babies: 0, pets: 0 })
   const [editingDates, setEditingDates] = useState(false)
   const [savingDates, setSavingDates] = useState(false)
+  const envioAbono = useEnvioUnico()
 
   // Cobro en bolivares. La tasa del euro del BCV es la que usa la posada, pero se
   // ofrece como referencia de un toque, no como valor impuesto: quien cobra escribe
@@ -1376,6 +1378,9 @@ export default function BookingsPage() {
       return
     }
 
+    // Un segundo toque mientras se guarda apuntaría el mismo abono dos veces.
+    if (!envioAbono.empezar()) return
+
     const newPayment = {
       booking_id: groupBookings[0].id,
       payment_date: paymentForm.date,
@@ -1396,6 +1401,7 @@ export default function BookingsPage() {
     if (error || !data) {
       console.error('Error adding payment:', error)
       alert('Error al registrar el abono. Intenta de nuevo.')
+      envioAbono.terminar()
       return
     }
 
@@ -1427,6 +1433,9 @@ export default function BookingsPage() {
 
     setAddingPayment(false)
     setPaymentForm({ amount: '', date: todayStr, method: 'transferencia', reference: '' })
+    // Sin esto, al abrir «Agregar pago» otra vez salían los bolívares del abono anterior.
+    setNuevoAbonoBs({ activo: false, bolivares: '', tasa: '' })
+    envioAbono.terminar()
 
     if (selectedBooking.guestEmail.trim()) {
       const totalAmount = groupBookings.reduce((sum, room) => sum + room.totalAmount, 0)
@@ -4059,7 +4068,7 @@ export default function BookingsPage() {
                       />
 
                       <div className="flex items-center gap-3 pt-1">
-                        <button onClick={handleAddPayment} className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider hover:underline">
+                        <button onClick={handleAddPayment} disabled={envioAbono.ocupado} className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider hover:underline disabled:opacity-40">
                           Guardar Abono
                         </button>
                         <button

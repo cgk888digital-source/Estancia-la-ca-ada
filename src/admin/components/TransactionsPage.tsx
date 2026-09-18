@@ -12,6 +12,7 @@ import { supabase } from '../../lib/supabase'
 import ReceiptModal from './ReceiptModal'
 import { parseLocalDate, fechaLocalISO } from '../../utils/dateUtils'
 import { useAuth } from '../context/AuthContext'
+import { useEnvioUnico } from '../../utils/useEnvioUnico'
 
 const DEFAULT_SUPPLIERS = [
   'Corpoelec',
@@ -216,6 +217,7 @@ const PAGE_SIZE = 25
 
 const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   const { role } = useAuth()
+  const envioMovimiento = useEnvioUnico()
 
   // Quien atiende el hotel registra los ingresos, pero la propiedad no quiere que vea lo
   // que factura la casa. Se le deja el dia en curso —para que compruebe lo que acaba de
@@ -580,6 +582,8 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
         + ' Abra la calculadora y anote los bolívares y la tasa.')
       return
     }
+    // Un segundo toque mientras se guarda duplicaría el gasto: dinero contado dos veces.
+    if (!envioMovimiento.empezar()) return
     
     const cleanDesc = form.description.trim()
     const cleanRelatedTo = (form.relatedTo || '').trim()
@@ -607,6 +611,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       if (error) {
         console.error('Error updating transaction:', error)
         alert('No se pudo modificar la transacción: ' + error.message)
+        envioMovimiento.terminar()
         return
       }
 
@@ -623,6 +628,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       if (error) {
         console.error('Error saving transaction:', error)
         alert('No se pudo guardar la transacción. Intenta de nuevo.')
+        envioMovimiento.terminar()
         return
       }
 
@@ -660,6 +666,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
 
     setSaved(true)
     setTimeout(() => {
+      envioMovimiento.terminar()
       setSaved(false)
       setShowModal(false)
       setEditingTx(null)
@@ -1952,7 +1959,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
             <div className="space-y-2 pt-2">
               <button
                 onClick={handleSave}
-                disabled={!form.description.trim() || form.amount <= 0}
+                disabled={!form.description.trim() || form.amount <= 0 || envioMovimiento.ocupado || saved}
                 className={`w-full py-3.5 rounded-2xl font-bold text-sm transition-all flex items-center justify-center gap-2
                   ${saved
                     ? 'bg-emerald-500 text-white'

@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase'
 import { getBcvEuroRate } from '../../utils/exchangeRate'
 import { parseLocalDate, fechaLocalISO } from '../../utils/dateUtils'
 import ReceiptModal from './ReceiptModal'
+import { useEnvioUnico } from '../../utils/useEnvioUnico'
 import WeeklyTipsModal from './WeeklyTipsModal'
 import {
   cargarBonos, crearBono, borrarBonoPendiente, sumaDeBonos, bonosPagadosEn,
@@ -109,7 +110,9 @@ const EmployeesPage: React.FC = () => {
     paymentFrequency: 'quincenal' as 'quincenal' | 'mensual' | 'semanal' | 'por_dias',
     dailyRate: '',
     contractedDays: '',
+    status: 'activo' as 'activo' | 'inactivo',
   })
+  const envioEmpleado = useEnvioUnico()
 
   useEffect(() => {
     let active = true
@@ -427,6 +430,7 @@ const EmployeesPage: React.FC = () => {
       paymentFrequency: 'quincenal',
       dailyRate: '',
       contractedDays: '',
+      status: 'activo',
     })
     setShowModal(true)
   }
@@ -442,8 +446,48 @@ const EmployeesPage: React.FC = () => {
       paymentFrequency: emp.paymentFrequency,
       dailyRate: emp.dailyRate ? String(emp.dailyRate) : '',
       contractedDays: emp.contractedDays ? String(emp.contractedDays) : '',
+      status: emp.status,
     })
     setShowModal(true)
+  }
+
+  // ── Eliminar un empleado ────────────────────────────────────────────────
+  // Para errores de carga: un empleado duplicado, uno creado por equivocación. Uno que
+  // se fue es otra cosa: se marca inactivo y conserva su ficha.
+  const handleDeleteEmployee = async (emp: Employee) => {
+    const pendientes = bonosPendientesDe(emp.id)
+    const avisos = [`¿Eliminar a ${emp.name} (${emp.role})?`, 'Esto no se puede deshacer.']
+    if (emp.lastPayment) {
+      const cuando = parseLocalDate(emp.lastPayment).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })
+      avisos.push(
+        `Tiene pagos registrados (el último, el ${cuando}). Esos pagos se quedan en Egresos, `
+        + 'pero su ficha desaparece. Si ya no trabaja aquí, es mejor editarlo y marcarlo como Inactivo.',
+      )
+    }
+    if (pendientes.length > 0) {
+      avisos.push(`Tiene ${pendientes.length} bono${pendientes.length === 1 ? '' : 's'} pendiente${pendientes.length === 1 ? '' : 's'} por ${fmtBono(sumaDeBonos(pendientes))} que se borrará${pendientes.length === 1 ? '' : 'n'} con él.`)
+    }
+    if (!window.confirm(avisos.join('\n\n'))) return
+
+    const { data, error } = await supabase.from('employees').delete().eq('id', emp.id).select('id')
+    if (error) {
+      alert('No se pudo eliminar: ' + error.message)
+      return
+    }
+    // Con RLS, un borrado sin permiso no da error: simplemente no borra nada. Por eso se
+    // mira cuántas filas se fueron en vez de dar por hecho que se borró.
+    if (!data || data.length === 0) {
+      alert('No se eliminó: este acceso no tiene permiso para borrar empleados.')
+      return
+    }
+
+    setEmployees(prev => prev.filter(e => e.id !== emp.id))
+    setBonuses(prev => prev.filter(b => b.employeeId !== emp.id))
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      next.delete(emp.id)
+      return next
+    })
   }
 
   // ── Save/Update employee ──────────────────────────────────────────────────
@@ -452,6 +496,7 @@ const EmployeesPage: React.FC = () => {
     if (!form.name || !form.role) return
     if (isFijo && !form.salary) return
     if (!isFijo && !form.dailyRate) return
+    if (!envioEmpleado.empezar()) return
 
     if (editingEmployee) {
       // Modo Edición
@@ -464,6 +509,7 @@ const EmployeesPage: React.FC = () => {
         daily_rate: isFijo ? 0 : Number(form.dailyRate),
         contracted_days: isFijo ? 0 : Number(form.contractedDays) || 0,
         hire_date: form.hireDate || editingEmployee.hireDate,
+        status: form.status,
       }
 
       const { data, error } = await supabase
@@ -472,7 +518,7 @@ const EmployeesPage: React.FC = () => {
         .eq('id', editingEmployee.id)
         .select('*')
 
-      if (error) { console.error(error); alert(`Error al actualizar: ${error.message}`); return }
+      if (error) { console.error(error); alert(`Error al actualizar: ${error.message}`); envioEmpleado.terminar(); return }
       if (data && data[0]) {
         setEmployees(prev => prev.map(e => e.id === editingEmployee.id ? mapDbEmployeeToReact(data[0]) : e))
       }
@@ -493,7 +539,7 @@ const EmployeesPage: React.FC = () => {
       }
 
       const { data, error } = await supabase.from('employees').insert([dbEmp]).select('*')
-      if (error) { console.error(error); alert(`Error al crear: ${error.message}`); return }
+      if (error) { console.error(error); alert(`Error al crear: ${error.message}`); envioEmpleado.terminar(); return }
       if (data && data[0]) {
         setEmployees(prev => [mapDbEmployeeToReact(data[0]), ...prev])
       }
@@ -504,6 +550,9 @@ const EmployeesPage: React.FC = () => {
       setSaved(false)
       setShowModal(false)
       setEditingEmployee(null)
+      // El candado se suelta cuando la ficha ya se ha cerrado: mientras enseña «Guardado»,
+      // otro toque volvería a crear el mismo empleado.
+      envioEmpleado.terminar()
     }, 900)
   }
 
@@ -853,6 +902,14 @@ const EmployeesPage: React.FC = () => {
                             <Pencil size={14} />
                           </button>
 
+                          <button
+                            onClick={() => handleDeleteEmployee(emp)}
+                            className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Eliminar empleado"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+
                           {emp.status === 'activo' && emp.pendingPayment && (
                             <button
                               onClick={() => setPagoTarget(emp)}
@@ -1013,6 +1070,14 @@ const EmployeesPage: React.FC = () => {
                             title="Editar empleado y frecuencia"
                           >
                             <Pencil size={14} />
+                          </button>
+
+                          <button
+                            onClick={() => handleDeleteEmployee(emp)}
+                            className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Eliminar empleado"
+                          >
+                            <Trash2 size={14} />
                           </button>
 
                           {emp.status === 'activo' && (
@@ -1391,9 +1456,34 @@ const EmployeesPage: React.FC = () => {
               )}
             </div>
 
+            {editingEmployee && (
+              <div className="flex items-center justify-between rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
+                <div>
+                  <p className="text-sm font-bold text-gray-900">Estado</p>
+                  <p className="text-[11px] text-gray-500">
+                    Inactivo: ya no trabaja aquí, pero se conserva su ficha y su historial.
+                  </p>
+                </div>
+                <div className="flex rounded-lg bg-white border border-gray-200 p-0.5 shrink-0">
+                  {(['activo', 'inactivo'] as const).map(st => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => setForm(f => ({ ...f, status: st }))}
+                      className={`px-3 py-1.5 rounded-md text-xs font-bold capitalize transition-all ${
+                        form.status === st ? (st === 'activo' ? 'bg-emerald-600 text-white' : 'bg-gray-700 text-white') : 'text-gray-500'
+                      }`}
+                    >
+                      {st}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <button
               onClick={handleSave}
-              disabled={!isFormValid}
+              disabled={!isFormValid || envioEmpleado.ocupado || saved}
               className={`w-full py-3.5 rounded-2xl font-bold text-sm transition-all flex items-center justify-center gap-2
                 ${saved ? 'bg-emerald-500 text-white'
                   : !isFormValid ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
