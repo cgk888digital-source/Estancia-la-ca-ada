@@ -1,72 +1,94 @@
-# admin-login — sacar las contraseñas del navegador
+# admin-login — las contraseñas fuera del navegador
 
-## El problema
+**Hecho y en producción el 17 de septiembre de 2026.** Este documento describe cómo quedó,
+no lo que hay que hacer.
 
-Hoy `src/admin/context/AuthContext.tsx` lleva escrito el mapa de PIN a credenciales:
+## Qué pasaba
+
+`src/admin/context/AuthContext.tsx` llevaba escrito el mapa de PIN a credenciales:
 
 ```ts
 '1234': { email: 'propiedad@estancialacanada.com', pass: 'password1234', ... }
 ```
 
-Eso se compila dentro del JavaScript del panel, así que las tres contraseñas viajan al
-navegador de cualquiera que abra la web. Se ven buscando `password1234` en el bundle.
+Eso se compila dentro del JavaScript del panel, así que las tres contraseñas viajaban al
+navegador de cualquiera que abriera la web. No hacía falta saber nada: se veían en la
+pestaña de red. Comprobado en producción antes de arreglarlo — el fichero
+`AuthContext-B7Hn2GIT.js` contenía el correo y la contraseña de la propiedad.
 
-## El orden de los pasos
+Las tres eran además del tipo que sale en cualquier lista de contraseñas filtradas.
 
-**Importante: no cambies el cliente antes de desplegar la función.** Si el panel deja de
-tener las contraseñas y la función todavía no responde, nadie puede entrar.
+## Cómo quedó
 
-### 1. Guardar el mapa como secreto
+El mapa vive en la tabla **`public.admin_pin_map`** (`pin`, `email`, `password`, `role`,
+`label`), con **RLS activo, cero políticas y ningún permiso para `anon` ni
+`authenticated`**. Solo la lee esta función, que corre en el servidor con
+`SUPABASE_SERVICE_ROLE_KEY` — la clave de servicio se salta RLS y es la única que entra.
 
-```bash
-supabase secrets set ADMIN_PIN_MAP='{
-  "1234": {"email":"propiedad@estancialacanada.com","password":"LA_CLAVE_REAL"},
-  "2222": {"email":"admin@estancialacanada.com","password":"LA_CLAVE_REAL"},
-  "3333": {"email":"restaurante@estancialacanada.com","password":"LA_CLAVE_REAL"}
-}'
+El navegador manda `{ pin }` y recibe `{ access_token, refresh_token, expires_in, role }`.
+`AuthContext` monta la sesión con `supabase.auth.setSession()`. Ninguna contraseña ni
+ninguno de los tres correos aparece ya en el bundle.
+
+Comprobado que la tabla no se puede leer:
+
+| Quién | Resultado |
+|---|---|
+| Llave pública (`anon`) | `42501 permission denied` |
+| Sesión de administrador iniciada (`authenticated`) | `42501 permission denied` |
+
+## Contra la fuerza bruta
+
+Un PIN de cuatro cifras son diez mil combinaciones. El límite que hay en la pantalla de
+login sirve de poco: se salta llamando a la API directamente. Este no.
+
+- **10 intentos por IP cada 5 minutos**, y luego 429.
+- Se cuentan **también los aciertos**. Si solo contara los fallos, bastaría con intercalar
+  un PIN bueno para seguir probando sin límite.
+- Un PIN que no existe y un PIN que existe pero falla dan **la misma respuesta**, para que
+  no se puedan descubrir cuáles son válidos probando.
+
+El contador vive en memoria y se pierde si la función se reinicia. Es un freno contra quien
+prueba en bucle, no un registro de auditoría.
+
+## Por qué va sin verificación de JWT
+
+Se desplegó con `verify_jwt: false`. Es la excepción normal de un endpoint de login: quien
+llama todavía no tiene sesión, y la autorización la hace la propia función.
+
+## Las contraseñas se rotaron
+
+Sacarlas del bundle no arregla lo que ya pasó: llevaban meses descargables y quien las
+guardara podía seguir entrando. El mismo día se cambiaron las tres por cadenas aleatorias
+de 24 bytes, generadas **dentro de Postgres** (`gen_random_bytes` + `crypt`), de modo que
+el texto plano nunca salió de la base de datos.
+
+Comprobado después: las tres contraseñas viejas devuelven `400` contra
+`/auth/v1/token`, y los tres PINes siguen entrando por la función.
+
+## Si hay que cambiar un PIN o una contraseña
+
+Todo está en la tabla; no hay que tocar código ni volver a desplegar:
+
+```sql
+-- Cambiar el PIN de un acceso
+update public.admin_pin_map set pin = '4321', updated_at = now() where role = 'propiedad';
+
+-- Rotar una contraseña (genera la nueva dentro de Postgres y la pone en los dos sitios)
+with nueva as (
+  select email, encode(extensions.gen_random_bytes(24), 'base64') as clave
+  from public.admin_pin_map where role = 'propiedad'
+), u as (
+  update auth.users set encrypted_password = extensions.crypt(n.clave, extensions.gen_salt('bf')),
+         updated_at = now()
+  from nueva n where auth.users.email = n.email returning 1
+)
+update public.admin_pin_map m set password = n.clave, updated_at = now()
+from nueva n where m.email = n.email;
 ```
 
-### 2. Desplegar
+## Lo que sigue sin estar resuelto
 
-```bash
-supabase functions deploy admin-login --no-verify-jwt
-```
-
-`--no-verify-jwt` es obligatorio: quien llama todavía no tiene sesión.
-
-### 3. Comprobar antes de tocar nada
-
-```bash
-curl -s -X POST "https://<tu-proyecto>.supabase.co/functions/v1/admin-login" \
-  -H "Content-Type: application/json" -d '{"pin":"1234"}'
-```
-
-Debe devolver `access_token` y `refresh_token`. Con un PIN falso, `401 PIN incorrecto`.
-
-### 4. Recién entonces, cambiar el cliente
-
-`login()` pasa a llamar a la función y montar la sesión con lo que devuelve:
-
-```ts
-const { data, error } = await supabase.functions.invoke('admin-login', { body: { pin } })
-if (error || !data?.access_token) return null
-await supabase.auth.setSession({
-  access_token: data.access_token,
-  refresh_token: data.refresh_token,
-})
-```
-
-Y se borra el objeto `PINS` con las contraseñas. El rol se puede seguir guardando en
-`localStorage`, pero **ya no hay que guardar el PIN**: la sesión se restaura sola con el
-`refresh_token` que Supabase mantiene.
-
-## Qué resuelve y qué no
-
-**Resuelve:** las contraseñas dejan de publicarse, y los intentos quedan limitados en el
-servidor (10 cada 5 minutos por IP), que es el único sitio donde el límite cuenta — el
-del navegador se salta llamando a la API directamente.
-
-**No resuelve:** un PIN de cuatro cifras sigue siendo un PIN de cuatro cifras. Con el
-límite del servidor, recorrer las diez mil combinaciones lleva días en vez de segundos,
-pero si algún día esto guarda algo más delicado que una nómina, toca login de verdad con
-usuario y contraseña por persona.
+Un PIN de cuatro cifras es un PIN de cuatro cifras. El límite por IP lo hace lento, pero
+quien tenga muchas IPs tiene tiempo. Si en algún momento importa de verdad, el paso
+siguiente es un PIN más largo o un segundo factor; el sitio donde tocarlo es esta función y
+la tabla, no el cliente.
