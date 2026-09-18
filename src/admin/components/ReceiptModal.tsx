@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, Printer, CheckCircle2 } from 'lucide-react';
 import type { Employee, EmployeeBonus } from '../types';
+import { etiquetaDeParte, type ParteDePago } from '../../utils/pagoNomina';
 
 interface ReceiptModalProps {
   emp: Employee;
@@ -11,6 +12,9 @@ interface ReceiptModalProps {
   /** Bonos cobrados en este mismo pago. El recibo tiene que decirlo: el empleado firma
    *  una cantidad y tiene derecho a ver de que se compone. */
   bonuses?: EmployeeBonus[];
+  /** Cómo se pagó, si se pagó en varias formas o monedas. Sin esto el recibo supone un
+   *  único pago en bolívares, que es como se pagaba antes. */
+  partes?: ParteDePago[];
   onClose: () => void;
 }
 
@@ -20,7 +24,7 @@ const fmtUsd = (n: number) =>
 const fmtBs = (n: number) =>
   new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'VES', maximumFractionDigits: 2 }).format(n);
 
-const ReceiptModal: React.FC<ReceiptModalProps> = ({ emp, amountUsd, period, bcvRate, isHistory, bonuses, onClose }) => {
+const ReceiptModal: React.FC<ReceiptModalProps> = ({ emp, amountUsd, period, bcvRate, isHistory, bonuses, partes, onClose }) => {
   // Un recibo viejo puede no tener guardada la tasa a la que se cambio. En ese caso el
   // recibo se queda en dolares en lugar de inventarse unos bolivares con la tasa de hoy,
   // que darian una cifra que nadie pago.
@@ -30,6 +34,19 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({ emp, amountUsd, period, bcv
   const totalBonos = listaBonos.reduce((s, b) => s + b.amount, 0);
   // `amountUsd` ya viene con los bonos sumados; el sueldo es lo que queda al quitarlos.
   const sueldoUsd = amountUsd - totalBonos;
+
+  // Con un pago mixto —cien dólares en billetes y el resto en bolívares— el total no se
+  // puede dar en bolívares: el empleado no recibió bolívares por todo. Solo si todo se
+  // pagó en bolívares el titular va en bolívares; si no, en dólares, con el desglose.
+  const listaPartes = partes ?? [];
+  const hayPartes = listaPartes.length > 0;
+  const todoEnBs = hayPartes && listaPartes.every(p => (p.bolivares ?? 0) > 0);
+  const totalBsPartes = listaPartes.reduce((s, p) => s + (p.bolivares ?? 0), 0);
+  const titular = hayPartes
+    ? (todoEnBs ? fmtBs(totalBsPartes) : fmtUsd(amountUsd))
+    : (hayTasa ? fmtBs(amountBs) : fmtUsd(amountUsd));
+  const conEquivalente = hayPartes ? todoEnBs : hayTasa;
+  const valorDeParte = (p: ParteDePago) => (p.bolivares ?? 0) > 0 ? fmtBs(p.bolivares as number) : fmtUsd(p.dolares);
   const [date] = useState(new Date().toLocaleDateString('es-ES', { 
     year: 'numeric', 
     month: 'long', 
@@ -101,14 +118,31 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({ emp, amountUsd, period, bcv
             </div>
           )}
 
+          {hayPartes && (
+            <div className="pt-4 border-t border-gray-200 space-y-2">
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Forma de pago</p>
+              {listaPartes.map((p, i) => (
+                <div key={i} className="flex justify-between items-center gap-3">
+                  <span className="text-gray-500 text-sm font-medium">{etiquetaDeParte(p.metodo, (p.bolivares ?? 0) > 0)}</span>
+                  <span className="text-right shrink-0">
+                    <span className="font-bold text-gray-900">{valorDeParte(p)}</span>
+                    {(p.bolivares ?? 0) > 0 && (
+                      <span className="block text-[10px] text-gray-400">{fmtUsd(p.dolares)}</span>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="pt-4 border-t border-gray-200 flex flex-col gap-1 items-end">
             <div className="flex justify-between items-center w-full">
               <span className="text-gray-500 text-sm font-bold uppercase tracking-wider">Total Pagado</span>
               <span className="font-bold text-2xl text-emerald-600">
-                {hayTasa ? fmtBs(amountBs) : fmtUsd(amountUsd)}
+                {titular}
               </span>
             </div>
-            {hayTasa && (
+            {conEquivalente && (
               <span className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">
                 Equivalente a {fmtUsd(amountUsd)}
               </span>
@@ -162,15 +196,36 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({ emp, amountUsd, period, bcv
             </p>
             <div className="bg-gray-100 p-4 rounded-lg flex flex-col items-center justify-center border border-gray-300">
               <span className="text-3xl font-bold text-gray-900 mb-1">
-                {hayTasa ? fmtBs(amountBs) : fmtUsd(amountUsd)}
+                {titular}
               </span>
-              {hayTasa && (
+              {conEquivalente && (
                 <span className="text-sm font-bold text-gray-500 tracking-wider">Equivalente a {fmtUsd(amountUsd)}</span>
               )}
             </div>
             <p className="text-lg">
               Por concepto de honorarios / salario correspondiente al período: <strong>{period}</strong>.
             </p>
+            {hayPartes && (
+              <table className="w-full text-left border border-gray-400">
+                <thead>
+                  <tr className="border-b border-gray-400 bg-gray-100">
+                    <th className="px-4 py-2 text-sm uppercase tracking-wider">Forma de pago</th>
+                    <th className="px-4 py-2 text-sm uppercase tracking-wider text-right">Monto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {listaPartes.map((p, i) => (
+                    <tr key={i} className="border-b border-gray-300">
+                      <td className="px-4 py-2">{etiquetaDeParte(p.metodo, (p.bolivares ?? 0) > 0)}</td>
+                      <td className="px-4 py-2 text-right font-bold">
+                        {valorDeParte(p)}
+                        {(p.bolivares ?? 0) > 0 && <span className="font-normal text-gray-500"> ({fmtUsd(p.dolares)})</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
             {totalBonos > 0 && (
               <table className="w-full text-left border border-gray-400">
                 <tbody>

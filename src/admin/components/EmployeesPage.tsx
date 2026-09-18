@@ -8,9 +8,12 @@ import { parseLocalDate, fechaLocalISO } from '../../utils/dateUtils'
 import ReceiptModal from './ReceiptModal'
 import WeeklyTipsModal from './WeeklyTipsModal'
 import {
-  cargarBonos, crearBono, borrarBonoPendiente, pagarBonosPendientes,
-  sumaDeBonos, bonosPagadosEn, esApunteDeBono,
+  cargarBonos, crearBono, borrarBonoPendiente, sumaDeBonos, bonosPagadosEn,
 } from '../../utils/employeeBonuses'
+import PagoNominaModal, { type PagoConfirmado } from './PagoNominaModal'
+import {
+  registrarPagoDeNomina, renglonPorDefecto, type ParteDePago,
+} from '../../utils/pagoNomina'
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
@@ -56,89 +59,15 @@ const FREQ_LABELS: Record<string, string> = {
   por_dias: 'Por Días',
 }
 
-// ─── Pay Eventual Modal ──────────────────────────────────────────────────────
-interface PayEventualModalProps {
-  emp: Employee
-  onConfirm: (emp: Employee, days: number) => void
-  onClose: () => void
-  paying: boolean
-}
-
-const PayEventualModal: React.FC<PayEventualModalProps> = ({ emp, onConfirm, onClose, paying }) => {
-  const defaultDays = emp.paymentFrequency === 'semanal' ? 7 : emp.contractedDays || 1
-  const [days, setDays] = useState(defaultDays)
-  const total = emp.dailyRate * days
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 space-y-5">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold text-gray-900">Registrar Pago Eventual</h2>
-          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
-            <X size={18} className="text-gray-500" />
-          </button>
-        </div>
-
-        {/* Employee info */}
-        <div className="bg-gray-50 rounded-2xl p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-[#C5A059]/15 text-[#C5A059] flex items-center justify-center font-bold text-sm shrink-0">
-            {emp.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-          </div>
-          <div>
-            <p className="text-sm font-bold text-gray-900">{emp.name}</p>
-            <p className="text-xs text-gray-500">{emp.role} · Tarifa: {fmt(emp.dailyRate)}/día</p>
-          </div>
-        </div>
-
-        {/* Days input */}
-        <div>
-          <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 block">
-            {emp.paymentFrequency === 'semanal'
-              ? 'Días de la semana a pagar'
-              : 'Días trabajados a pagar'}
-          </label>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setDays(d => Math.max(1, d - 1))}
-              className="w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center font-bold text-gray-700 text-lg transition-colors"
-            >−</button>
-            <input
-              type="number"
-              min={1}
-              value={days}
-              onChange={e => setDays(Math.max(1, Number(e.target.value)))}
-              className="flex-1 border border-gray-200 rounded-xl px-3 py-2.5 text-center text-lg font-bold outline-none focus:border-[#C5A059]"
-            />
-            <button
-              onClick={() => setDays(d => d + 1)}
-              className="w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center font-bold text-gray-700 text-lg transition-colors"
-            >+</button>
-          </div>
-          {emp.contractedDays > 0 && (
-            <p className="text-[10px] text-gray-400 mt-1.5 text-center">
-              Contratado por {emp.contractedDays} días · Días a pagar: <strong>{days}</strong>
-            </p>
-          )}
-        </div>
-
-        {/* Total */}
-        <div className="bg-[#3D2B1F]/5 border border-[#3D2B1F]/10 rounded-2xl p-4 text-center">
-          <p className="text-xs text-gray-500 uppercase tracking-widest font-bold mb-1">Total a Pagar</p>
-          <p className="text-3xl font-bold text-[#3D2B1F] font-serif">{fmt(total)}</p>
-          <p className="text-[10px] text-gray-400 mt-1">{fmt(emp.dailyRate)} × {days} día{days !== 1 ? 's' : ''}</p>
-        </div>
-
-        <button
-          onClick={() => onConfirm(emp, days)}
-          disabled={paying}
-          className="w-full py-3.5 bg-[#3D2B1F] hover:bg-[#2a1d14] text-white rounded-2xl font-bold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-        >
-          {paying ? <Loader2 size={16} className="animate-spin" /> : <DollarSign size={16} />}
-          Confirmar Pago de {fmt(total)}
-        </button>
-      </div>
-    </div>
-  )
+/** Etiqueta del período, en minúscula para las descripciones y con mayúscula para el recibo. */
+const periodoDe = (emp: Employee, dias: number) => {
+  if (emp.employeeType === 'eventual') {
+    const texto = emp.paymentFrequency === 'semanal' ? `semana (${dias} días)` : `${dias} día${dias !== 1 ? 's' : ''}`
+    return { concepto: `Pago eventual (${texto})`, recibo: texto }
+  }
+  const f = emp.paymentFrequency === 'semanal' ? 'semanal' : emp.paymentFrequency === 'mensual' ? 'mensual' : 'quincenal'
+  const recibo = f === 'semanal' ? 'Semana' : f === 'mensual' ? 'Mes' : 'Quincena'
+  return { concepto: `Pago nómina ${f}`, recibo }
 }
 
 // ─── Main Component ──────────────────────────────────────────────────────────
@@ -148,12 +77,12 @@ const EmployeesPage: React.FC = () => {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null)
-  const [paidId, setPaidId] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
-  const [payEventualTarget, setPayEventualTarget] = useState<Employee | null>(null)
-  const [payingEventual, setPayingEventual] = useState(false)
+  // Empleado al que se le está registrando el pago, con el formulario abierto.
+  const [pagoTarget, setPagoTarget] = useState<Employee | null>(null)
+  const [pagando, setPagando] = useState(false)
   const [activeTab, setActiveTab] = useState<'fijos' | 'eventuales'>('fijos')
-  const [receiptData, setReceiptData] = useState<{emp: Employee, amount: number, period: string, isHistory?: boolean, bcvRate?: number, bonuses?: EmployeeBonus[]} | null>(null)
+  const [receiptData, setReceiptData] = useState<{emp: Employee, amount: number, period: string, isHistory?: boolean, bcvRate?: number, bonuses?: EmployeeBonus[], partes?: ParteDePago[]} | null>(null)
   const [bcvRate, setBcvRate] = useState<number>(36.50)
   
   // Fondo y Reparto de Propinas
@@ -303,211 +232,108 @@ const EmployeesPage: React.FC = () => {
   const bonosPendientesDe = (id: string) => bonosPendientesPorEmpleado.get(id) ?? []
   const totalBonosPendientes = (id: string) => sumaDeBonos(bonosPendientesDe(id))
 
-  /** Cobra los bonos pendientes de un empleado y deja el estado en pantalla al dia. */
-  const cobrarBonos = async (emp: Employee, fecha: string): Promise<EmployeeBonus[]> => {
-    const pendientes = bonosPendientesDe(emp.id)
-    if (pendientes.length === 0) return []
-
-    const { pagados, error } = await pagarBonosPendientes(emp, pendientes, fecha, bcvRate)
-    if (pagados.length > 0) {
-      const ids = new Set(pagados.map(b => b.id))
+  /** Deja la pantalla como ha quedado la base de datos tras un pago. */
+  const reflejarPago = (emp: Employee, fecha: string, bonosCobrados: EmployeeBonus[]) => {
+    setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, pendingPayment: false, lastPayment: fecha } : e))
+    if (bonosCobrados.length > 0) {
+      const ids = new Set(bonosCobrados.map(b => b.id))
       setBonuses(prev => prev.map(b => ids.has(b.id) ? { ...b, paid: true, paidAt: fecha } : b))
     }
-    // El error se enseña siempre: es dinero que puede quedar sin apuntar en Egresos.
-    if (error) alert(error)
-    return pagados
-  }
-
-  // ── Pay fixed employee ────────────────────────────────────────────────────
-  const handlePay = async (id: string) => {
-    setPaidId(id)
-    const today = fechaLocalISO()
-    const emp = employees.find(e => e.id === id)
-
-    const { error } = await supabase
-      .from('employees')
-      .update({ pending_payment: false, last_payment: today })
-      .eq('id', id)
-
-    if (error) { console.error(error); setPaidId(null); return }
-
-    if (emp) {
-      const periodLabel = emp.paymentFrequency === 'semanal' ? 'semanal' : 'quincenal'
-      await supabase.from('transactions').insert([{
-        date: today,
-        type: 'egreso',
-        category: 'empleados',
-        description: `Pago nómina ${periodLabel} — ${emp.name}`,
-        amount: emp.salary,
-        payment_method: 'transferencia',
-        related_to: emp.name,
-        exchange_rate: bcvRate,
-        amount_bs: Math.round(emp.salary * bcvRate * 100) / 100,
-      }])
-    }
-
-    const bonosCobrados = emp ? await cobrarBonos(emp, today) : []
-
-    setEmployees(prev => prev.map(e => e.id === id ? { ...e, pendingPayment: false, lastPayment: today } : e))
     setSelectedIds(prev => {
       const next = new Set(prev)
-      next.delete(id)
+      next.delete(emp.id)
       return next
     })
-    setPaidId(null)
-    if (emp) {
-      setReceiptData({
-        emp,
-        amount: emp.salary + sumaDeBonos(bonosCobrados),
-        period: emp.paymentFrequency === 'semanal' ? 'Semana' : 'Quincena',
-        bonuses: bonosCobrados,
-      })
+  }
+
+  // ── Pago de un empleado, con el formulario ──────────────────────────────
+  const handleConfirmarPago = async ({ renglones, dias, total }: PagoConfirmado) => {
+    const emp = pagoTarget
+    if (!emp) return
+    setPagando(true)
+    const fecha = fechaLocalISO()
+    const { concepto, recibo } = periodoDe(emp, dias)
+    const pendientes = bonosPendientesDe(emp.id)
+
+    const r = await registrarPagoDeNomina({
+      emp, renglones, concepto, fecha, bonosPendientes: pendientes, totalEsperado: total,
+    })
+    setPagando(false)
+
+    // Sin partes no se apuntó nada: el empleado sigue como estaba.
+    if (r.partes.length === 0) {
+      alert(r.error ?? 'No se pudo registrar el pago.')
+      return
     }
+    if (r.error) alert(r.error)
+
+    reflejarPago(emp, fecha, r.bonosCobrados)
+    setPagoTarget(null)
+    setReceiptData({ emp, amount: r.total, period: recibo, bonuses: r.bonosCobrados, partes: r.partes })
+  }
+
+  // Los pagos en lote no abren formulario: cada empleado se paga entero de la forma
+  // de siempre —bolívares por transferencia a la tasa del euro—. Quien necesite partir un
+  // pago lo registra uno a uno.
+  const pagarEnLote = async (lista: Employee[]) => {
+    const fecha = fechaLocalISO()
+    let hechos = 0
+    const errores: string[] = []
+    let ultimo: { emp: Employee; total: number; partes: ParteDePago[]; bonos: EmployeeBonus[] } | null = null
+
+    for (const emp of lista) {
+      const dias = emp.contractedDays || (emp.paymentFrequency === 'semanal' ? 7 : 1)
+      const base = emp.employeeType === 'fijo' ? emp.salary : emp.dailyRate * dias
+      const pendientes = bonosPendientesDe(emp.id)
+      const total = Math.round((base + sumaDeBonos(pendientes)) * 100) / 100
+      const r = await registrarPagoDeNomina({
+        emp,
+        renglones: [renglonPorDefecto(total, bcvRate)],
+        concepto: periodoDe(emp, dias).concepto,
+        fecha,
+        bonosPendientes: pendientes,
+        totalEsperado: total,
+      })
+      if (r.error) errores.push(r.error)
+      if (r.partes.length > 0) {
+        hechos++
+        reflejarPago(emp, fecha, r.bonosCobrados)
+        ultimo = { emp, total: r.total, partes: r.partes, bonos: r.bonosCobrados }
+      }
+    }
+
+    if (errores.length > 0) alert(errores.join('\n\n'))
+    return { hechos, ultimo }
   }
 
   // ── Pay Selected Employees ────────────────────────────────────────────────
   const handlePaySelected = async () => {
     if (selectedPendingEmployees.length === 0) return
 
-    const confirmMsg = `¿Deseas registrar el pago de nómina de ${selectedPendingEmployees.length} empleado(s) seleccionado(s) por un total de ${fmt(totalSelectedPay)}?`
+    const confirmMsg = `¿Deseas registrar el pago de nómina de ${selectedPendingEmployees.length} empleado(s) seleccionado(s) por un total de ${fmt(totalSelectedPay)}?\n\nSe pagará cada uno entero por transferencia en bolívares. Si alguno cobra en varias formas, regístrelo uno a uno.`
     if (!window.confirm(confirmMsg)) return
 
     setPayingSelected(true)
-    const today = fechaLocalISO()
-    const ids = selectedPendingEmployees.map(e => e.id)
-
-    const { error } = await supabase
-      .from('employees')
-      .update({ pending_payment: false, last_payment: today })
-      .in('id', ids)
-
-    if (error) {
-      console.error('Error al actualizar empleados:', error)
-      alert(`Hubo un error al actualizar el estado: ${error.message}`)
-      setPayingSelected(false)
-      return
-    }
-
-    const txs = selectedPendingEmployees.map(emp => {
-      const amount = emp.employeeType === 'fijo'
-        ? emp.salary
-        : emp.dailyRate * (emp.contractedDays || (emp.paymentFrequency === 'semanal' ? 7 : 1))
-      const periodLabel = emp.paymentFrequency === 'semanal' ? 'semanal' : emp.paymentFrequency === 'quincenal' ? 'quincenal' : 'por días'
-      return {
-        date: today,
-        type: 'egreso',
-        category: 'empleados',
-        description: `Pago nómina ${periodLabel} — ${emp.name}`,
-        amount,
-        payment_method: 'transferencia',
-        related_to: emp.name,
-        exchange_rate: bcvRate,
-        amount_bs: Math.round(amount * bcvRate * 100) / 100,
-      }
-    })
-
-    await supabase.from('transactions').insert(txs)
-
-    // Los bonos pendientes se cobran con la nomina, cada uno con su apunte aparte.
-    const bonosPorEmpleado = new Map<string, EmployeeBonus[]>()
-    for (const emp of selectedPendingEmployees) {
-      bonosPorEmpleado.set(emp.id, await cobrarBonos(emp, today))
-    }
-
-    setEmployees(prev => prev.map(e => ids.includes(e.id) ? { ...e, pendingPayment: false, lastPayment: today } : e))
-    setSelectedIds(new Set())
+    const { hechos, ultimo } = await pagarEnLote(selectedPendingEmployees)
     setPayingSelected(false)
 
-    if (selectedPendingEmployees.length === 1) {
-      const single = selectedPendingEmployees[0]
-      const amt = single.employeeType === 'fijo' ? single.salary : single.dailyRate * (single.contractedDays || 7)
-      const bonos = bonosPorEmpleado.get(single.id) ?? []
+    if (hechos === 1 && ultimo) {
       setReceiptData({
-        emp: single,
-        amount: amt + sumaDeBonos(bonos),
-        period: single.paymentFrequency === 'semanal' ? 'Semana' : 'Quincena',
-        bonuses: bonos,
+        emp: ultimo.emp,
+        amount: ultimo.total,
+        period: periodoDe(ultimo.emp, ultimo.emp.contractedDays || 7).recibo,
+        bonuses: ultimo.bonos,
+        partes: ultimo.partes,
       })
-    } else {
-      alert(`¡Se procesó exitosamente el pago de nómina de ${selectedPendingEmployees.length} empleados!`)
+    } else if (hechos > 1) {
+      alert(`Se registró el pago de ${hechos} empleados.`)
     }
   }
 
   const handlePayAll = async () => {
-    const today = fechaLocalISO()
     const pending = activeFijos.filter(e => e.pendingPayment)
     if (pending.length === 0) return
-
-    const { error } = await supabase
-      .from('employees')
-      .update({ pending_payment: false, last_payment: today })
-      .eq('status', 'activo')
-      .eq('pending_payment', true)
-      .eq('employee_type', 'fijo')
-
-    if (error) { console.error(error); return }
-
-    const txs = pending.map(emp => ({
-      date: today,
-      type: 'egreso',
-      category: 'empleados',
-      description: `Pago nómina ${emp.paymentFrequency === 'semanal' ? 'semanal' : 'quincenal'} — ${emp.name}`,
-      amount: emp.salary,
-      payment_method: 'transferencia',
-      related_to: emp.name,
-      exchange_rate: bcvRate,
-      amount_bs: Math.round(emp.salary * bcvRate * 100) / 100,
-    }))
-    await supabase.from('transactions').insert(txs)
-
-    for (const emp of pending) await cobrarBonos(emp, today)
-
-    setEmployees(prev =>
-      prev.map(e => e.employeeType === 'fijo' && e.status === 'activo' && e.pendingPayment
-        ? { ...e, pendingPayment: false, lastPayment: today }
-        : e
-      )
-    )
-    setSelectedIds(new Set())
-  }
-
-  // ── Pay eventual employee ─────────────────────────────────────────────────
-  const handlePayEventual = async (emp: Employee, days: number) => {
-    setPayingEventual(true)
-    const today = fechaLocalISO()
-    const amount = emp.dailyRate * days
-
-    const { error } = await supabase
-      .from('employees')
-      .update({ last_payment: today, pending_payment: false })
-      .eq('id', emp.id)
-
-    if (error) { console.error(error); setPayingEventual(false); return }
-
-    const freqLabel = emp.paymentFrequency === 'semanal' ? `semana (${days} días)` : `${days} día${days !== 1 ? 's' : ''}`
-    await supabase.from('transactions').insert([{
-      date: today,
-      type: 'egreso',
-      category: 'empleados',
-      description: `Pago eventual (${freqLabel}) — ${emp.name}`,
-      amount,
-      payment_method: 'transferencia',
-      related_to: emp.name,
-      exchange_rate: bcvRate,
-      amount_bs: Math.round(amount * bcvRate * 100) / 100,
-    }])
-
-    const bonosCobrados = await cobrarBonos(emp, today)
-
-    setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, lastPayment: today, pendingPayment: false } : e))
-    setPayingEventual(false)
-    setPayEventualTarget(null)
-    setReceiptData({
-      emp,
-      amount: amount + sumaDeBonos(bonosCobrados),
-      period: freqLabel,
-      bonuses: bonosCobrados,
-    })
+    await pagarEnLote(pending)
   }
 
   const handleViewLastReceipt = async (emp: Employee) => {
@@ -518,33 +344,40 @@ const EmployeesPage: React.FC = () => {
       .eq('category', 'empleados')
       .eq('related_to', emp.name)
       .eq('date', emp.lastPayment)
-      .order('created_at', { ascending: false })
-      .limit(10)
+      .order('created_at', { ascending: true })
 
-    // Un bono es otro apunte del mismo empleado y la misma fecha. Sin saltarlos, al pedir
-    // el recibo saldria el del bono en lugar del del sueldo.
-    const tx = (data || []).find(t => !esApunteDeBono(t.notes))
-
-    if (error || !tx) {
+    const filas = data || []
+    if (error || filas.length === 0) {
       alert('No se encontró el comprobante de este pago.')
       return
     }
-    const rate = tx.exchange_rate ? Number(tx.exchange_rate) : bcvRate
-    
-    let period = emp.paymentFrequency === 'semanal' ? 'Semana' : 'Quincena'
+
+    // Un pago puede tener varias partes —efectivo y pago móvil, por ejemplo— y los pagos
+    // anteriores a esto tenían además un apunte por cada bono. Todas son dinero que
+    // recibió el empleado ese día, así que el recibo las suma todas.
+    const partes: ParteDePago[] = filas.map(t => ({
+      metodo: t.payment_method || 'transferencia',
+      dolares: Number(t.amount) || 0,
+      bolivares: t.amount_bs == null ? null : Number(t.amount_bs),
+      tasa: t.exchange_rate == null ? null : Number(t.exchange_rate),
+    }))
+    const total = Math.round(partes.reduce((s, p) => s + p.dolares, 0) * 100) / 100
+
+    let period = emp.paymentFrequency === 'semanal' ? 'Semana' : emp.paymentFrequency === 'mensual' ? 'Mes' : 'Quincena'
     if (emp.employeeType === 'eventual') {
-      const entreParentesis = tx.description.match(/\((.*?)\)/)
+      const entreParentesis = String(filas[0].description).match(/\((.*?)\)/)
       if (entreParentesis) period = entreParentesis[1]
     }
 
     const bonos = await bonosPagadosEn(emp.id, emp.lastPayment)
     setReceiptData({
       emp,
-      amount: Number(tx.amount) + sumaDeBonos(bonos),
+      amount: total,
       period,
       isHistory: true,
-      bcvRate: rate,
+      bcvRate: partes.find(p => p.tasa)?.tasa ?? 0,
       bonuses: bonos,
+      partes,
     })
   }
 
@@ -1022,14 +855,10 @@ const EmployeesPage: React.FC = () => {
 
                           {emp.status === 'activo' && emp.pendingPayment && (
                             <button
-                              onClick={() => handlePay(emp.id)}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                                paidId === emp.id
-                                  ? 'bg-emerald-500 text-white'
-                                  : 'bg-violet-100 text-violet-700 hover:bg-violet-600 hover:text-white'
-                              }`}
+                              onClick={() => setPagoTarget(emp)}
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-violet-100 text-violet-700 hover:bg-violet-600 hover:text-white"
                             >
-                              {paidId === emp.id ? <Check size={14} /> : 'Pagar'}
+                              Pagar
                             </button>
                           )}
                         </div>
@@ -1188,7 +1017,7 @@ const EmployeesPage: React.FC = () => {
 
                           {emp.status === 'activo' && (
                             <button
-                              onClick={() => setPayEventualTarget(emp)}
+                              onClick={() => setPagoTarget(emp)}
                               className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#C5A059]/10 text-[#3D2B1F] hover:bg-[#C5A059] hover:text-white transition-all"
                             >
                               Registrar Pago
@@ -1218,12 +1047,14 @@ const EmployeesPage: React.FC = () => {
       />
 
       {/* ── Pay Eventual Modal ── */}
-      {payEventualTarget && (
-        <PayEventualModal
-          emp={payEventualTarget}
-          onConfirm={handlePayEventual}
-          onClose={() => setPayEventualTarget(null)}
-          paying={payingEventual}
+      {pagoTarget && (
+        <PagoNominaModal
+          emp={pagoTarget}
+          bonos={bonosPendientesDe(pagoTarget.id)}
+          tasaReferencia={bcvRate}
+          paying={pagando}
+          onConfirm={handleConfirmarPago}
+          onClose={() => setPagoTarget(null)}
         />
       )}
 
@@ -1377,6 +1208,7 @@ const EmployeesPage: React.FC = () => {
           bcvRate={receiptData.bcvRate || bcvRate}
           isHistory={receiptData.isHistory}
           bonuses={receiptData.bonuses}
+          partes={receiptData.partes}
           onClose={() => setReceiptData(null)}
         />
       )}
