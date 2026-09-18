@@ -138,11 +138,13 @@ export async function pagarBonosPendientes(
     type: 'egreso',
     category: 'empleados',
     description: b.concept
-      ? `Bono — ${emp.name} (${b.concept}) (Tasa BCV: ${bcvRate} Bs/€)`
-      : `Bono — ${emp.name} (Tasa BCV: ${bcvRate} Bs/€)`,
+      ? `Bono — ${emp.name} (${b.concept})`
+      : `Bono — ${emp.name}`,
     amount: b.amount,
     payment_method: 'transferencia',
     related_to: emp.name,
+    exchange_rate: bcvRate,
+    amount_bs: Math.round(b.amount * bcvRate * 100) / 100,
     notes: marcaDeBono(b.id),
   }))
 

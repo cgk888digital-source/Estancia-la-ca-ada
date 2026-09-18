@@ -21,6 +21,10 @@ const fmtBs = (n: number) =>
   new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'VES', maximumFractionDigits: 2 }).format(n);
 
 const ReceiptModal: React.FC<ReceiptModalProps> = ({ emp, amountUsd, period, bcvRate, isHistory, bonuses, onClose }) => {
+  // Un recibo viejo puede no tener guardada la tasa a la que se cambio. En ese caso el
+  // recibo se queda en dolares en lugar de inventarse unos bolivares con la tasa de hoy,
+  // que darian una cifra que nadie pago.
+  const hayTasa = bcvRate > 0;
   const amountBs = amountUsd * bcvRate;
   const listaBonos = bonuses ?? [];
   const totalBonos = listaBonos.reduce((s, b) => s + b.amount, 0);
@@ -100,11 +104,15 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({ emp, amountUsd, period, bcv
           <div className="pt-4 border-t border-gray-200 flex flex-col gap-1 items-end">
             <div className="flex justify-between items-center w-full">
               <span className="text-gray-500 text-sm font-bold uppercase tracking-wider">Total Pagado</span>
-              <span className="font-bold text-2xl text-emerald-600">{fmtBs(amountBs)}</span>
+              <span className="font-bold text-2xl text-emerald-600">
+                {hayTasa ? fmtBs(amountBs) : fmtUsd(amountUsd)}
+              </span>
             </div>
-            <span className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">
-              Equivalente a {fmtUsd(amountUsd)} (Tasa: {bcvRate} Bs/$)
-            </span>
+            {hayTasa && (
+              <span className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">
+                Equivalente a {fmtUsd(amountUsd)}
+              </span>
+            )}
           </div>
         </div>
 
@@ -153,8 +161,12 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({ emp, amountUsd, period, bcv
               He recibido de <strong>La Estancia Hotel & Club</strong>, la cantidad de:
             </p>
             <div className="bg-gray-100 p-4 rounded-lg flex flex-col items-center justify-center border border-gray-300">
-              <span className="text-3xl font-bold text-gray-900 mb-1">{fmtBs(amountBs)}</span>
-              <span className="text-sm font-bold text-gray-500 tracking-wider">Equivalente a {fmtUsd(amountUsd)} (Tasa BCV: {bcvRate} Bs/$)</span>
+              <span className="text-3xl font-bold text-gray-900 mb-1">
+                {hayTasa ? fmtBs(amountBs) : fmtUsd(amountUsd)}
+              </span>
+              {hayTasa && (
+                <span className="text-sm font-bold text-gray-500 tracking-wider">Equivalente a {fmtUsd(amountUsd)}</span>
+              )}
             </div>
             <p className="text-lg">
               Por concepto de honorarios / salario correspondiente al período: <strong>{period}</strong>.

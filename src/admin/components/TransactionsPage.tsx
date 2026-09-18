@@ -674,19 +674,12 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
 
   const handleViewReceipt = (tx: Transaction) => {
     const isEventual = tx.description.toLowerCase().includes('eventual')
-    const matchRate = tx.description.match(/Tasa BCV: ([\d.]+) Bs\/\$/)
-    const bcvRate = matchRate ? Number(matchRate[1]) : 36.50
+    const bcvRate = tx.exchangeRate && tx.exchangeRate > 0 ? tx.exchangeRate : 0
     
     let period = 'Quincena'
     if (isEventual) {
-      const matchPeriod = tx.description.match(/\((.*?) - Tasa BCV/)
-      if (matchPeriod) {
-        period = matchPeriod[1]
-      } else {
-        // Fallback for older transactions
-        const fallback = tx.description.match(/\((.*?)\)/)
-        if (fallback) period = fallback[1]
-      }
+      const entreParentesis = tx.description.match(/\((.*?)\)/)
+      if (entreParentesis) period = entreParentesis[1]
     }
 
     const emp = {

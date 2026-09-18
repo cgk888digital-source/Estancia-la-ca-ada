@@ -337,10 +337,12 @@ const EmployeesPage: React.FC = () => {
         date: today,
         type: 'egreso',
         category: 'empleados',
-        description: `Pago nómina ${periodLabel} — ${emp.name} (Tasa BCV: ${bcvRate} Bs/€)`,
+        description: `Pago nómina ${periodLabel} — ${emp.name}`,
         amount: emp.salary,
         payment_method: 'transferencia',
         related_to: emp.name,
+        exchange_rate: bcvRate,
+        amount_bs: Math.round(emp.salary * bcvRate * 100) / 100,
       }])
     }
 
@@ -395,10 +397,12 @@ const EmployeesPage: React.FC = () => {
         date: today,
         type: 'egreso',
         category: 'empleados',
-        description: `Pago nómina ${periodLabel} — ${emp.name} (Tasa BCV: ${bcvRate} Bs/€)`,
+        description: `Pago nómina ${periodLabel} — ${emp.name}`,
         amount,
         payment_method: 'transferencia',
         related_to: emp.name,
+        exchange_rate: bcvRate,
+        amount_bs: Math.round(amount * bcvRate * 100) / 100,
       }
     })
 
@@ -447,10 +451,12 @@ const EmployeesPage: React.FC = () => {
       date: today,
       type: 'egreso',
       category: 'empleados',
-      description: `Pago nómina ${emp.paymentFrequency === 'semanal' ? 'semanal' : 'quincenal'} — ${emp.name} (Tasa BCV: ${bcvRate} Bs/€)`,
+      description: `Pago nómina ${emp.paymentFrequency === 'semanal' ? 'semanal' : 'quincenal'} — ${emp.name}`,
       amount: emp.salary,
       payment_method: 'transferencia',
       related_to: emp.name,
+      exchange_rate: bcvRate,
+      amount_bs: Math.round(emp.salary * bcvRate * 100) / 100,
     }))
     await supabase.from('transactions').insert(txs)
 
@@ -483,10 +489,12 @@ const EmployeesPage: React.FC = () => {
       date: today,
       type: 'egreso',
       category: 'empleados',
-      description: `Pago eventual (${freqLabel} - Tasa BCV: ${bcvRate} Bs/€) — ${emp.name}`,
+      description: `Pago eventual (${freqLabel}) — ${emp.name}`,
       amount,
       payment_method: 'transferencia',
       related_to: emp.name,
+      exchange_rate: bcvRate,
+      amount_bs: Math.round(amount * bcvRate * 100) / 100,
     }])
 
     const bonosCobrados = await cobrarBonos(emp, today)
@@ -521,18 +529,12 @@ const EmployeesPage: React.FC = () => {
       alert('No se encontró el comprobante de este pago.')
       return
     }
-    const matchRate = tx.description.match(/Tasa BCV: ([\d.]+) Bs\/\$/)
-    const rate = matchRate ? Number(matchRate[1]) : bcvRate
+    const rate = tx.exchange_rate ? Number(tx.exchange_rate) : bcvRate
     
     let period = emp.paymentFrequency === 'semanal' ? 'Semana' : 'Quincena'
     if (emp.employeeType === 'eventual') {
-      const matchPeriod = tx.description.match(/\((.*?) - Tasa BCV/)
-      if (matchPeriod) {
-        period = matchPeriod[1]
-      } else {
-        const fallback = tx.description.match(/\((.*?)\)/)
-        if (fallback) period = fallback[1]
-      }
+      const entreParentesis = tx.description.match(/\((.*?)\)/)
+      if (entreParentesis) period = entreParentesis[1]
     }
 
     const bonos = await bonosPagadosEn(emp.id, emp.lastPayment)
