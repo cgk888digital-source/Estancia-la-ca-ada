@@ -15,7 +15,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 const TABLAS = ['bookings', 'booking_payments', 'transactions', 'accommodations',
-  'comandas', 'employees', 'menu_sections', 'menu_items', 'hotel_settings']
+  'comandas', 'employees', 'menu_sections', 'menu_items', 'hotel_settings',
+  'employee_bonuses', 'cash_box_movements']
 
 const env = Object.fromEntries(
   fs.readFileSync('.env.local', 'utf8').split('\n').filter(Boolean).map(l => {
