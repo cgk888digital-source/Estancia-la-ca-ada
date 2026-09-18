@@ -5,10 +5,11 @@
  * indique. Sirve para tener una foto antes de tocar nada, y para poder reconstruir si
  * algo se borra por error.
  *
- *   CLAVE_PROPIEDAD=xxx node respaldo-datos.mjs                 -> guarda en ./respaldos/<fecha>
- *   CLAVE_PROPIEDAD=xxx node respaldo-datos.mjs ruta/carpeta     -> guarda donde se le diga
+ *   PIN_PROPIEDAD=1234 node respaldo-datos.mjs                -> guarda en ./respaldos/<fecha>
+ *   PIN_PROPIEDAD=1234 node respaldo-datos.mjs ruta/carpeta    -> guarda donde se le diga
  *
- * La clave va por variable de entorno, nunca escrita aqui.
+ * Entra con el PIN, igual que el panel: la contraseña ya no la conoce nadie fuera del
+ * servidor, asi que no hay ninguna que escribir aqui ni en el historial de la terminal.
  */
 import { createClient } from '@supabase/supabase-js'
 import fs from 'node:fs'
@@ -25,17 +26,29 @@ const env = Object.fromEntries(
   })
 )
 
-if (!process.env.CLAVE_PROPIEDAD) {
-  console.log('Falta la clave. Ejecuta:  CLAVE_PROPIEDAD=<clave> node respaldo-datos.mjs')
+const PIN = process.env.PIN_PROPIEDAD
+if (!PIN) {
+  console.log('Falta el PIN. Ejecuta:  PIN_PROPIEDAD=<pin> node respaldo-datos.mjs')
   process.exit(1)
 }
 
 const sb = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY)
-const { error: eLogin } = await sb.auth.signInWithPassword({
-  email: 'propiedad@estancialacanada.com',
-  password: process.env.CLAVE_PROPIEDAD,
+
+// El mismo camino que usa el panel: se manda el PIN y vuelve una sesion. La contraseña
+// vive solo en el servidor y no hace falta conocerla para nada.
+const { data: sesion, error: eFuncion } = await sb.functions.invoke('admin-login', {
+  body: { pin: PIN },
 })
-if (eLogin) { console.log('No se pudo entrar:', eLogin.message); process.exit(1) }
+if (eFuncion || !sesion?.access_token) {
+  console.log('No se pudo entrar con ese PIN.')
+  process.exit(1)
+}
+
+const { error: eLogin } = await sb.auth.setSession({
+  access_token: sesion.access_token,
+  refresh_token: sesion.refresh_token,
+})
+if (eLogin) { console.log('No se pudo montar la sesion:', eLogin.message); process.exit(1) }
 
 const sello = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
 const destino = process.argv[2] || path.join('respaldos', sello)
