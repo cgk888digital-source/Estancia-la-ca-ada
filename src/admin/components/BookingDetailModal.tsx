@@ -555,7 +555,7 @@ export default function BookingDetailModal({
       const specialNotes = withBookingDiscountNote(selectedBooking.specialNotes, discountPercent)
 
       return {
-        guest_name: `${selectedBooking.guestName.replace(/\\s+\\(\\d+\\/\\d+\\)$/, '')} (${resultingGroupSize}/${resultingGroupSize})`,
+        guest_name: `${selectedBooking.guestName.replace(/\s+\(\d+\/\d+\)$/, '')} (${resultingGroupSize}/${resultingGroupSize})`,
         guest_phone: selectedBooking.guestPhone || '+58 412-000-0000',
         guest_email: selectedBooking.guestEmail || 'cliente@estancialacanada.com',
         guest_ci: selectedBooking.guestCi || null,
@@ -665,12 +665,14 @@ export default function BookingDetailModal({
     const reactPayment = mapDbPaymentToReact(data)
     setBookingPayments(prev => [...prev, reactPayment])
 
+    // Update amount_paid on target booking
     const newPaid = Number(targetBooking.amountPaid) + amountVal
     const newStatus = newPaid >= targetBooking.totalAmount ? 'completo' : 'parcial'
     await supabase.from('bookings').update({ amount_paid: newPaid, payment_status: newStatus }).eq('id', targetBooking.id)
     setBookings(prev => prev.map(b => b.id === targetBooking.id ? { ...b, amountPaid: newPaid, paymentStatus: newStatus } : b))
     setSelectedBooking(prev => prev && prev.id === targetBooking.id ? { ...prev, amountPaid: newPaid, paymentStatus: newStatus } : prev)
 
+    // Register income
     await registrarIngresoDeAbono(supabase, {
       paymentId: data.id,
       bookingId: targetBooking.id,
@@ -895,7 +897,7 @@ export default function BookingDetailModal({
                   </div>
                   <button
                     onClick={() => {
-                      const { firstName, lastName } = splitPersonName(selectedBooking.guestName.replace(/\\s+\\(\\d+\\/\\d+\\)$/, ''))
+                      const { firstName, lastName } = splitPersonName(selectedBooking.guestName.replace(/\s+\(\d+\/\d+\)$/, ''))
                       setEditGuestForm({
                         firstName,
                         lastName,
