@@ -81,11 +81,14 @@ export interface Booking {
   paymentStatus: 'completo' | 'parcial' | 'pendiente'
   paymentMethod: 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque' | 'zelle' | 'pago_movil'
   paymentReference?: string
-  status: 'checkout_hoy' | 'checkin_hoy' | 'ocupado' | 'confirmado' | 'limpieza'
+  status: 'checkout_hoy' | 'checkin_hoy' | 'ocupado' | 'confirmado' | 'limpieza' | 'anulada'
   /** false = reserva recién creada por el huésped (BookingFlow), aún no revisada por el staff. */
   confirmed: boolean
   specialNotes?: string
   locator?: string
+  createdAt?: string
+  cancelledAt?: string | null
+  cancellationReason?: string | null
 }
 
 export interface BookingPayment {
@@ -147,4 +150,3 @@ export interface EmailCampaign {
   clickedCount: number
   createdAt: string
 }
-

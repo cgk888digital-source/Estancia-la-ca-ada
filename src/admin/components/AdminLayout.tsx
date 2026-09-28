@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ArrowDownCircle, ArrowUpCircle,
-  Users, BarChart3, Menu, X, LogOut, UtensilsCrossed, Calendar, DollarSign, ClipboardList, Mail, ContactRound, Wallet
+  Users, BarChart3, Menu, X, LogOut, UtensilsCrossed, Calendar, DollarSign, ClipboardList, Mail, ContactRound, Wallet, ArchiveX
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import LoginPage from './LoginPage'
@@ -10,6 +10,7 @@ import LoginPage from './LoginPage'
 const navItems = [
   { to: '/admin', label: 'Dashboard', icon: <LayoutDashboard size={20} />, end: true, roles: ['propiedad'] },
   { to: '/admin/reservas', label: 'Planner Reservas', icon: <Calendar size={20} />, roles: ['propiedad', 'administracion'] },
+  { to: '/admin/reservas-anuladas', label: 'Res. Anuladas', icon: <ArchiveX size={20} />, roles: ['propiedad', 'administracion'] },
   { to: '/admin/clientes', label: 'Clientes', icon: <ContactRound size={20} />, roles: ['propiedad', 'administracion'] },
   { to: '/admin/ingresos', label: 'Ingresos & Propinas', icon: <ArrowDownCircle size={20} />, roles: ['propiedad', 'administracion'] },
   { to: '/admin/egresos', label: 'Egresos', icon: <ArrowUpCircle size={20} />, roles: ['propiedad', 'administracion'] },
