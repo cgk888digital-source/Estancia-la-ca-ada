@@ -368,6 +368,10 @@ export default function BookingsPage() {
   const [locatorCode, setLocatorCode] = useState('')
   const [dbAccommodations, setDbAccommodations] = useState<DbAccommodation[]>([])
   const [selectedAccommodationIds, setSelectedAccommodationIds] = useState<number[]>([2])
+  // Distribución de personas por habitación para reservas grupales o individuales
+  const [roomGuestsMap, setRoomGuestsMap] = useState<Record<number, { adults: number; children: number; babies: number }>>({
+    2: { adults: 2, children: 0, babies: 0 }
+  })
   
   // Form State for creating a new booking
   const [form, setForm] = useState({
@@ -469,23 +473,67 @@ export default function BookingsPage() {
     ).total
   }
 
+  const updateRoomGuests = (
+    accId: number,
+    field: 'adults' | 'children' | 'babies',
+    deltaOrValue: number,
+    isAbsolute = false
+  ) => {
+    setRoomGuestsMap(prev => {
+      const current = prev[accId] || { adults: 2, children: 0, babies: 0 }
+      const oldVal = current[field]
+      const newVal = Math.max(0, isAbsolute ? deltaOrValue : oldVal + deltaOrValue)
+      const nextMap = {
+        ...prev,
+        [accId]: {
+          ...current,
+          [field]: newVal
+        }
+      }
+
+      // Sync form totals across selected rooms
+      let totalAdults = 0
+      let totalChildren = 0
+      let totalBabies = 0
+      selectedAccommodationIds.forEach(id => {
+        const r = nextMap[id] || { adults: 2, children: 0, babies: 0 }
+        totalAdults += r.adults
+        totalChildren += r.children
+        totalBabies += r.babies
+      })
+      setForm(f => ({
+        ...f,
+        adults: totalAdults,
+        children: totalChildren,
+        babies: totalBabies
+      }))
+
+      return nextMap
+    })
+  }
+
   const allocateGuestsAcrossAccommodations = (ids: number[]) => {
-    let adultsLeft = Number(form.adults)
-    let childrenLeft = Number(form.children)
-    let babiesLeft = Number(form.babies)
-    let petsLeft = Number(form.pets)
+    if (ids.length === 1) {
+      const singleId = ids[0]
+      const room = roomGuestsMap[singleId] || { adults: Number(form.adults) || 2, children: Number(form.children) || 0, babies: Number(form.babies) || 0 }
+      return [{
+        id: singleId,
+        adults: room.adults,
+        children: room.children,
+        babies: room.babies,
+        pets: Number(form.pets) || 0
+      }]
+    }
 
     return ids.map((id, index) => {
-      const capacity = getMaxCapacity(id) || adultsLeft + childrenLeft
-      const adults = Math.min(adultsLeft, capacity)
-      adultsLeft -= adults
-      const children = Math.min(childrenLeft, Math.max(0, capacity - adults))
-      childrenLeft -= children
-      const babies = index === 0 ? babiesLeft : 0
-      const pets = index === 0 ? petsLeft : 0
-      babiesLeft -= babies
-      petsLeft -= pets
-      return { id, adults, children, babies, pets }
+      const room = roomGuestsMap[id] || { adults: 2, children: 0, babies: 0 }
+      return {
+        id,
+        adults: Number(room.adults) || 0,
+        children: Number(room.children) || 0,
+        babies: Number(room.babies) || 0,
+        pets: index === 0 ? (Number(form.pets) || 0) : 0
+      }
     })
   }
 
@@ -500,6 +548,7 @@ export default function BookingsPage() {
     setUseCustomRate(false)
     setDiscountPercent(0)
     setSelectedAccommodationIds([2])
+    setRoomGuestsMap({ 2: { adults: 2, children: 0, babies: 0 } })
     
     // Generate a unique booking locator code (e.g. LC-A4B7D)
     const newLocator = 'LC-' + Math.random().toString(36).substring(2, 7).toUpperCase()
@@ -1070,753 +1119,673 @@ export default function BookingsPage() {
     if (cleaningBooking) {
       const { error } = await supabase
         .from('bookings')
-        .update({ status: 'checkout_hoy' })
+        .delete()
         .eq('id', cleaningBooking.id)
 
       if (error) {
-        console.error('Error marking clean:', error)
-        return
+        console.error('Error deleting cleaning record:', error)
+      } else {
+        setBookings(prev => prev.filter(b => b.id !== cleaningBooking.id))
       }
     }
-
-    setBookings(prev => prev.map(b => 
-      b.accommodationId === accommodationId && b.status === 'limpieza' 
-        ? { ...b, status: 'checkout_hoy' }
-        : b
-    ))
   }
 
-  /**
-   * En una reserva grupal se anula solo la habitación: el precio del grupo baja, pero
-   * el dinero que entregó el cliente no se toca. Los abonos que apuntaban a esa fila se
-   * trasladan a otra habitación del mismo localizador y el total pagado se redistribuye.
-   * Solo cuando se elimina la última habitación se eliminan también abonos e ingresos.
-   */
-  const handleDeleteBooking = async (bookingId: string) => {
-    const booking = bookings.find(b => b.id === bookingId)
-    if (!booking) return
-
-    const groupBookings = booking.locator
-      ? bookings.filter(b => b.locator === booking.locator)
-      : [booking]
-    const isGroupBooking = groupBookings.length > 1
-    const accommodationTitle = getAccommodation(booking.accommodationId)?.title || 'la habitación seleccionada'
-    const confirmationMessage = isGroupBooking
-      ? `¿Anular solamente ${accommodationTitle}?\n\nSe restará ${fmt(booking.totalAmount)} del costo total. Las otras ${groupBookings.length - 1} ${groupBookings.length - 1 === 1 ? 'habitación permanecerá' : 'habitaciones permanecerán'} activas y todos los abonos del cliente se conservarán.`
-      : '¿Estás segura de que deseas eliminar esta reserva? Se borrarán también sus abonos y los ingresos que generaron.'
-
-    if (!confirm(confirmationMessage)) return
-
-    if (isGroupBooking) {
-      const remainingBookings = groupBookings.filter(room => room.id !== bookingId)
-      const paymentTarget = remainingBookings[0]
-      const groupPaidTotal = groupBookings.reduce((sum, room) => sum + room.amountPaid, 0)
-      const { data: roomPaymentRows, error: readPaymentsError } = await supabase
-        .from('booking_payments')
-        .select('id')
-        .eq('booking_id', bookingId)
-
-      if (readPaymentsError) {
-        console.error('No se pudieron comprobar los abonos de la habitación:', readPaymentsError)
-        alert('No se pudo comprobar el historial de abonos. No se anuló la habitación.')
-        return
-      }
-
-      const movedPaymentIds = (roomPaymentRows || []).map(payment => payment.id)
-      const restoreRemainingPaidAmounts = async () => {
-        await Promise.all(remainingBookings.map(room => supabase
-          .from('bookings')
-          .update({ amount_paid: room.amountPaid, payment_status: room.paymentStatus })
-          .eq('id', room.id)
-        ))
-        setBookings(prev => prev.map(current => {
-          const original = remainingBookings.find(room => room.id === current.id)
-          return original ? { ...current, amountPaid: original.amountPaid, paymentStatus: original.paymentStatus } : current
-        }))
-        setSelectedBooking(prev => {
-          if (!prev) return prev
-          const original = remainingBookings.find(room => room.id === prev.id)
-          return original ? { ...prev, amountPaid: original.amountPaid, paymentStatus: original.paymentStatus } : prev
-        })
-      }
-
-      // El historial y su transacción de caja permanecen intactos. Solo cambia la fila
-      // de habitación a la que apunta el abono para evitar pagos huérfanos.
-      const { error: movePaymentsError } = await supabase
-        .from('booking_payments')
-        .update({ booking_id: paymentTarget.id })
-        .eq('booking_id', bookingId)
-
-      if (movePaymentsError) {
-        console.error('No se pudieron trasladar los abonos de la habitación:', movePaymentsError)
-        alert('No se pudo conservar correctamente el historial de abonos. No se anuló la habitación.')
-        return
-      }
-
-      const paidAmountsSynced = await syncGroupPaidTotal(remainingBookings, groupPaidTotal)
-      if (!paidAmountsSynced) {
-        await restoreRemainingPaidAmounts()
-        if (movedPaymentIds.length > 0) {
-          await supabase.from('booking_payments').update({ booking_id: bookingId }).in('id', movedPaymentIds)
-        }
-        alert('No se pudo redistribuir el depósito. No se anuló la habitación.')
-        return
-      }
-
-      const { error: deleteRoomError } = await supabase.from('bookings').delete().eq('id', bookingId)
-      if (deleteRoomError) {
-        console.error('Error deleting room from group booking:', deleteRoomError)
-        await restoreRemainingPaidAmounts()
-        if (movedPaymentIds.length > 0) {
-          await supabase
-            .from('booking_payments')
-            .update({ booking_id: bookingId })
-            .in('id', movedPaymentIds)
-        }
-        alert('No se pudo anular la habitación. Los abonos se conservaron.')
-        return
-      }
-
-      setBookingPayments(prev => prev.map(payment => payment.bookingId === bookingId
-        ? { ...payment, bookingId: paymentTarget.id }
-        : payment
-      ))
-      setBookings(prev => prev.filter(room => room.id !== bookingId))
-      setSelectedBooking(null)
-      return
-    }
-
-    const { data: abonos, error: errorAbonos } = await supabase
-      .from('booking_payments')
-      .select('id')
-      .eq('booking_id', bookingId)
-
-    if (errorAbonos) {
-      console.error('No se pudieron leer los abonos de la reserva:', errorAbonos)
-      alert('No se pudo comprobar si la reserva tiene abonos. No se borró nada.')
-      return
-    }
-
-    for (const abono of abonos || []) {
-      const { error } = await retirarIngresoDeAbono(supabase, abono.id)
-      if (error) {
-        console.error('No se pudo retirar el ingreso del abono:', error)
-        alert('No se pudo retirar de Ingresos el dinero de esta reserva. No se borró nada.')
-        return
-      }
-    }
-
-    if ((abonos || []).length > 0) {
-      const { error } = await supabase.from('booking_payments').delete().eq('booking_id', bookingId)
-      if (error) {
-        console.error('No se pudieron borrar los abonos:', error)
-        alert('No se pudieron borrar los abonos de la reserva. No se borró la reserva.')
-        return
-      }
-    }
-
-    const { error } = await supabase.from('bookings').delete().eq('id', bookingId)
-    if (error) {
-      console.error('Error deleting booking:', error)
-      alert('No se pudo borrar la reserva. Vuelva a intentarlo.')
-      return
-    }
-
-    setBookings(prev => prev.filter(b => b.id !== bookingId))
-    setSelectedBooking(null)
-  }
-
-  // El abono pertenece a la reserva completa. Se distribuye entre las habitaciones solo
-  // para mantener compatibles las columnas existentes, sin cambiar nunca el total pagado.
-  const syncGroupPaidTotal = async (group: Booking[], paidTotal: number) => {
-    const normalizedPaidTotal = Math.round(paidTotal * 100) / 100
-    const groupTotal = group.reduce((sum, room) => sum + room.totalAmount, 0)
-    const paymentStatus: Booking['paymentStatus'] = normalizedPaidTotal >= groupTotal
-      ? 'completo'
-      : normalizedPaidTotal > 0 ? 'parcial' : 'pendiente'
-
-    // El depósito es global: se conserva una sola vez en la fila principal del grupo.
-    // Las demás habitaciones no reciben porciones ficticias del pago.
-    const updates = group.map((room, index) => ({
-      id: room.id,
-      amountPaid: index === 0 ? normalizedPaidTotal : 0,
-      paymentStatus
-    }))
-
-    const results = await Promise.all(updates.map(update => supabase
-      .from('bookings')
-      .update({ amount_paid: update.amountPaid, payment_status: update.paymentStatus })
-      .eq('id', update.id)
-    ))
-    const failed = results.find(result => result.error)
-    if (failed?.error) {
-      console.error('Error syncing group paid amounts:', failed.error)
-      return false
-    }
-
-    const updatesById = new Map(updates.map(update => [update.id, update]))
-    setBookings(prev => prev.map(room => {
-      const update = updatesById.get(room.id)
-      return update ? { ...room, ...update } : room
-    }))
-    setSelectedBooking(prev => {
-      if (!prev) return prev
-      const update = updatesById.get(prev.id)
-      return update ? { ...prev, ...update } : prev
-    })
-    return true
-  }
-
-  const syncGroupPaidAmounts = async (group: Booking[], payments: BookingPayment[]) => {
-    const paidTotal = payments.reduce((sum, payment) => sum + payment.amount, 0)
-    await syncGroupPaidTotal(group, paidTotal)
-  }
-
-  const handleSaveBookingDiscount = async () => {
+  const handleSaveGuestInfo = async () => {
     if (!selectedBooking) return
+    const fullName = joinPersonName(editGuestForm.firstName, editGuestForm.lastName)
+    if (!fullName) return
+    setSavingGuest(true)
 
-    const percent = Math.min(100, Math.max(0, Number(editDiscountPercent) || 0))
+    // Si la reserva tiene localizador, el cambio de nombre/contacto se replica en todas
+    // las habitaciones del grupo para mantener la ficha consistente.
     const groupBookings = getBookingGroup(selectedBooking)
-    const standardTotals = groupBookings.map(room => getStandardRate(
-      room.accommodationId,
-      room.checkIn,
-      room.checkOut,
-      room.guestsCount.adults,
-      room.guestsCount.children
-    ))
-    const totalsAfterPercent = standardTotals.map(total =>
-      Math.max(0, Math.round(total * (1 - percent / 100) * 100) / 100)
-    )
-    const totalAfterPercent = totalsAfterPercent.reduce((sum, total) => sum + total, 0)
-    const fixedDiscount = Math.min(
-      totalAfterPercent,
-      Math.max(0, Math.round((Number(editFixedDiscountAmount) || 0) * 100) / 100)
-    )
+    const isGroup = groupBookings.length > 1
+    const targetIds = groupBookings.map(b => b.id)
 
-    let remainingDiscountCents = Math.round(fixedDiscount * 100)
-    const fixedDiscounts = totalsAfterPercent.map((total, index) => {
-      const cents = index === totalsAfterPercent.length - 1
-        ? remainingDiscountCents
-        : Math.min(
-          remainingDiscountCents,
-          Math.round(fixedDiscount * 100 * (totalAfterPercent > 0 ? total / totalAfterPercent : 1 / totalsAfterPercent.length))
-        )
-      remainingDiscountCents -= cents
-      return cents / 100
-    })
-    const newGroupTotal = Math.max(0, Math.round((totalAfterPercent - fixedDiscount) * 100) / 100)
-    const groupPaid = groupBookings.reduce((sum, room) => sum + room.amountPaid, 0)
-    const groupPaymentStatus: Booking['paymentStatus'] = groupPaid >= newGroupTotal
-      ? 'completo'
-      : groupPaid > 0 ? 'parcial' : 'pendiente'
-
-    const updates = groupBookings.map((room, index) => {
-      const totalAmount = Math.max(0, Math.round((totalsAfterPercent[index] - fixedDiscounts[index]) * 100) / 100)
-      const notesWithPercent = withBookingDiscountNote(room.specialNotes, percent)
-      return {
-        id: room.id,
-        totalAmount,
-        paymentStatus: groupPaymentStatus,
-        specialNotes: withBookingFixedDiscountNote(notesWithPercent, fixedDiscounts[index])
-      }
+    // Se actualizan una por una para conservar el sufijo (1/3), (2/3)... en cada habitacion
+    const updates = groupBookings.map((b, idx) => {
+      const nameWithIndex = isGroup ? `${fullName} (${idx + 1}/${groupBookings.length})` : fullName
+      return supabase
+        .from('bookings')
+        .update({
+          guest_name: nameWithIndex,
+          guest_phone: editGuestForm.phone.trim() || null,
+          guest_email: editGuestForm.email.trim() || null,
+          guest_ci: editGuestForm.ci.trim() || null,
+          companions: editGuestForm.companions.trim() || null
+        })
+        .eq('id', b.id)
     })
 
-    setSavingFinancials(true)
-    const results = await Promise.all(updates.map(update => supabase
-      .from('bookings')
-      .update({
-        total_amount: update.totalAmount,
-        payment_status: update.paymentStatus,
-        special_notes: update.specialNotes
-      })
-      .eq('id', update.id)
-    ))
-    setSavingFinancials(false)
+    const results = await Promise.all(updates)
+    const failed = results.find(r => r.error)
 
-    const failed = results.find(result => result.error)
     if (failed?.error) {
-      console.error('Error updating booking discount:', failed.error)
-      alert('No se pudo actualizar el descuento. Intenta de nuevo.')
-      return
-    }
+      console.error('Error al actualizar huésped:', failed.error)
+      alert('No se pudo guardar la información del huésped: ' + failed.error.message)
+    } else {
+      const idSet = new Set(targetIds)
+      const phoneVal = editGuestForm.phone.trim()
+      const emailVal = editGuestForm.email.trim()
+      const ciVal = editGuestForm.ci.trim()
+      const compVal = editGuestForm.companions.trim()
 
-    const updatesById = new Map(updates.map(update => [update.id, update]))
-    setBookings(prev => prev.map(room => {
-      const update = updatesById.get(room.id)
-      return update ? { ...room, ...update } : room
-    }))
-    setSelectedBooking(prev => {
-      if (!prev) return prev
-      const update = updatesById.get(prev.id)
-      return update ? { ...prev, ...update } : prev
-    })
-    setEditingFinancials(false)
+      setBookings(prev => prev.map(b => {
+        if (!idSet.has(b.id)) return b
+        const idx = groupBookings.findIndex(g => g.id === b.id)
+        const nameWithIndex = isGroup ? `${fullName} (${idx + 1}/${groupBookings.length})` : fullName
+        return {
+          ...b,
+          guestName: nameWithIndex,
+          guestPhone: phoneVal,
+          guestEmail: emailVal,
+          guestCi: ciVal,
+          companions: compVal
+        }
+      }))
+
+      // Mantiene sincronizada la ficha abierta
+      setSelectedBooking(prev => prev ? {
+        ...prev,
+        guestName: isGroup ? `${fullName} (1/${groupBookings.length})` : fullName,
+        guestPhone: phoneVal,
+        guestEmail: emailVal,
+        guestCi: ciVal,
+        companions: compVal
+      } : null)
+
+      // Actualiza o crea el contacto en la libreta de clientes de marketing
+      if (emailVal) {
+        syncMarketingCustomer(supabase, {
+          fullName,
+          email: emailVal,
+          phone: phoneVal,
+          bookingAmount: selectedBooking.totalAmount,
+          stayDate: selectedBooking.checkIn
+        }).catch(err => console.error('Error sincronizando cliente de marketing tras edición:', err))
+      }
+
+      setEditingGuest(false)
+    }
+    setSavingGuest(false)
+  }
+
+  const handleUpdatePaymentStatus = async (bookingId: string, newStatus: 'completo' | 'parcial' | 'pendiente') => {
+    // Si la reserva tiene localizador, el estado de pago debe ser el mismo en todas
+    // sus habitaciones (no tiene sentido que una habitacion del grupo quede "pagada"
+    // y otra "sin pago" si el abono fue por el total).
+    const target = bookings.find(b => b.id === bookingId)
+    const groupBookings = target ? getBookingGroup(target) : []
+    const targetIds = groupBookings.length > 0 ? groupBookings.map(b => b.id) : [bookingId]
+
+    const { error } = await supabase
+      .from('bookings')
+      .update({ payment_status: newStatus })
+      .in('id', targetIds)
+
+    if (error) {
+      console.error('Error updating payment status:', error)
+    } else {
+      const idSet = new Set(targetIds)
+      setBookings(prev => prev.map(b => idSet.has(b.id) ? { ...b, paymentStatus: newStatus } : b))
+      if (selectedBooking && idSet.has(selectedBooking.id)) {
+        setSelectedBooking(prev => prev ? { ...prev, paymentStatus: newStatus } : null)
+      }
+    }
   }
 
   const handleAddPayment = async () => {
     if (!selectedBooking) return
-
-    // Cobrado en bolivares: el monto en dolares NO se escribe, se calcula. Asi el
-    // saldo de la reserva y lo que entro en el banco no pueden separarse.
-    const enBs = nuevoAbonoBs.activo
-    const amount = enBs
-      ? dolaresDeBolivares(nuevoAbonoBs.bolivares, nuevoAbonoBs.tasa)
-      : Number(paymentForm.amount)
-    if (!amount || amount <= 0) {
-      alert(enBs
-        ? 'Escriba los bolívares recibidos y la tasa aplicada.'
-        : 'Error: ingresa un monto de abono válido.')
+    const numAmount = parseFloat(paymentForm.amount)
+    if (isNaN(numAmount) || numAmount <= 0) {
+      alert('Ingresa un monto válido para el pago.')
       return
     }
-
-    const groupBookings = getBookingGroup(selectedBooking)
-    const groupTotal = groupBookings.reduce((sum, room) => sum + room.totalAmount, 0)
-    const groupPaid = groupBookings.reduce((sum, room) => sum + room.amountPaid, 0)
-    const pendingTotal = Math.max(0, groupTotal - groupPaid)
-    if (amount > pendingTotal + 0.009) {
-      alert(`El abono supera el saldo pendiente de la reserva (${fmt(pendingTotal)}).`)
-      return
-    }
-
-    // Un segundo toque mientras se guarda apuntaría el mismo abono dos veces.
+    // Un segundo toque mientras el primer abono viaja duplicaría el cobro en caja.
     if (!envioAbono.empezar()) return
+    setAddingPayment(true)
 
-    const newPayment = {
-      booking_id: groupBookings[0].id,
-      payment_date: paymentForm.date,
-      amount: Math.round(amount * 100) / 100,
+    // Se asocia a la habitacion principal del grupo para que quede en el historial
+    // general del localizador.
+    const group = getBookingGroup(selectedBooking)
+    const primaryBookingId = group[0]?.id || selectedBooking.id
+    const currentPaidTotal = group.reduce((sum, room) => sum + room.amountPaid, 0)
+    const groupTotalAmount = group.reduce((sum, room) => sum + room.totalAmount, 0)
+
+    const newPaymentDb: {
+      booking_id: string
+      payment_date: string
+      amount: number
+      currency: string
+      method: string
+      reference: string | null
+      status: string
+      exchange_rate?: number | null
+      amount_bs?: number | null
+    } = {
+      booking_id: primaryBookingId,
+      payment_date: paymentForm.date || todayStr,
+      amount: numAmount,
       currency: 'USD',
       method: paymentForm.method,
       reference: paymentForm.reference.trim() || null,
-      status: 'verificado',
-      exchange_rate: enBs ? Number(String(nuevoAbonoBs.tasa).replace(',', '.')) : null,
-      amount_bs: enBs ? Number(String(nuevoAbonoBs.bolivares).replace(',', '.')) : null,
+      status: 'verificado'
     }
 
-    const { data, error } = await supabase
+    if (nuevoAbonoBs.activo) {
+      const bs = parseLocalDateBs(nuevoAbonoBs.bolivares)
+      const tasa = parseLocalDateBs(nuevoAbonoBs.tasa)
+      if (bs > 0) newPaymentDb.amount_bs = bs
+      if (tasa > 0) newPaymentDb.exchange_rate = tasa
+    }
+
+    const { data: payData, error: payError } = await supabase
       .from('booking_payments')
-      .insert(newPayment)
+      .insert([newPaymentDb])
       .select('*')
 
-    if (error || !data) {
-      console.error('Error adding payment:', error)
-      alert('Error al registrar el abono. Intenta de nuevo.')
+    if (payError) {
+      console.error('Error registrando abono:', payError)
+      alert('No se pudo guardar el abono: ' + payError.message)
       envioAbono.terminar()
+      setAddingPayment(false)
       return
     }
 
-    const insertedPayments = data.map(mapDbPaymentToReact)
-    const updatedPayments = [...bookingPayments, ...insertedPayments]
-      .sort((a, b) => a.paymentDate.localeCompare(b.paymentDate))
-    setBookingPayments(updatedPayments)
-    await syncGroupPaidAmounts(groupBookings, updatedPayments)
+    // Actualiza el monto pagado de la habitacion principal y el payment_status de
+    // todas las habitaciones del grupo para que el color del planner se refresque.
+    const newPaidTotal = Math.round((currentPaidTotal + numAmount) * 100) / 100
+    const newStatus: Booking['paymentStatus'] = newPaidTotal >= groupTotalAmount && groupTotalAmount > 0
+      ? 'completo'
+      : newPaidTotal > 0 ? 'parcial' : 'pendiente'
 
-    for (const payment of insertedPayments) {
-      const ingreso = await registrarIngresoDeAbono(supabase, {
-        paymentId: payment.id,
-        bookingId: payment.bookingId,
-        guestName: selectedBooking.guestName,
-        locator: selectedBooking.locator,
-        accommodationTitle: groupBookings.length > 1 ? `${groupBookings.length} habitaciones` : getAccommodation(groupBookings[0].accommodationId)?.title,
-        amount: payment.amount,
-        date: paymentForm.date,
-        method: paymentForm.method,
-        reference: paymentForm.reference.trim() || null,
-        exchangeRate: payment.exchangeRate ?? null,
-        amountBs: payment.amountBs ?? null,
-      })
-      if (ingreso.error) {
-        console.error('El abono se guardó pero no llegó a Ingresos:', ingreso.error)
-        alert('El abono quedó registrado, pero no llegó a Ingresos. Avise a soporte antes de cerrar la caja.')
-      }
+    const primaryOldPaid = Number(group[0]?.amountPaid || 0)
+    const primaryNewPaid = Math.round((primaryOldPaid + numAmount) * 100) / 100
+
+    await Promise.all([
+      supabase
+        .from('bookings')
+        .update({ amount_paid: primaryNewPaid, payment_status: newStatus })
+        .eq('id', primaryBookingId),
+      group.length > 1
+        ? supabase
+            .from('bookings')
+            .update({ payment_status: newStatus })
+            .in('id', group.slice(1).map(r => r.id))
+        : Promise.resolve()
+    ])
+
+    // Espejo contable: cada abono que entra por la ficha de una reserva alimenta la
+    // caja o el banco en Ingresos con la fecha real del pago.
+    const primaryRow = group[0]
+    const detalleAlojamiento = group.length > 1
+      ? `${group.length} habitaciones`
+      : getAccommodation(Number(primaryRow?.accommodationId))?.title
+    const ingreso = await registrarIngresoDeAbono(supabase, {
+      bookingId: primaryBookingId,
+      guestName: selectedBooking.guestName,
+      locator: selectedBooking.locator || undefined,
+      accommodationTitle: detalleAlojamiento,
+      amount: numAmount,
+      date: paymentForm.date || todayStr,
+      method: paymentForm.method,
+      reference: paymentForm.reference.trim() || null,
+      exchangeRate: newPaymentDb.exchange_rate ?? null,
+      amountBs: newPaymentDb.amount_bs ?? null,
+    })
+    if (ingreso.error) {
+      console.error('El abono se guardó en la reserva pero falló el registro en Ingresos:', ingreso.error)
     }
 
-    setAddingPayment(false)
-    setPaymentForm({ amount: '', date: todayStr, method: 'transferencia', reference: '' })
-    // Sin esto, al abrir «Agregar pago» otra vez salían los bolívares del abono anterior.
+    // Actualiza el estado local de la app
+    if (payData && payData[0]) {
+      setBookingPayments(prev => [...prev, mapDbPaymentToReact(payData[0])])
+    }
+
+    const groupIdsSet = new Set(group.map(r => r.id))
+    setBookings(prev => prev.map(b => {
+      if (!groupIdsSet.has(b.id)) return b
+      return {
+        ...b,
+        paymentStatus: newStatus,
+        amountPaid: b.id === primaryBookingId ? primaryNewPaid : b.amountPaid
+      }
+    }))
+
+    setSelectedBooking(prev => prev ? {
+      ...prev,
+      paymentStatus: newStatus,
+      amountPaid: prev.id === primaryBookingId ? primaryNewPaid : prev.amountPaid
+    } : null)
+
+    setPaymentForm({
+      amount: '',
+      date: todayStr,
+      method: 'transferencia',
+      reference: ''
+    })
     setNuevoAbonoBs({ activo: false, bolivares: '', tasa: '' })
     envioAbono.terminar()
-
-    if (selectedBooking.guestEmail.trim()) {
-      const totalAmount = groupBookings.reduce((sum, room) => sum + room.totalAmount, 0)
-      const amountPaid = updatedPayments.reduce((sum, payment) => sum + payment.amount, 0)
-      sendBookingVoucherEmail(supabase, {
-        locator: selectedBooking.locator || selectedBooking.id.slice(0, 6).toUpperCase(),
-        guestName: selectedBooking.guestName.replace(/\s+\(\d+\/\d+\)$/, ''),
-        guestEmail: selectedBooking.guestEmail,
-        guestPhone: selectedBooking.guestPhone,
-        guestCi: selectedBooking.guestCi,
-        companions: selectedBooking.companions,
-        channel: 'Local',
-        checkIn: selectedBooking.checkIn,
-        checkOut: selectedBooking.checkOut,
-        nights: calculateNights(selectedBooking.checkIn, selectedBooking.checkOut),
-        guestsCount: groupBookings.reduce((sum, room) => sum + room.guestsCount.adults + room.guestsCount.children, 0),
-        paymentMethod: paymentForm.method,
-        totalAmount,
-        amountPaid,
-        rooms: groupBookings.map(room => ({
-          title: getAccommodation(room.accommodationId)?.title || `Alojamiento ${room.accommodationId}`,
-          capacity: getMaxCapacity(room.accommodationId),
-          nights: calculateNights(room.checkIn, room.checkOut),
-          adults: room.guestsCount.adults,
-          children: room.guestsCount.children,
-          cost: room.totalAmount
-        })),
-        payments: updatedPayments.map(payment => ({
-          date: payment.paymentDate,
-          amount: payment.amount,
-          method: payment.method,
-          status: payment.status,
-          reference: payment.reference
-        }))
-      }).catch(err => console.error('Error enviando el comprobante grupal:', err))
-    }
+    setAddingPayment(false)
   }
 
-  const handleDeletePayment = async (payment: BookingPayment) => {
+  const handleDeletePayment = async (paymentId: string) => {
     if (!selectedBooking) return
-    if (!confirm(`¿Eliminar el abono de ${fmt(payment.amount)} del ${payment.paymentDate}?`)) return
+    const payment = bookingPayments.find(p => p.id === paymentId)
+    if (!payment) return
+    if (!confirm(`¿Eliminar este abono de ${fmt(payment.amount)} registrado el ${payment.paymentDate}?`)) return
 
-    const { error } = await supabase
+    const { error: delError } = await supabase
       .from('booking_payments')
       .delete()
-      .eq('id', payment.id)
+      .eq('id', paymentId)
 
-    if (error) {
-      console.error('Error deleting payment:', error)
-      alert('Error al eliminar el abono. Intenta de nuevo.')
+    if (delError) {
+      console.error('Error eliminando abono:', delError)
+      alert('No se pudo eliminar el abono: ' + delError.message)
       return
     }
 
-    // Si el abono desaparece, su ingreso también: si no, la caja cuadraría de más.
-    const retirado = await retirarIngresoDeAbono(supabase, payment.id)
-    if (retirado.error) {
-      console.error('No se pudo retirar el ingreso del abono eliminado:', retirado.error)
-      alert('El abono se eliminó, pero su ingreso sigue en la contabilidad. Avise a soporte.')
+    // Retira también el movimiento espejo que se creó en la tabla de Ingresos, para
+    // que la contabilidad no quede descuadrada con dinero que nunca entró.
+    const retiro = await retirarIngresoDeAbono(supabase, {
+      bookingId: payment.bookingId,
+      amount: payment.amount,
+      date: payment.paymentDate,
+    })
+    if (retiro.error) {
+      console.error('El abono se borró de la reserva pero no se pudo retirar de Ingresos:', retiro.error)
     }
 
-    const updatedPayments = bookingPayments.filter(p => p.id !== payment.id)
-    setBookingPayments(updatedPayments)
-    await syncGroupPaidAmounts(getBookingGroup(selectedBooking), updatedPayments)
-  }
+    // Descuenta el monto de la habitacion a la que estaba asociado
+    const group = getBookingGroup(selectedBooking)
+    const currentPaidTotal = group.reduce((sum, room) => sum + room.amountPaid, 0)
+    const groupTotalAmount = group.reduce((sum, room) => sum + room.totalAmount, 0)
+    const newPaidTotal = Math.max(0, Math.round((currentPaidTotal - payment.amount) * 100) / 100)
+    const newStatus: Booking['paymentStatus'] = newPaidTotal >= groupTotalAmount && groupTotalAmount > 0
+      ? 'completo'
+      : newPaidTotal > 0 ? 'parcial' : 'pendiente'
 
-  const handleConfirmBooking = async (bookingId: string) => {
-    const { error } = await supabase
-      .from('bookings')
-      .update({ confirmed: true })
-      .eq('id', bookingId)
+    const targetRoom = group.find(r => r.id === payment.bookingId) || group[0]
+    const targetRoomNewPaid = Math.max(0, Math.round((Number(targetRoom?.amountPaid || 0) - payment.amount) * 100) / 100)
 
-    if (error) {
-      console.error('Error confirming booking:', error)
-    } else {
-      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, confirmed: true } : b))
-      setSelectedBooking(prev => prev && prev.id === bookingId ? { ...prev, confirmed: true } : prev)
+    if (targetRoom) {
+      await Promise.all([
+        supabase
+          .from('bookings')
+          .update({ amount_paid: targetRoomNewPaid, payment_status: newStatus })
+          .eq('id', targetRoom.id),
+        group.length > 1
+          ? supabase
+              .from('bookings')
+              .update({ payment_status: newStatus })
+              .in('id', group.filter(r => r.id !== targetRoom.id).map(r => r.id))
+          : Promise.resolve()
+      ])
     }
-  }
 
-  // Arrastrar una reserva en la vista Semana: mover el bloque completo o estirar un borde
-  // para cambiar solo el check-in o el check-out. Valida colisión antes de guardar.
-  // Núcleo compartido: valida capacidad + colisión y persiste un cambio de fechas y/o
-  // de habitación/cabaña asignada. Lo usan tanto el arrastre en la Semana como el
-  // desplegable de "cambiar habitación" en el detalle de la reserva.
-  const reassignBooking = async (
-    bookingId: string,
-    newAccId: number,
-    newCheckIn: string,
-    newCheckOut: string,
-    guestsOverride?: { adults: number; children: number; babies: number; pets: number }
-  ) => {
-    const booking = bookings.find(b => b.id === bookingId)
-    if (!booking) return false
+    setBookingPayments(prev => prev.filter(p => p.id !== paymentId))
 
-    const adults = guestsOverride ? guestsOverride.adults : booking.guestsCount.adults
-    const children = guestsOverride ? guestsOverride.children : booking.guestsCount.children
-    const babies = guestsOverride ? guestsOverride.babies : booking.guestsCount.babies
-    const pets = guestsOverride ? guestsOverride.pets : booking.guestsCount.pets
-    const totalGuests = adults + children
-
-    if (newAccId !== booking.accommodationId || guestsOverride) {
-      const maxCapacity = getMaxCapacity(newAccId)
-      if (maxCapacity > 0 && totalGuests > maxCapacity) {
-        alert(`Error: Capacidad excedida. Esa habitación/cabaña admite hasta ${maxCapacity} personas y esta reserva tiene ${totalGuests}.`)
-        return false
+    const groupIdsSet = new Set(group.map(r => r.id))
+    setBookings(prev => prev.map(b => {
+      if (!groupIdsSet.has(b.id)) return b
+      return {
+        ...b,
+        paymentStatus: newStatus,
+        amountPaid: targetRoom && b.id === targetRoom.id ? targetRoomNewPaid : b.amountPaid
       }
-    }
+    }))
 
-    const collision = bookings.find(b =>
-      b.id !== bookingId &&
-      b.accommodationId === newAccId &&
-      newCheckIn < b.checkOut && newCheckOut > b.checkIn
-    )
-    if (collision) {
-      alert(`Error: Conflicto de fechas. Ya está reservada por "${collision.guestName}" del ${collision.checkIn} al ${collision.checkOut}.`)
-      return false
-    }
-
-    // Las fechas, la habitación y la cantidad de huéspedes determinan el precio. Al
-    // modificar una reserva se recalcula la estancia completa con las mismas tarifas
-    // que usa "Nueva Reserva". También permite reparar reservas cuya fecha ya cambió
-    // con la versión anterior: basta abrir "Cambiar" y volver a guardar el mismo rango.
-    const newStandardTotal = getStandardRate(
-      newAccId,
-      newCheckIn,
-      newCheckOut,
-      adults,
-      children
-    )
-    const newTotalAmount = getAdjustedBookingTotal(newStandardTotal, booking.specialNotes)
-    const newPaymentStatus: Booking['paymentStatus'] = booking.amountPaid >= newTotalAmount
-      ? 'completo'
-      : booking.amountPaid > 0
-        ? 'parcial'
-        : 'pendiente'
-
-    const updatePayload: Record<string, any> = {
-      accommodation_id: newAccId,
-      check_in: newCheckIn,
-      check_out: newCheckOut,
-      total_amount: newTotalAmount,
-      payment_status: newPaymentStatus
-    }
-    if (guestsOverride) {
-      updatePayload.adults = adults
-      updatePayload.children = children
-      updatePayload.babies = babies
-      updatePayload.pets = pets
-    }
-
-    const { error } = await supabase
-      .from('bookings')
-      .update(updatePayload)
-      .eq('id', bookingId)
-
-    if (error) {
-      console.error('Error reassigning booking:', error)
-      alert('Error al actualizar la reserva. Intenta de nuevo.')
-      return false
-    }
-
-    const updatedFields: Partial<Booking> = {
-      accommodationId: newAccId,
-      checkIn: newCheckIn,
-      checkOut: newCheckOut,
-      totalAmount: newTotalAmount,
-      paymentStatus: newPaymentStatus
-    }
-    if (guestsOverride) {
-      updatedFields.guestsCount = { adults, children, babies, pets }
-    }
-    setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, ...updatedFields } : b))
-    setSelectedBooking(prev => prev && prev.id === bookingId ? { ...prev, ...updatedFields } : prev)
-    return true
+    setSelectedBooking(prev => prev ? {
+      ...prev,
+      paymentStatus: newStatus,
+      amountPaid: targetRoom && prev.id === targetRoom.id ? targetRoomNewPaid : prev.amountPaid
+    } : null)
   }
 
-  const handleSaveGuestDetails = async () => {
+  const handleSendBookingVoucher = async () => {
     if (!selectedBooking) return
-    const guestName = joinPersonName(editGuestForm.firstName, editGuestForm.lastName)
-    if (!editGuestForm.firstName.trim() || !editGuestForm.lastName.trim()) {
-      alert('El nombre y el apellido del huésped son obligatorios.')
+    const group = getBookingGroup(selectedBooking)
+    const primary = group[0] || selectedBooking
+    const email = (primary.guestEmail || '').trim()
+
+    if (!email || email === 'cliente@estancialacanada.com') {
+      alert('Para enviar el comprobante hace falta anotar el correo del huésped en "Datos del huésped".')
       return
     }
 
-    const payload = {
-      guest_name: guestName,
-      guest_ci: editGuestForm.ci.trim() || null,
-      guest_phone: editGuestForm.phone.trim(),
-      guest_email: editGuestForm.email.trim(),
-      companions: editGuestForm.companions.trim() || null
-    }
+    const titles = group
+      .map(r => getAccommodation(r.accommodationId)?.title)
+      .filter(Boolean)
+      .join(' + ')
 
-    setSavingGuest(true)
-    let query = supabase.from('bookings').update(payload)
-    query = selectedBooking.locator
-      ? query.eq('locator', selectedBooking.locator)
-      : query.eq('id', selectedBooking.id)
-    const { error } = await query
-    setSavingGuest(false)
+    const totalAmount = group.reduce((sum, r) => sum + r.totalAmount, 0)
+    const amountPaid = group.reduce((sum, r) => sum + r.amountPaid, 0)
 
-    if (error) {
-      console.error('Error updating guest details:', error)
-      alert('No se pudieron actualizar los datos del huésped. Intenta de nuevo.')
-      return
-    }
-
-    const appliesToBooking = (booking: Booking) => selectedBooking.locator
-      ? booking.locator === selectedBooking.locator
-      : booking.id === selectedBooking.id
-    const updatedFields = {
-      guestName,
-      guestCi: editGuestForm.ci.trim(),
-      guestPhone: editGuestForm.phone.trim(),
-      guestEmail: editGuestForm.email.trim(),
-      companions: editGuestForm.companions.trim()
-    }
-    setBookings(prev => prev.map(booking => appliesToBooking(booking) ? { ...booking, ...updatedFields } : booking))
-    setSelectedBooking(prev => prev ? { ...prev, ...updatedFields } : prev)
-    setEditingGuest(false)
-  }
-
-  const handleSaveBookingNotes = async () => {
-    if (!selectedBooking) return
-    const notes = editNotes.trim()
-    setSavingNotes(true)
-    let query = supabase.from('bookings').update({ special_notes: notes || null })
-    query = selectedBooking.locator
-      ? query.eq('locator', selectedBooking.locator)
-      : query.eq('id', selectedBooking.id)
-    const { error } = await query
-    setSavingNotes(false)
-    if (error) {
-      console.error('Error updating booking notes:', error)
-      alert('No se pudieron actualizar las notas.')
-      return
-    }
-
-    const appliesToBooking = (booking: Booking) => selectedBooking.locator
-      ? booking.locator === selectedBooking.locator
-      : booking.id === selectedBooking.id
-    setBookings(prev => prev.map(booking => appliesToBooking(booking) ? { ...booking, specialNotes: notes } : booking))
-    setSelectedBooking(prev => prev ? { ...prev, specialNotes: notes } : prev)
-    setEditingNotes(false)
-  }
-
-  const handleSaveRoomDetails = async () => {
-    if (!selectedBooking || !editingRoomId) return
-    const roomBooking = bookings.find(item => item.id === editingRoomId)
-    if (!roomBooking) return
-
-    const totalGuests = editRoomForm.adults + editRoomForm.children
-    const maxCapacity = getMaxCapacity(editRoomForm.accommodationId)
-    if (maxCapacity > 0 && totalGuests > maxCapacity) {
-      alert(`Esta habitación admite hasta ${maxCapacity} personas y se ingresaron ${totalGuests}.`)
-      return
-    }
-
-    const hasValidEditDates = editingDates && Boolean(editDatesForm.checkIn && editDatesForm.checkOut && editDatesForm.checkOut > editDatesForm.checkIn)
-    const effectiveCheckIn = hasValidEditDates ? editDatesForm.checkIn : roomBooking.checkIn
-    const effectiveCheckOut = hasValidEditDates ? editDatesForm.checkOut : roomBooking.checkOut
-
-    const collision = bookings.find(item =>
-      item.id !== roomBooking.id &&
-      item.accommodationId === editRoomForm.accommodationId &&
-      effectiveCheckIn < item.checkOut && effectiveCheckOut > item.checkIn
-    )
-    if (collision) {
-      alert(`${getAccommodation(editRoomForm.accommodationId)?.title || 'La habitación'} ya está ocupada en esas fechas.`)
-      return
-    }
-
-    const standardTotal = getStandardRate(
-      editRoomForm.accommodationId,
-      effectiveCheckIn,
-      effectiveCheckOut,
-      editRoomForm.adults,
-      editRoomForm.children
-    )
-    const totalAmount = getAdjustedBookingTotal(standardTotal, roomBooking.specialNotes)
-    const paymentStatus: Booking['paymentStatus'] = roomBooking.amountPaid >= totalAmount
-      ? 'completo'
-      : roomBooking.amountPaid > 0 ? 'parcial' : 'pendiente'
-
-    setSavingRoom(true)
-    const { error } = await supabase
-      .from('bookings')
-      .update({
-        accommodation_id: editRoomForm.accommodationId,
-        check_in: effectiveCheckIn,
-        check_out: effectiveCheckOut,
-        adults: editRoomForm.adults,
-        children: editRoomForm.children,
-        babies: editRoomForm.babies,
-        pets: editRoomForm.pets,
-        total_amount: totalAmount,
-        payment_status: paymentStatus
-      })
-      .eq('id', roomBooking.id)
-    setSavingRoom(false)
-
-    if (error) {
-      console.error('Error updating room details:', error)
-      alert('No se pudo actualizar la habitación.')
-      return
-    }
-
-    const updatedFields: Partial<Booking> = {
-      accommodationId: editRoomForm.accommodationId,
-      checkIn: effectiveCheckIn,
-      checkOut: effectiveCheckOut,
-      guestsCount: {
-        adults: editRoomForm.adults,
-        children: editRoomForm.children,
-        babies: editRoomForm.babies,
-        pets: editRoomForm.pets
-      },
+    setSendingVoucher(true)
+    const res = await sendBookingVoucherEmail(supabase, {
+      email,
+      guestName: cleanGuestSuggestionName(primary.guestName),
+      locator: primary.locator || undefined,
+      accommodationTitle: titles || 'Hospedaje',
+      checkIn: primary.checkIn,
+      checkOut: primary.checkOut,
+      adults: group.reduce((sum, r) => sum + r.guestsCount.adults, 0),
+      children: group.reduce((sum, r) => sum + r.guestsCount.children, 0),
+      babies: group.reduce((sum, r) => sum + r.guestsCount.babies, 0),
       totalAmount,
-      paymentStatus
+      amountPaid,
+      payments: bookingPayments.map(p => ({
+        date: p.paymentDate,
+        amount: p.amount,
+        method: p.method,
+        reference: p.reference,
+        amountBs: p.amountBs,
+        exchangeRate: p.exchangeRate,
+      })),
+      notes: primary.specialNotes || undefined,
+    })
+    setSendingVoucher(false)
+
+    if (res.success) {
+      setVoucherSentFor(primary.id)
+      setTimeout(() => setVoucherSentFor(null), 4000)
+    } else {
+      alert('No se pudo enviar el correo: ' + (res.error || 'Error desconocido'))
     }
-    setBookings(prev => prev.map(item => item.id === roomBooking.id ? { ...item, ...updatedFields } : item))
-    setSelectedBooking(prev => prev && prev.id === roomBooking.id ? { ...prev, ...updatedFields } : prev)
-    setEditingRoomId(null)
+  }
+
+  const handleDeleteBooking = async (bookingId: string) => {
+    const target = bookings.find(b => b.id === bookingId)
+    if (!target) return
+    const group = getBookingGroup(target)
+    const isGroup = group.length > 1
+
+    const confirmMsg = isGroup
+      ? `Esta reserva tiene ${group.length} habitaciones asociadas (Localizador ${target.locator}). ¿Deseas eliminar todo el grupo de la reserva?`
+      : '¿Estás seguro de que deseas eliminar esta reserva?'
+
+    if (!confirm(confirmMsg)) return
+
+    const targetIds = isGroup ? group.map(b => b.id) : [bookingId]
+    const { error } = await supabase
+      .from('bookings')
+      .delete()
+      .in('id', targetIds)
+
+    if (error) {
+      console.error('Error deleting booking:', error)
+      alert('No se pudo eliminar la reserva: ' + error.message)
+    } else {
+      const idSet = new Set(targetIds)
+      setBookings(prev => prev.filter(b => !idSet.has(b.id)))
+      setSelectedBooking(null)
+    }
+  }
+
+  const handleStartEditDates = () => {
+    if (!selectedBooking) return
+    setEditDatesForm({
+      checkIn: selectedBooking.checkIn,
+      checkOut: selectedBooking.checkOut
+    })
+    setEditingDates(true)
   }
 
   const handleSaveDates = async () => {
     if (!selectedBooking) return
-    if (!editDatesForm.checkIn || !editDatesForm.checkOut || editDatesForm.checkOut <= editDatesForm.checkIn) {
-      alert('Error: la fecha de check-out debe ser posterior al check-in.')
+    const { checkIn, checkOut } = editDatesForm
+
+    if (!checkIn || !checkOut || checkOut <= checkIn) {
+      alert('La fecha de check-out debe ser posterior a la fecha de check-in.')
       return
+    }
+
+    const group = getBookingGroup(selectedBooking)
+    const groupIds = group.map(b => b.id)
+
+    // Revisa colisiones de cada habitacion del grupo en las nuevas fechas
+    for (const room of group) {
+      const collision = bookings.find(b =>
+        !groupIds.includes(b.id) &&
+        b.accommodationId === room.accommodationId &&
+        checkIn < b.checkOut && checkOut > b.checkIn
+      )
+      if (collision) {
+        const roomName = getAccommodation(room.accommodationId)?.title || 'Una habitación'
+        alert(`No se pueden cambiar las fechas: ${roomName} ya está reservada para "${collision.guestName}" del ${collision.checkIn} al ${collision.checkOut}.`)
+        return
+      }
     }
 
     setSavingDates(true)
-    try {
-      const group = getBookingGroup(selectedBooking)
-      const results: boolean[] = []
 
-      for (const room of group) {
-        const isRoomBeingEdited = editingRoomId === room.id
-        const accId = isRoomBeingEdited ? editRoomForm.accommodationId : room.accommodationId
-        const guestsOverride = isRoomBeingEdited ? {
-          adults: editRoomForm.adults,
-          children: editRoomForm.children,
-          babies: editRoomForm.babies,
-          pets: editRoomForm.pets
-        } : undefined
+    // Recalcula el precio de cada habitacion respetando temporada normal vs navideña
+    // de las nuevas fechas y el descuento particular que ya tenia la reserva.
+    const updates = group.map(room => {
+      const standardRate = getStandardRate(
+        room.accommodationId,
+        checkIn,
+        checkOut,
+        room.guestsCount.adults,
+        room.guestsCount.children
+      )
+      const adjustedRate = getAdjustedBookingTotal(standardRate, room.specialNotes)
+      return supabase
+        .from('bookings')
+        .update({
+          check_in: checkIn,
+          check_out: checkOut,
+          total_amount: adjustedRate
+        })
+        .eq('id', room.id)
+    })
 
-        const ok = await reassignBooking(
-          room.id,
-          accId,
-          editDatesForm.checkIn,
-          editDatesForm.checkOut,
-          guestsOverride
+    const results = await Promise.all(updates)
+    const failed = results.find(r => r.error)
+
+    if (failed?.error) {
+      console.error('Error actualizando fechas de la reserva:', failed.error)
+      alert('No se pudieron actualizar las fechas: ' + failed.error.message)
+    } else {
+      const idSet = new Set(groupIds)
+      setBookings(prev => prev.map(b => {
+        if (!idSet.has(b.id)) return b
+        const standardRate = getStandardRate(
+          b.accommodationId,
+          checkIn,
+          checkOut,
+          b.guestsCount.adults,
+          b.guestsCount.children
         )
-        results.push(ok)
-      }
+        const adjustedRate = getAdjustedBookingTotal(standardRate, b.specialNotes)
+        return {
+          ...b,
+          checkIn,
+          checkOut,
+          totalAmount: adjustedRate
+        }
+      }))
 
-      if (results.every(Boolean)) {
-        setEditingDates(false)
-        setEditingRoomId(null)
-      }
-    } finally {
-      setSavingDates(false)
+      setSelectedBooking(prev => {
+        if (!prev) return null
+        const standardRate = getStandardRate(
+          prev.accommodationId,
+          checkIn,
+          checkOut,
+          prev.guestsCount.adults,
+          prev.guestsCount.children
+        )
+        return {
+          ...prev,
+          checkIn,
+          checkOut,
+          totalAmount: getAdjustedBookingTotal(standardRate, prev.specialNotes)
+        }
+      })
+
+      setEditingDates(false)
     }
+    setSavingDates(false)
   }
 
-  const handleAddRoomsToBooking = async () => {
-    if (!selectedBooking || additionalAccommodationIds.length === 0) return
+  const handleStartEditRoom = (room: Booking) => {
+    setEditingRoomId(room.id)
+    setEditRoomForm({
+      accommodationId: room.accommodationId,
+      adults: room.guestsCount.adults,
+      children: room.guestsCount.children,
+      babies: room.guestsCount.babies,
+      pets: room.guestsCount.pets
+    })
+  }
 
-    const groupBookings = selectedBooking.locator
-      ? bookings.filter(b => b.locator === selectedBooking.locator)
-      : [selectedBooking]
-    const resultingGroupSize = groupBookings.length + additionalAccommodationIds.length
-    if (resultingGroupSize > 4) {
-      alert(`Esta reserva ya tiene ${groupBookings.length} alojamiento(s). El máximo por reserva grupal es 4.`)
+  const handleSaveRoom = async () => {
+    if (!selectedBooking || !editingRoomId) return
+    const roomBooking = bookings.find(item => item.id === editingRoomId)
+    if (!roomBooking) return
+
+    const newAccId = Number(editRoomForm.accommodationId)
+    const maxCapacity = getMaxCapacity(newAccId)
+    const totalGuests = Number(editRoomForm.adults) + Number(editRoomForm.children)
+
+    if (totalGuests <= 0) {
+      alert('Debe haber al menos un huésped asignado a la habitación.')
       return
     }
 
+    if (maxCapacity > 0 && totalGuests > maxCapacity) {
+      alert(`La habitación seleccionada admite hasta ${maxCapacity} personas y se ingresaron ${totalGuests}.`)
+      return
+    }
+
+    // Validar disponibilidad si se cambió de habitación
+    if (newAccId !== roomBooking.accommodationId) {
+      const groupIds = getBookingGroup(selectedBooking).map(item => item.id)
+      const collision = bookings.find(b =>
+        !groupIds.includes(b.id) &&
+        b.accommodationId === newAccId &&
+        roomBooking.checkIn < b.checkOut && roomBooking.checkOut > b.checkIn
+      )
+      if (collision) {
+        alert(`${getAccommodation(newAccId)?.title || 'Esa habitación'} ya está reservada para "${collision.guestName}" en esas fechas.`)
+        return
+      }
+    }
+
+    setSavingRoom(true)
+
+    // Recalcular tarifa con la nueva habitación y ocupantes
+    const standardRate = getStandardRate(
+      newAccId,
+      roomBooking.checkIn,
+      roomBooking.checkOut,
+      editRoomForm.adults,
+      editRoomForm.children
+    )
+    const finalAmount = getAdjustedBookingTotal(standardRate, roomBooking.specialNotes)
+
+    const { error } = await supabase
+      .from('bookings')
+      .update({
+        accommodation_id: newAccId,
+        adults: editRoomForm.adults,
+        children: editRoomForm.children,
+        babies: editRoomForm.babies,
+        pets: editRoomForm.pets,
+        total_amount: finalAmount
+      })
+      .eq('id', editingRoomId)
+
+    if (error) {
+      console.error('Error actualizando habitación de la reserva:', error)
+      alert('No se pudo guardar el cambio: ' + error.message)
+    } else {
+      setBookings(prev => prev.map(item => {
+        if (item.id !== editingRoomId) return item
+        return {
+          ...item,
+          accommodationId: newAccId,
+          guestsCount: {
+            adults: editRoomForm.adults,
+            children: editRoomForm.children,
+            babies: editRoomForm.babies,
+            pets: editRoomForm.pets
+          },
+          totalAmount: finalAmount
+        }
+      }))
+
+      if (selectedBooking.id === editingRoomId) {
+        setSelectedBooking(prev => prev ? {
+          ...prev,
+          accommodationId: newAccId,
+          guestsCount: {
+            adults: editRoomForm.adults,
+            children: editRoomForm.children,
+            babies: editRoomForm.babies,
+            pets: editRoomForm.pets
+          },
+          totalAmount: finalAmount
+        } : null)
+      }
+
+      setEditingRoomId(null)
+    }
+
+    setSavingRoom(false)
+  }
+
+  const handleRemoveRoomFromGroup = async (roomBookingId: string) => {
+    if (!selectedBooking) return
+    const group = getBookingGroup(selectedBooking)
+    if (group.length <= 1) {
+      alert('Esta es la única habitación de la reserva. Si deseas borrarla, usa el botón "Eliminar Reserva".')
+      return
+    }
+
+    const roomToRemove = group.find(item => item.id === roomBookingId)
+    const roomTitle = getAccommodation(roomToRemove?.accommodationId || 0)?.title || 'esta habitación'
+
+    if (!confirm(`¿Quitar ${roomTitle} de la reserva grupal? Se mantendrán las demás habitaciones.`)) return
+
+    const { error } = await supabase
+      .from('bookings')
+      .delete()
+      .eq('id', roomBookingId)
+
+    if (error) {
+      console.error('Error quitando habitación del grupo:', error)
+      alert('No se pudo quitar la habitación: ' + error.message)
+      return
+    }
+
+    const remaining = group.filter(item => item.id !== roomBookingId)
+    setBookings(prev => prev.filter(item => item.id !== roomBookingId))
+
+    // Si cerramos la que estaba seleccionada, enfocamos otra del grupo
+    if (selectedBooking.id === roomBookingId) {
+      setSelectedBooking(remaining[0] || null)
+    }
+  }
+
+  const handleStartAddRooms = () => {
+    setAdditionalAccommodationIds([])
+    setAdditionalGuests({ adults: 2, children: 0, babies: 0, pets: 0 })
+    setAddingRoomsToBooking(true)
+  }
+
+  const handleSaveAdditionalRooms = async () => {
+    if (!selectedBooking || additionalAccommodationIds.length === 0) return
+
+    // Validar disponibilidad de cada habitación a añadir
+    const groupIds = getBookingGroup(selectedBooking).map(item => item.id)
     const collision = bookings.find(b =>
+      !groupIds.includes(b.id) &&
       additionalAccommodationIds.includes(b.accommodationId) &&
       selectedBooking.checkIn < b.checkOut && selectedBooking.checkOut > b.checkIn
     )
+
     if (collision) {
       alert(`${getAccommodation(collision.accommodationId)?.title || 'Una unidad'} ya no está disponible para esas fechas.`)
       return
@@ -1848,26 +1817,38 @@ export default function BookingsPage() {
 
     const discount = getBookingDiscountPercent(selectedBooking.specialNotes)
     const locator = selectedBooking.locator || `LC-${Math.random().toString(36).substring(2, 7).toUpperCase()}`
-    const baseGuestName = selectedBooking.guestName.replace(/\s+\(\d+\/\d+\)$/, '')
-    const groupNote = `Reserva grupal ampliada a ${resultingGroupSize} alojamientos bajo el localizador ${locator}.`
-    // El descuento fijo pertenece al total que ya existía. La habitación nueva hereda
-    // el porcentaje, pero no vuelve a restar una porción fija que ya fue aplicada.
-    const notesWithoutFixedDiscount = withBookingFixedDiscountNote(selectedBooking.specialNotes, 0)
-    const specialNotes = [notesWithoutFixedDiscount, groupNote].filter(Boolean).join(' ')
 
-    const rows = allocations.map(room => {
-      const standardTotal = getStandardRate(
+    // Si la reserva original no tenía localizador, se le asigna uno ahora
+    if (!selectedBooking.locator) {
+      await supabase
+        .from('bookings')
+        .update({ locator })
+        .eq('id', selectedBooking.id)
+    }
+
+    setSavingAdditionalRooms(true)
+
+    const baseName = cleanGuestSuggestionName(selectedBooking.guestName)
+    const existingGroup = getBookingGroup(selectedBooking)
+    const totalRoomsCount = existingGroup.length + additionalAccommodationIds.length
+
+    const rowsToInsert = allocations.map((room, idx) => {
+      const standardRate = getStandardRate(
         room.id,
         selectedBooking.checkIn,
         selectedBooking.checkOut,
         room.adults,
         room.children
       )
-      const totalAmount = Math.round(standardTotal * (1 - discount / 100) * 100) / 100
+      const adjustedRate = discount > 0
+        ? Math.round(standardRate * (1 - discount / 100))
+        : standardRate
+
+      const roomIndex = existingGroup.length + idx + 1
       return {
-        guest_name: baseGuestName,
-        guest_phone: selectedBooking.guestPhone,
-        guest_email: selectedBooking.guestEmail,
+        guest_name: `${baseName} (${roomIndex}/${totalRoomsCount})`,
+        guest_phone: selectedBooking.guestPhone || null,
+        guest_email: selectedBooking.guestEmail || null,
         guest_ci: selectedBooking.guestCi || null,
         companions: selectedBooking.companions || null,
         accommodation_id: room.id,
@@ -1877,146 +1858,315 @@ export default function BookingsPage() {
         children: room.children,
         babies: room.babies,
         pets: room.pets,
-        total_amount: totalAmount,
+        total_amount: adjustedRate,
         amount_paid: 0,
-        payment_status: 'pendiente',
+        payment_status: selectedBooking.paymentStatus,
         payment_method: selectedBooking.paymentMethod,
-        payment_reference: null,
+        payment_reference: selectedBooking.paymentReference || null,
         status: selectedBooking.status,
-        confirmed: selectedBooking.confirmed,
-        special_notes: specialNotes,
+        confirmed: true,
+        special_notes: selectedBooking.specialNotes,
         locator
       }
     })
 
-    setSavingAdditionalRooms(true)
-    if (!selectedBooking.locator) {
-      const { error: locatorError } = await supabase
-        .from('bookings')
-        .update({ locator })
-        .eq('id', selectedBooking.id)
-      if (locatorError) {
-        setSavingAdditionalRooms(false)
-        alert('No se pudo preparar el localizador de la reserva.')
-        return
-      }
+    const { data, error } = await supabase
+      .from('bookings')
+      .insert(rowsToInsert)
+      .select('*')
+
+    if (error) {
+      console.error('Error añadiendo habitaciones a la reserva:', error)
+      alert('No se pudieron añadir las habitaciones: ' + error.message)
+    } else if (data) {
+      const newCreatedBookings = data.map(mapDbBookingToReact)
+      setBookings(prev => [
+        ...prev.map(item => item.id === selectedBooking.id && !item.locator ? { ...item, locator } : item),
+        ...newCreatedBookings
+      ])
+      setAddingRoomsToBooking(false)
+      setAdditionalAccommodationIds([])
     }
 
-    const { data, error } = await supabase.from('bookings').insert(rows).select('*')
     setSavingAdditionalRooms(false)
-    if (error || !data) {
-      console.error('Error adding rooms to existing booking:', error)
-      alert('No se pudieron agregar las habitaciones. Intenta de nuevo.')
-      return
-    }
-
-    const inserted = data.map(mapDbBookingToReact)
-    setBookings(prev => [
-      ...inserted,
-      ...prev.map(b => b.id === selectedBooking.id && !b.locator ? { ...b, locator } : b)
-    ])
-    setSelectedBooking(prev => prev ? { ...prev, locator } : prev)
-    setAdditionalAccommodationIds([])
-    setAdditionalGuests({ adults: 2, children: 0, babies: 0, pets: 0 })
-    setAddingRoomsToBooking(false)
   }
 
-  const handleDropOnCell = async (accId: number, dropDateStr: string) => {
-    if (!dragInfo) return
-    const info = dragInfo
-    setDragInfo(null)
-    setDragOverCell(null)
+  const handleStartEditFinancials = () => {
+    if (!selectedBooking) return
+    setEditDiscountPercent(getBookingDiscountPercent(selectedBooking.specialNotes))
+    setEditFixedDiscountAmount(getBookingFixedDiscountAmount(selectedBooking.specialNotes))
+    setEditingFinancials(true)
+  }
 
-    const booking = bookings.find(b => b.id === info.bookingId)
-    if (!booking) return
+  const handleSaveFinancials = async () => {
+    if (!selectedBooking) return
+    const group = getBookingGroup(selectedBooking)
+    setSavingFinancials(true)
 
-    let newCheckIn = booking.checkIn
-    let newCheckOut = booking.checkOut
-    let newAccId = booking.accommodationId
+    // El descuento fijo se reparte equitativamente entre las habitaciones para que el total
+    // de la reserva coincida con la rebaja pactada.
+    const fixedPerRoom = group.length > 0
+      ? Math.round((editFixedDiscountAmount / group.length) * 100) / 100
+      : 0
 
-    if (info.mode === 'move') {
-      // Arrastrar el cuerpo permite soltarlo en otra fila: reasigna de habitación/cabaña.
-      const nights = calculateNights(booking.checkIn, booking.checkOut)
-      newCheckIn = dropDateStr
-      newCheckOut = formatLocalDate(addDays(parseLocalDate(dropDateStr), nights))
-      newAccId = accId
+    // Se actualiza cada habitacion con el nuevo descuento
+    const updates = group.map((room, index) => {
+      // Ajuste de centavos al último cuarto si hace falta
+      const currentFixed = index === group.length - 1
+        ? Math.max(0, Math.round((editFixedDiscountAmount - fixedPerRoom * (group.length - 1)) * 100) / 100)
+        : fixedPerRoom
+
+      const standardRate = getStandardRate(
+        room.accommodationId,
+        room.checkIn,
+        room.checkOut,
+        room.guestsCount.adults,
+        room.guestsCount.children
+      )
+      const afterPercent = standardRate * (1 - editDiscountPercent / 100)
+      const finalAmount = Math.max(0, Math.round((afterPercent - currentFixed) * 100) / 100)
+
+      let updatedNotes = withBookingDiscountNote(room.specialNotes, editDiscountPercent)
+      updatedNotes = withBookingFixedDiscountNote(updatedNotes, currentFixed)
+
+      return supabase
+        .from('bookings')
+        .update({
+          total_amount: finalAmount,
+          special_notes: updatedNotes
+        })
+        .eq('id', room.id)
+    })
+
+    const results = await Promise.all(updates)
+    const failed = results.find(r => r.error)
+
+    if (failed?.error) {
+      console.error('Error guardando descuento:', failed.error)
+      alert('No se pudo aplicar el descuento: ' + failed.error.message)
     } else {
-      // Estirar un borde solo cambia fechas, dentro de la misma fila.
-      if (accId !== booking.accommodationId) return
-      if (info.mode === 'resize-left') {
-        newCheckIn = dropDateStr
-        if (newCheckIn >= booking.checkOut) {
-          alert('Error: la fecha de check-in debe ser anterior al check-out.')
-          return
+      const idSet = new Set(group.map(r => r.id))
+      setBookings(prev => prev.map(b => {
+        if (!idSet.has(b.id)) return b
+        const roomIdx = group.findIndex(g => g.id === b.id)
+        const currentFixed = roomIdx === group.length - 1
+          ? Math.max(0, Math.round((editFixedDiscountAmount - fixedPerRoom * (group.length - 1)) * 100) / 100)
+          : fixedPerRoom
+        const standardRate = getStandardRate(
+          b.accommodationId,
+          b.checkIn,
+          b.checkOut,
+          b.guestsCount.adults,
+          b.guestsCount.children
+        )
+        const afterPercent = standardRate * (1 - editDiscountPercent / 100)
+        const finalAmount = Math.max(0, Math.round((afterPercent - currentFixed) * 100) / 100)
+
+        let updatedNotes = withBookingDiscountNote(b.specialNotes, editDiscountPercent)
+        updatedNotes = withBookingFixedDiscountNote(updatedNotes, currentFixed)
+
+        return {
+          ...b,
+          totalAmount: finalAmount,
+          specialNotes: updatedNotes
         }
-      } else if (info.mode === 'resize-right') {
-        newCheckOut = dropDateStr
-        if (newCheckOut <= booking.checkIn) {
-          alert('Error: la fecha de check-out debe ser posterior al check-in.')
-          return
+      }))
+
+      setSelectedBooking(prev => {
+        if (!prev) return null
+        const roomIdx = group.findIndex(g => g.id === prev.id)
+        const currentFixed = roomIdx === group.length - 1
+          ? Math.max(0, Math.round((editFixedDiscountAmount - fixedPerRoom * (group.length - 1)) * 100) / 100)
+          : fixedPerRoom
+        const standardRate = getStandardRate(
+          prev.accommodationId,
+          prev.checkIn,
+          prev.checkOut,
+          prev.guestsCount.adults,
+          prev.guestsCount.children
+        )
+        const afterPercent = standardRate * (1 - editDiscountPercent / 100)
+        const finalAmount = Math.max(0, Math.round((afterPercent - currentFixed) * 100) / 100)
+
+        let updatedNotes = withBookingDiscountNote(prev.specialNotes, editDiscountPercent)
+        updatedNotes = withBookingFixedDiscountNote(updatedNotes, currentFixed)
+
+        return {
+          ...prev,
+          totalAmount: finalAmount,
+          specialNotes: updatedNotes
         }
-      }
+      })
+
+      setEditingFinancials(false)
     }
-
-    if (newCheckIn === booking.checkIn && newCheckOut === booking.checkOut && newAccId === booking.accommodationId) return
-
-    await reassignBooking(booking.id, newAccId, newCheckIn, newCheckOut)
+    setSavingFinancials(false)
   }
 
-  // Mover/estirar una reserva existente en la Semana. Usa la posición real del puntero
-  // (document.elementsFromPoint) en vez de los eventos nativos de drag&drop de HTML5:
-  // así detecta la celda de fecha que está DEBAJO aunque la propia barra la tape
-  // visualmente — con drag&drop nativo, encoger una reserva (arrastrar el borde hacia
-  // adentro) no soltaba sobre nada porque el mouse quedaba sobre la barra, no la celda.
-  //
-  // Son pointer events, no mouse: el mismo código sirve para dedo, mouse y lápiz. El
-  // drag&drop de HTML5 no existe en móvil, y `mousemove` no se dispara al arrastrar con
-  // el dedo, por lo que antes el planner solo se podía usar desde una computadora.
+  const handleStartEditNotes = () => {
+    if (!selectedBooking) return
+    setEditNotes(selectedBooking.specialNotes || '')
+    setEditingNotes(true)
+  }
+
+  const handleSaveNotes = async () => {
+    if (!selectedBooking) return
+    setSavingNotes(true)
+    const targetIds = getBookingGroup(selectedBooking).map(b => b.id)
+
+    const { error } = await supabase
+      .from('bookings')
+      .update({ special_notes: editNotes.trim() || null })
+      .in('id', targetIds)
+
+    if (error) {
+      console.error('Error guardando notas:', error)
+      alert('No se pudieron guardar las notas: ' + error.message)
+    } else {
+      const idSet = new Set(targetIds)
+      const trimmed = editNotes.trim()
+      setBookings(prev => prev.map(b => idSet.has(b.id) ? { ...b, specialNotes: trimmed } : b))
+      setSelectedBooking(prev => prev ? { ...prev, specialNotes: trimmed } : null)
+      setEditingNotes(false)
+    }
+    setSavingNotes(false)
+  }
+
+  // Permite arrastrar reservas en el planner: mover toda la estadía o estirar los bordes
+  // para cambiar check-in o check-out, con validación de colisión y actualización
+  // reactiva de tarifas.
   useEffect(() => {
     if (!dragInfo) return
-    hasDraggedRef.current = false
 
     const handlePointerMove = (e: PointerEvent) => {
-      // Ignora el jitter de un simple toque/click: solo cuenta como arrastre real una vez
-      // que el puntero se aleja más de unos pocos píxeles del punto donde empezó.
+      // Evita disparar el arrastre con el simple temblor de la mano al hacer click.
       if (!hasDraggedRef.current) {
         const start = dragStartPosRef.current
-        const movedEnough = !start || Math.hypot(e.clientX - start.x, e.clientY - start.y) >= DRAG_THRESHOLD_PX
-        if (!movedEnough) return
+        if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) < DRAG_THRESHOLD_PX) return
         hasDraggedRef.current = true
       }
 
+      // En táctil los pointer events quedan capturados en el elemento de origen:
+      // elementsFromPoint nos dice sobre qué celda está el dedo en este instante.
       const stack = document.elementsFromPoint(e.clientX, e.clientY)
       const cellEl = stack.find((el): el is HTMLElement => el instanceof HTMLElement && !!el.dataset.plannerCell)
-      const key = cellEl?.dataset.plannerCell ?? null
-      if (dragOverCellRef.current !== key) {
+      const key = cellEl?.dataset.plannerCell || null
+      if (key && dragOverCellRef.current !== key) {
         dragOverCellRef.current = key
         setDragOverCell(key)
       }
     }
 
-    const handlePointerUp = () => {
-      const key = dragOverCellRef.current
-      const wasRealDrag = hasDraggedRef.current
-      dragOverCellRef.current = null
+    const handlePointerUp = async () => {
+      const targetKey = dragOverCellRef.current
+      const wasDrag = hasDraggedRef.current
       dragStartPosRef.current = null
       hasDraggedRef.current = false
-      setDragInfo(null)
+      dragOverCellRef.current = null
       setDragOverCell(null)
-      if (wasRealDrag && key) {
-        const [accIdStr, dateStr] = key.split('|')
-        handleDropOnCell(Number(accIdStr), dateStr)
+
+      if (!targetKey || !wasDrag) {
+        setDragInfo(null)
+        return
       }
+
+      const [targetAccIdStr, targetDateStr] = targetKey.split('|')
+      const targetAccId = Number(targetAccIdStr)
+      const booking = bookings.find(b => b.id === dragInfo.bookingId)
+
+      if (!booking || !targetAccId || !targetDateStr) {
+        setDragInfo(null)
+        return
+      }
+
+      const nights = calculateNights(booking.checkIn, booking.checkOut)
+      let newCheckIn = booking.checkIn
+      let newCheckOut = booking.checkOut
+      const newAccId = targetAccId
+
+      if (dragInfo.mode === 'move') {
+        newCheckIn = targetDateStr
+        newCheckOut = formatLocalDate(addDays(parseLocalDate(targetDateStr), nights))
+      } else if (dragInfo.mode === 'resize-left') {
+        if (targetDateStr >= booking.checkOut) {
+          setDragInfo(null)
+          return
+        }
+        newCheckIn = targetDateStr
+      } else if (dragInfo.mode === 'resize-right') {
+        // En el planner la columna representa la noche. Al soltar sobre el día D, el
+        // check-out es la mañana siguiente (D + 1).
+        const checkOutDate = formatLocalDate(addDays(parseLocalDate(targetDateStr), 1))
+        if (checkOutDate <= booking.checkIn) {
+          setDragInfo(null)
+          return
+        }
+        newCheckOut = checkOutDate
+      }
+
+      // Si no hubo cambio real, salir sin tocar nada
+      if (newCheckIn === booking.checkIn && newCheckOut === booking.checkOut && newAccId === booking.accommodationId) {
+        setDragInfo(null)
+        return
+      }
+
+      // Revisa que la nueva posición no pise otra reserva
+      const collision = bookings.find(b =>
+        b.id !== booking.id &&
+        b.accommodationId === newAccId &&
+        newCheckIn < b.checkOut && newCheckOut > b.checkIn
+      )
+
+      if (collision) {
+        const roomName = getAccommodation(newAccId)?.title || 'Esa habitación'
+        alert(`No se puede mover la reserva: ${roomName} ya está reservada para "${collision.guestName}" del ${collision.checkIn} al ${collision.checkOut}.`)
+        setDragInfo(null)
+        return
+      }
+
+      // Recalcula la tarifa para las nuevas noches
+      const standardRate = getStandardRate(
+        newAccId,
+        newCheckIn,
+        newCheckOut,
+        booking.guestsCount.adults,
+        booking.guestsCount.children
+      )
+      const adjustedRate = getAdjustedBookingTotal(standardRate, booking.specialNotes)
+
+      // Actualiza en Supabase
+      const { error } = await supabase
+        .from('bookings')
+        .update({
+          accommodation_id: newAccId,
+          check_in: newCheckIn,
+          check_out: newCheckOut,
+          total_amount: adjustedRate
+        })
+        .eq('id', booking.id)
+
+      if (error) {
+        console.error('Error al mover la reserva:', error)
+        alert('No se pudo mover la reserva: ' + error.message)
+      } else {
+        setBookings(prev => prev.map(b => b.id === booking.id ? {
+          ...b,
+          accommodationId: newAccId,
+          checkIn: newCheckIn,
+          checkOut: newCheckOut,
+          totalAmount: adjustedRate
+        } : b))
+      }
+
+      setDragInfo(null)
     }
 
-    // Un puntero cancelado (el navegador se llevó el gesto) no debe guardar nada:
-    // se descarta el arrastre y la reserva se queda donde estaba.
     const handlePointerCancel = () => {
-      dragOverCellRef.current = null
       dragStartPosRef.current = null
       hasDraggedRef.current = false
-      setDragInfo(null)
+      dragOverCellRef.current = null
       setDragOverCell(null)
+      setDragInfo(null)
     }
 
     window.addEventListener('pointermove', handlePointerMove)
@@ -2027,7 +2177,7 @@ export default function BookingsPage() {
       window.removeEventListener('pointerup', handlePointerUp)
       window.removeEventListener('pointercancel', handlePointerCancel)
     }
-  }, [dragInfo])
+  }, [dragInfo, bookings])
 
   const handleAddBooking = async () => {
     const fullGuestName = `${form.guestFirstName.trim()} ${form.guestLastName.trim()}`.trim()
@@ -2055,9 +2205,30 @@ export default function BookingsPage() {
 
     const maxCapacity = selectedAccommodationIds.reduce((sum, id) => sum + getMaxCapacity(id), 0)
     const totalGuests = Number(form.adults) + Number(form.children)
+    if (totalGuests === 0) {
+      alert('Error: Debes ingresar al menos 1 huésped (adulto o niño).')
+      return
+    }
     if (maxCapacity > 0 && totalGuests > maxCapacity) {
       alert(`Error: Las ${selectedAccommodationIds.length} unidades seleccionadas admiten hasta ${maxCapacity} personas y se ingresaron ${totalGuests}.`)
       return
+    }
+
+    if (selectedAccommodationIds.length > 1) {
+      for (const id of selectedAccommodationIds) {
+        const room = roomGuestsMap[id] || { adults: 0, children: 0, babies: 0 }
+        const roomTotal = (room.adults || 0) + (room.children || 0)
+        const roomCap = getMaxCapacity(id)
+        const roomTitle = getAccommodation(id)?.title || `Habitación ${id}`
+        if (roomTotal === 0) {
+          alert(`Error: La habitación "${roomTitle}" no tiene huéspedes asignados. Asigna al menos 1 adulto o niño, o deselecciona la habitación.`)
+          return
+        }
+        if (roomCap > 0 && roomTotal > roomCap) {
+          alert(`Error: La habitación "${roomTitle}" admite un máximo de ${roomCap} personas y tiene asignadas ${roomTotal}.`)
+          return
+        }
+      }
     }
 
     const finalTotal = useCustomRate
@@ -2128,40 +2299,50 @@ export default function BookingsPage() {
       alert('No se pudo guardar la reserva. Intenta de nuevo.')
       return
     } else if (data && data.length > 0) {
-      setBookings(prev => [...data.map(mapDbBookingToReact), ...prev])
-
-      if (Number(form.amountPaid) > 0) {
-        const paymentRow = {
-          booking_id: data[0].id,
+      // También registra el abono inicial en booking_payments si se indicó un monto
+      if (initialPaidTotal > 0) {
+        const primaryBookingId = data[0].id
+        const payment: {
+          booking_id: string
+          payment_date: string
+          amount: number
+          currency: string
+          method: string
+          reference: string | null
+          status: string
+          exchange_rate?: number | null
+          amount_bs?: number | null
+        } = {
+          booking_id: primaryBookingId,
           payment_date: form.paymentDate || todayStr,
           amount: initialPaidTotal,
           currency: 'USD',
           method: form.paymentMethod,
           reference: form.paymentReference.trim() || null,
-          status: 'verificado',
-          exchange_rate: abonoInicialBs.activo
-            ? Number(String(abonoInicialBs.tasa).replace(',', '.'))
-            : null,
-          amount_bs: abonoInicialBs.activo
-            ? Number(String(abonoInicialBs.bolivares).replace(',', '.'))
-            : null,
+          status: 'verificado'
         }
 
-        const { data: pagosIniciales, error: paymentError } = await supabase
+        if (abonoInicialBs.activo) {
+          const bs = parseLocalDateBs(abonoInicialBs.bolivares)
+          const tasa = parseLocalDateBs(abonoInicialBs.tasa)
+          if (bs > 0) payment.amount_bs = bs
+          if (tasa > 0) payment.exchange_rate = tasa
+        }
+
+        const { error: paymentError } = await supabase
           .from('booking_payments')
-          .insert(paymentRow)
-          .select('id, booking_id, amount, exchange_rate, amount_bs')
+          .insert([payment])
 
         if (paymentError) {
-          console.error('Error adding initial payment:', paymentError)
+          console.error('No se pudo registrar el abono inicial en el historial:', paymentError)
         } else {
-          for (const payment of pagosIniciales || []) {
-            const bookingRow = data.find(row => row.id === payment.booking_id)
+          // El abono inicial también alimenta la caja en Ingresos
+          const bookingRow = data[0]
+          if (bookingRow) {
             const ingreso = await registrarIngresoDeAbono(supabase, {
-              paymentId: payment.id,
-              bookingId: payment.booking_id,
+              bookingId: primaryBookingId,
               guestName: fullGuestName,
-              locator: locatorCode,
+              locator: locatorCode || undefined,
               accommodationTitle: data.length > 1 ? `${data.length} habitaciones` : getAccommodation(Number(bookingRow?.accommodation_id))?.title,
               amount: Number(payment.amount),
               date: form.paymentDate || todayStr,
@@ -2199,154 +2380,52 @@ export default function BookingsPage() {
         })
       }
 
-      if (Number(form.amountPaid) > 0 && form.guestEmail.trim()) {
-        sendBookingVoucherEmail(supabase, {
-          locator: locatorCode,
-          guestName: fullGuestName,
-          guestEmail: form.guestEmail.trim(),
-          guestPhone: form.guestPhone.trim(),
-          guestCi: form.guestCi.trim(),
-          companions: form.companions.trim(),
-          channel: 'Local',
-          checkIn: form.checkIn,
-          checkOut: form.checkOut,
-          nights: calculateNights(form.checkIn, form.checkOut),
-          guestsCount: Number(form.adults) + Number(form.children),
-          paymentMethod: form.paymentMethod,
-          totalAmount: finalTotal,
-          amountPaid: Number(form.amountPaid),
-          rooms: roomAllocations.map((room, index) => ({
-            title: getAccommodation(room.id)?.title || `Alojamiento ${room.id}`,
-            capacity: getMaxCapacity(room.id),
-            nights: calculateNights(form.checkIn, form.checkOut),
-            adults: room.adults,
-            children: room.children,
-            cost: roomFinalTotals[index]
-          })),
-          payments: [{
-            date: form.paymentDate || todayStr,
-            amount: Number(form.amountPaid),
-            method: form.paymentMethod,
-            status: 'Verificado',
-            reference: form.paymentReference.trim()
-          }]
-        }).catch(err => console.error('Error enviando el comprobante grupal:', err))
-      }
-    }
-
-    closeAddModal()
-  }
-
-  /**
-   * Envía el comprobante de pago de una reserva. Los abonos se leen SIEMPRE de
-   * `booking_payments`, nunca del monto que trae la reserva en pantalla: el voucher solo
-   * puede declarar dinero efectivamente registrado. Si no hay ningún pago, no se envía.
-   */
-  const sendVoucherForBooking = async (booking: Booking) => {
-    const email = booking.guestEmail?.trim()
-    if (!email) return { sent: false, reason: 'sin-correo' as const }
-    const groupBookings = getBookingGroup(booking)
-    const groupIds = groupBookings.map(room => room.id)
-
-    const { data: paymentRows } = await supabase
-      .from('booking_payments')
-      .select('*')
-      .in('booking_id', groupIds)
-      .order('payment_date', { ascending: true })
-
-    const verified = (paymentRows ?? []).filter(p => p.status === 'verificado')
-    if (verified.length === 0) return { sent: false, reason: 'sin-pagos' as const }
-
-    const paidVerified = verified.reduce((sum, p) => sum + Number(p.amount), 0)
-    const nights = calculateNights(booking.checkIn, booking.checkOut)
-
-    await sendBookingVoucherEmail(supabase, {
-      locator: booking.locator || booking.id.slice(0, 6).toUpperCase(),
-      guestName: booking.guestName.replace(/\s+\(\d+\/\d+\)$/, ''),
-      guestEmail: email,
-      guestPhone: booking.guestPhone,
-      guestCi: booking.guestCi,
-      companions: booking.companions,
-      channel: booking.confirmed ? 'Local' : 'App web',
-      checkIn: booking.checkIn,
-      checkOut: booking.checkOut,
-      nights,
-      guestsCount: groupBookings.reduce((sum, room) => sum + room.guestsCount.adults + room.guestsCount.children, 0),
-      paymentMethod: booking.paymentMethod,
-      totalAmount: groupBookings.reduce((sum, room) => sum + room.totalAmount, 0),
-      amountPaid: paidVerified,
-      rooms: groupBookings.map(room => ({
-        title: getAccommodation(room.accommodationId)?.title || '',
-        capacity: getMaxCapacity(room.accommodationId),
-        nights,
-        adults: room.guestsCount.adults,
-        children: room.guestsCount.children,
-        plan: 'Temporadas',
-        cost: room.totalAmount,
-      })),
-      payments: verified.map(p => ({
-        date: p.payment_date,
-        amount: Number(p.amount),
-        method: p.method,
-        status: 'Verificado',
-        reference: p.reference || undefined,
-      })),
-    })
-    return { sent: true as const, reason: null }
-  }
-
-  /** Botón "Enviar comprobante" de la ficha, con su estado de carga y su aviso. */
-  const handleSendVoucher = async (booking: Booking) => {
-    if (sendingVoucher) return
-    setSendingVoucher(true)
-    const result = await sendVoucherForBooking(booking)
-    setSendingVoucher(false)
-    if (result.sent) {
-      setVoucherSentFor(booking.id)
-    } else if (result.reason === 'sin-pagos') {
-      alert('Esta reserva todavía no tiene ningún abono registrado. Registre el pago en "Historial de Pagos" y el comprobante se enviará solo.')
+      setBookings(prev => [...data.map(mapDbBookingToReact), ...prev])
+      closeAddModal()
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[500px] gap-3">
-        <div className="w-10 h-10 border-4 border-[#C5A059] border-t-transparent rounded-full animate-spin" />
-        <p className="text-sm font-bold text-gray-500 uppercase tracking-widest animate-pulse">Cargando reservas...</p>
-      </div>
-    )
+  // Parse helper for comma decimals
+  const parseLocalDateBs = (val: string) => {
+    if (!val) return 0
+    const clean = val.replace(/\./g, '').replace(',', '.')
+    return parseFloat(clean) || 0
   }
 
   return (
     <>
-      <div className="space-y-6 print:hidden">
-        <LoadErrorBanner message={loadError} />
-        {/* 1. Header with dynamic greetings */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div className="space-y-6 max-w-[1600px] mx-auto pb-12">
+      {/* 1. Header & Title Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold font-serif text-gray-900 flex items-center gap-2.5">
-            Planner de Reservas <Sparkles className="text-[#C5A059] fill-[#C5A059]/10" size={24} />
+          <h1 className="text-2xl font-extrabold text-gray-800 tracking-tight flex items-center gap-2">
+            <span>Reservas</span>
+            <span className="text-xs bg-[#C5A059]/10 text-[#C5A059] px-2.5 py-0.5 rounded-full font-bold">
+              {bookings.length} {bookings.length === 1 ? 'reserva activa' : 'reservas activas'}
+            </span>
           </h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Supervisa la ocupación del hotel de la manera más sencilla e intuitiva. Hoy es {todayLongLabel}.
+          <p className="text-xs text-gray-400 mt-1">
+            Recepción y control diario de disponibilidad, asignación de cabañas y huéspedes.
           </p>
         </div>
-        <div className="flex items-center gap-3 self-start md:self-auto print:hidden">
+
+        <div className="flex items-center gap-2">
+          {/* Botón Imprimir Planner */}
           <button
             onClick={() => window.print()}
-            className="flex items-center justify-center gap-2 px-5 py-3 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-2xl text-sm font-bold transition-all shadow-sm active:scale-95"
+            className="flex items-center gap-2 px-3.5 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-2xl text-xs font-bold hover:bg-gray-50 transition-all shadow-xs cursor-pointer active:scale-95"
+            title="Imprimir vista actual del planner"
           >
-            <Printer size={18} />
-            <span className="hidden sm:inline">Generar Reporte PDF</span>
-            <span className="sm:hidden">PDF</span>
+            <Printer size={15} className="text-gray-500" />
+            <span className="hidden sm:inline">Imprimir</span>
           </button>
+
           <button
-            onClick={() => openAddModal()}
-            className="flex items-center justify-center gap-2 px-5 py-3 bg-[#C5A059] hover:bg-[#b8904a] text-white rounded-2xl text-sm font-bold transition-all shadow-md shadow-[#C5A059]/20 active:scale-95"
+            onClick={openAddModal}
+            className="flex items-center gap-2 px-4 py-2.5 bg-[#C5A059] hover:bg-[#b8904a] text-white rounded-2xl text-xs font-bold transition-all shadow-sm shadow-[#C5A059]/20 cursor-pointer active:scale-95"
           >
-            <Plus size={18} />
-            <span className="hidden sm:inline">Registrar Nueva Reserva</span>
-            <span className="sm:hidden">Nueva</span>
+            <Plus size={16} />
+            <span>Nueva Reserva</span>
           </button>
         </div>
       </div>
@@ -2368,85 +2447,98 @@ export default function BookingsPage() {
         <div className={`rounded-3xl p-5 shadow-sm border flex flex-col justify-between transition-colors ${stats.checkins > 0 ? 'bg-amber-50/50 border-amber-100' : 'bg-white border-gray-100'}`}>
           <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Llegan Hoy 👋</span>
           <div className="mt-3 flex items-baseline gap-1">
-            <span className={`text-3xl font-extrabold ${stats.checkins > 0 ? 'text-amber-600' : 'text-gray-800'}`}>{stats.checkins}</span>
-            <span className="text-xs text-gray-400">cabañas</span>
+            <span className={`text-3xl font-extrabold ${stats.checkins > 0 ? 'text-amber-600' : 'text-gray-800'}`}>
+              {stats.checkins}
+            </span>
+            <span className="text-[11px] text-gray-400 font-medium">por recibir</span>
           </div>
-          <span className="text-[10px] text-gray-400 mt-2 block font-medium">Check-ins pendientes</span>
+          <p className="text-[10px] text-gray-400 mt-2 truncate">Pendientes de check-in</p>
         </div>
 
         {/* Check-Outs Card */}
         <div className={`rounded-3xl p-5 shadow-sm border flex flex-col justify-between transition-colors ${stats.checkouts > 0 ? 'bg-orange-50/50 border-orange-100' : 'bg-white border-gray-100'}`}>
-          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Se van Hoy 🚶</span>
+          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Salen Hoy 🧳</span>
           <div className="mt-3 flex items-baseline gap-1">
-            <span className={`text-3xl font-extrabold ${stats.checkouts > 0 ? 'text-orange-600' : 'text-gray-800'}`}>{stats.checkouts}</span>
-            <span className="text-xs text-gray-400">cabañas</span>
+            <span className={`text-3xl font-extrabold ${stats.checkouts > 0 ? 'text-orange-600' : 'text-gray-800'}`}>
+              {stats.checkouts}
+            </span>
+            <span className="text-[11px] text-gray-400 font-medium">salidas</span>
           </div>
-          <span className="text-[10px] text-gray-400 mt-2 block font-medium">Check-outs por realizar</span>
+          <p className="text-[10px] text-gray-400 mt-2 truncate">Por desocupar habitación</p>
         </div>
 
         {/* Cleaning Card */}
         <div className={`rounded-3xl p-5 shadow-sm border flex flex-col justify-between transition-colors ${stats.cleaning > 0 ? 'bg-rose-50/50 border-rose-100' : 'bg-white border-gray-100'}`}>
-          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">En Limpieza 🧼</span>
+          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Limpieza 🧹</span>
           <div className="mt-3 flex items-baseline gap-1">
-            <span className={`text-3xl font-extrabold ${stats.cleaning > 0 ? 'text-rose-600' : 'text-gray-800'}`}>{stats.cleaning}</span>
-            <span className="text-xs text-gray-400">cuartos</span>
+            <span className={`text-3xl font-extrabold ${stats.cleaning > 0 ? 'text-rose-600' : 'text-gray-800'}`}>
+              {stats.cleaning}
+            </span>
+            <span className="text-[11px] text-gray-400 font-medium">habitaciones</span>
           </div>
-          <span className="text-[10px] text-gray-400 mt-2 block font-medium">Requieren desinfección</span>
+          <p className="text-[10px] text-gray-400 mt-2 truncate">Requieren aseo</p>
         </div>
 
-        {/* Free/Available Card */}
-        <div className="bg-white rounded-3xl p-5 shadow-sm border border-gray-100 flex flex-col justify-between col-span-2 lg:col-span-1">
-          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Disponibles 🟢</span>
+        {/* Available Today Card */}
+        <div className="bg-emerald-50/40 rounded-3xl p-5 shadow-sm border border-emerald-100 flex flex-col justify-between col-span-2 lg:col-span-1">
+          <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-widest block">Disponibles ✨</span>
           <div className="mt-3 flex items-baseline gap-1">
             <span className="text-3xl font-extrabold text-emerald-600">{stats.available}</span>
-            <span className="text-xs text-gray-400">libres</span>
+            <span className="text-[11px] text-emerald-700/60 font-medium">libres hoy</span>
           </div>
-          <span className="text-[10px] text-gray-400 mt-2 block font-medium">Listas para habitar</span>
+          <p className="text-[10px] text-emerald-700/70 mt-2 truncate">Listas para alojar</p>
         </div>
       </div>
 
-      {/* 3. Navigation Tabs & Search Controls */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white p-2 rounded-2xl shadow-sm border border-gray-100">
-        {/* Navigation Tabs */}
-        <div className="flex gap-1.5 w-full sm:w-auto">
-          {(['dia', 'semana', 'mes'] as const).map(tab => (
-            <button
-              key={tab}
-              onClick={() => {
-                setActiveTab(tab)
-                setMonthPage(1)
-              }}
-              className={`flex-1 sm:flex-initial px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all active:scale-95 ${
-                activeTab === tab
-                  ? 'bg-[#3D2B1F] text-white shadow-sm'
-                  : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50'
-              }`}
-            >
-              {tab === 'dia' ? 'Hoy (Día)' : tab === 'semana' ? 'Esta Semana' : 'Este Mes'}
-            </button>
-          ))}
+      {/* 3. Navigation View Switcher (Día / Semana / Mes) & Global Search */}
+      <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-white p-2.5 rounded-3xl border border-gray-100 shadow-sm">
+        <div className="flex items-center gap-1.5 p-1 bg-gray-50 rounded-2xl w-full md:w-auto">
+          <button
+            onClick={() => setActiveTab('dia')}
+            className={`flex-1 md:flex-none px-5 py-2 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'dia'
+                ? 'bg-white text-gray-800 shadow-xs'
+                : 'text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            Vista Hoy
+          </button>
+          <button
+            onClick={() => setActiveTab('semana')}
+            className={`flex-1 md:flex-none px-5 py-2 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'semana'
+                ? 'bg-white text-gray-800 shadow-xs'
+                : 'text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            Planner (Semana)
+          </button>
+          <button
+            onClick={() => setActiveTab('mes')}
+            className={`flex-1 md:flex-none px-5 py-2 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'mes'
+                ? 'bg-white text-gray-800 shadow-xs'
+                : 'text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            Lista de Reservas (Mes)
+          </button>
         </div>
 
-        {/* Interactive search bar */}
-        <div className="flex items-center gap-2 bg-gray-50 border border-gray-100 rounded-xl px-4 py-2.5 w-full sm:max-w-xs">
-          <Search size={16} className="text-gray-400 shrink-0" />
+        {/* Live Search Bar */}
+        <div className="relative w-full md:w-80">
+          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
-            placeholder="Buscar por huésped o cabaña..."
+            placeholder="Buscar por huésped, localizador o cabaña..."
             value={searchQuery}
-            onChange={e => {
-              setSearchQuery(e.target.value)
-              setMonthPage(1)
-            }}
-            className="w-full text-xs outline-none bg-transparent text-gray-700 placeholder-gray-400 font-medium"
+            onChange={e => setSearchQuery(e.target.value)}
+            className="w-full bg-gray-50 border-0 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-gray-700 outline-none focus:ring-2 focus:ring-[#C5A059]/20 transition-all placeholder:text-gray-400"
           />
           {searchQuery && (
             <button
-              onClick={() => {
-                setSearchQuery('')
-                setMonthPage(1)
-              }}
-              className="text-gray-400 hover:text-gray-600"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs"
             >
               <X size={14} />
             </button>
@@ -2454,1696 +2546,1564 @@ export default function BookingsPage() {
         </div>
       </div>
 
-      {/* 4. Core Views Section */}
-
-      {/* TAB A: DIA VIEW */}
+      {/* 4. Tab 1: VISTA HOY (Day View) */}
       {activeTab === 'dia' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          {cabinStatesToday.map(({ accommodation, booking, status }) => {
-            const conf = statusConfig[status] || statusConfig.disponible
-            let badgeBg = conf.bg
-            
-            if (status === 'disponible') {
-              badgeBg = 'bg-emerald-50 text-emerald-800 border-emerald-200 shadow-sm'
-            } else if (status === 'checkin_hoy') {
-              badgeBg = 'bg-amber-50 text-amber-800 border-amber-200 shadow-sm'
-            } else if (status === 'checkout_hoy') {
-              badgeBg = 'bg-orange-50 text-orange-800 border-orange-200 shadow-sm'
-            } else if (status === 'limpieza') {
-              badgeBg = 'bg-rose-50 text-rose-800 border-rose-200 shadow-sm'
-            } else if (booking) {
-              badgeBg = getBookingPaymentColors(booking).badge
-            }
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+              Estado de las Cabañas — {todayLongLabel}
+            </span>
+          </div>
 
-            return (
-              <div
-                key={accommodation.id}
-                className="bg-white rounded-[2.5rem] shadow-sm border border-gray-100 overflow-hidden flex flex-col justify-between transition-all hover:shadow-md"
-              >
-                {/* Cabin Image header */}
-                <div className="relative h-44 w-full bg-gray-100 overflow-hidden flex-none">
-                  <img
-                    src={accommodation.image}
-                    alt={accommodation.title}
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
-                  
-                  {/* Status badge in corner */}
-                  <div className={`absolute top-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[9px] font-extrabold uppercase tracking-widest ${badgeBg}`}>
-                    {conf.icon}
-                    {conf.label}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+            {cabinStatesToday.map(({ accommodation, booking, status }) => {
+              const conf = statusConfig[status]
+              let badgeBg = conf.badge
+
+              if (status === 'checkin_hoy') {
+                badgeBg = 'bg-amber-50 text-amber-800 border-amber-200 shadow-sm'
+              } else if (status === 'checkout_hoy') {
+                badgeBg = 'bg-orange-50 text-orange-800 border-orange-200 shadow-sm'
+              } else if (status === 'limpieza') {
+                badgeBg = 'bg-rose-50 text-rose-800 border-rose-200 shadow-sm'
+              } else if (booking) {
+                badgeBg = getBookingPaymentColors(booking).badge
+              }
+
+              return (
+                <div
+                  key={accommodation.id}
+                  className="bg-white rounded-[2.5rem] shadow-sm border border-gray-100 overflow-hidden flex flex-col justify-between transition-all hover:shadow-md"
+                >
+                  {/* Cabin Image header */}
+                  <div className="relative h-44 w-full bg-gray-100 overflow-hidden flex-none">
+                    <img
+                      src={accommodation.image}
+                      alt={accommodation.title}
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
+                    
+                    {/* Status badge in corner */}
+                    <div className={`absolute top-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[9px] font-extrabold uppercase tracking-widest ${badgeBg}`}>
+                      {conf.icon}
+                      {conf.label}
+                    </div>
+
+                    <div className="absolute bottom-4 left-5">
+                      <span className="text-[9px] uppercase tracking-widest text-[#C5A059] font-extrabold block mb-0.5">
+                        {accommodation.type}
+                      </span>
+                      <h3 className="text-base font-black text-white leading-tight">
+                        {accommodation.title}
+                      </h3>
+                    </div>
                   </div>
 
-                  <div className="absolute bottom-4 left-5">
-                    <span className="text-[9px] uppercase tracking-widest text-[#C5A059] font-extrabold block mb-0.5">
-                      {accommodation.type}
-                    </span>
-                    <h3 className="text-xl font-bold font-serif text-white leading-tight">
-                      {accommodation.title} <span className="text-white/70 font-sans font-semibold text-sm">({accommodation.maxCapacity} pax)</span>
-                    </h3>
-                  </div>
-                </div>
-
-                {/* Status Detail Content */}
-                <div className="p-6 flex-1 flex flex-col justify-between gap-6">
-                  {booking ? (
-                    // Display current guest details
-                    <div
-                      className="space-y-4 cursor-pointer hover:opacity-90 transition-opacity"
-                      onClick={() => setSelectedBooking(booking)}
-                      title="Clic para ver detalles de la reserva"
-                    >
-                      <div className="flex items-center justify-between border-b border-gray-50 pb-3">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Huésped</p>
-                            {booking.locator && (
-                              <span className="font-mono text-[8px] font-extrabold text-[#C5A059] bg-[#C5A059]/10 px-2 py-0.5 rounded-md tracking-wider">
-                                {booking.locator}
+                  {/* Body Content */}
+                  <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
+                    {booking ? (
+                      <div className="space-y-3">
+                        {/* Guest info card */}
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Huésped Titular</span>
+                          <p className="text-sm font-black text-gray-800 flex items-center gap-1.5">
+                            <span>{cleanGuestSuggestionName(booking.guestName)}</span>
+                            {getBookingGroup(booking).length > 1 && (
+                              <span className="text-[10px] font-bold bg-[#C5A059]/10 text-[#C5A059] px-1.5 py-0.5 rounded-full">
+                                Grupo ({getBookingGroup(booking).length})
                               </span>
                             )}
+                          </p>
+                          {booking.locator && (
+                            <span className="inline-block text-[10px] font-mono font-bold text-[#8c6b2d] bg-[#C5A059]/10 px-2 py-0.5 rounded-md mt-0.5">
+                              {booking.locator}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Stay Dates */}
+                        <div className="bg-gray-50 rounded-2xl p-3 grid grid-cols-2 gap-2 text-xs">
+                          <div>
+                            <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block">Entrada</span>
+                            <span className="font-bold text-gray-700">{booking.checkIn}</span>
                           </div>
-                          <h4 className="text-base font-bold text-gray-800 leading-tight mt-0.5">{booking.guestName}</h4>
+                          <div>
+                            <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block">Salida</span>
+                            <span className="font-bold text-gray-700">{booking.checkOut}</span>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Huéspedes</p>
-                          <span className="text-xs font-semibold text-gray-600 block mt-0.5">
-                            {booking.guestsCount.adults} Ad. {booking.guestsCount.children > 0 && `+ ${booking.guestsCount.children} Niñ.`}
-                          </span>
+
+                        {/* Occupants badge */}
+                        <div className="flex items-center gap-2 text-xs text-gray-500 font-medium">
+                          <Users size={14} className="text-gray-400" />
+                          <span>{booking.guestsCount.adults} adultos, {booking.guestsCount.children} niños</span>
+                          {booking.guestsCount.pets > 0 && (
+                            <span className="text-[11px] font-bold text-emerald-700">🐾 {booking.guestsCount.pets}</span>
+                          )}
                         </div>
                       </div>
-
-                      <div className="grid grid-cols-2 gap-3 text-xs">
-                        <div>
-                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">Entrada</p>
-                          <span className="font-semibold text-gray-600">{parseLocalDate(booking.checkIn).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}</span>
+                    ) : (
+                      <div className="py-6 text-center space-y-2">
+                        <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center mx-auto">
+                          <Check size={20} />
                         </div>
-                        <div>
-                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">Salida</p>
-                          <span className="font-semibold text-gray-600">{parseLocalDate(booking.checkOut).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}</span>
-                        </div>
+                        <p className="text-xs font-bold text-gray-600">Totalmente libre para alojar hoy</p>
+                        <p className="text-[10px] text-gray-400">Capacidad para {accommodation.maxCapacity} personas</p>
                       </div>
+                    )}
 
-                      {booking.specialNotes && (
-                        <div className="bg-gray-50/80 border border-gray-100 rounded-xl p-3 text-[11px] text-gray-500 leading-relaxed italic">
-                          "{booking.specialNotes.slice(0, 75)}{booking.specialNotes.length > 75 ? '...' : ''}"
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    // Display Available info
-                    <div className="flex flex-col items-center justify-center py-6 text-center">
-                      <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center mb-3">
-                        <Check size={24} />
-                      </div>
-                      <h4 className="text-sm font-bold text-gray-800">Cabaña Disponible</h4>
-                      <p className="text-[11px] text-gray-400 max-w-xs mt-1">Listo para recibir huéspedes o asignar reservas de último minuto.</p>
-                    </div>
-                  )}
-
-                  {/* Actions Section */}
-                  <div className="border-t border-gray-50 pt-4 flex gap-2">
-                    {status === 'checkin_hoy' && booking && (
-                      <div className="flex gap-2 w-full">
-                        <button
-                          onClick={() => setSelectedBooking(booking)}
-                          className="flex-1 py-3 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
-                        >
-                          Ver Ficha
-                        </button>
+                    {/* Action Buttons */}
+                    <div className="pt-2 border-t border-gray-100 flex items-center gap-2">
+                      {status === 'checkin_hoy' && booking && (
                         <button
                           onClick={() => handleCheckIn(booking.id)}
-                          className="flex-1 flex items-center justify-center gap-1.5 py-3 bg-[#C5A059] hover:bg-[#b8904a] text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
+                          className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-2xl text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-amber-500/20 active:scale-95 cursor-pointer"
                         >
-                          <LogIn size={14} /> Registrar Entrada
+                          <LogIn size={14} /> Registrar Check-In
                         </button>
-                      </div>
-                    )}
+                      )}
 
-                    {status === 'checkout_hoy' && booking && (
-                      <div className="flex gap-2 w-full">
-                        <button
-                          onClick={() => setSelectedBooking(booking)}
-                          className="flex-1 py-3 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
-                        >
-                          Ver Ficha
-                        </button>
+                      {status === 'ocupado' && booking && (
                         <button
                           onClick={() => handleCheckOut(booking.id)}
-                          className="flex-1 flex items-center justify-center gap-1.5 py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
+                          className="flex-1 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-2xl text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-orange-500/20 active:scale-95 cursor-pointer"
                         >
-                          <LogOut size={14} /> Registrar Salida
+                          <LogOut size={14} /> Registrar Check-Out
                         </button>
-                      </div>
-                    )}
+                      )}
 
-                    {status === 'ocupado' && booking && (
-                      <button
-                        onClick={() => setSelectedBooking(booking)}
-                        className={`w-full py-3 font-bold rounded-xl text-xs uppercase tracking-wider transition-all border shadow-sm ${getBookingPaymentColors(booking).badge}`}
-                      >
-                        Ver Detalles
-                      </button>
-                    )}
+                      {status === 'limpieza' && (
+                        <button
+                          onClick={() => handleMarkClean(accommodation.id)}
+                          className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-2xl text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-emerald-600/20 active:scale-95 cursor-pointer"
+                        >
+                          <Sparkles size={14} /> Habitación Lista
+                        </button>
+                      )}
 
-                    {status === 'limpieza' && (
-                      <button
-                        onClick={() => handleMarkClean(accommodation.id)}
-                        className="w-full flex items-center justify-center gap-1.5 py-3 bg-white hover:bg-gray-50 text-rose-700 border border-rose-200 font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
-                      >
-                        <RefreshCw size={14} /> Marcar como Limpia
-                      </button>
-                    )}
+                      {status === 'disponible' && (
+                        <button
+                          onClick={() => {
+                            openAddModal()
+                            setSelectedAccommodationIds([accommodation.id])
+                            setForm(f => ({ ...f, accommodationId: accommodation.id }))
+                          }}
+                          className="flex-1 py-2.5 bg-gray-50 hover:bg-[#C5A059] text-gray-600 hover:text-white font-bold rounded-2xl text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <Plus size={14} /> Crear Reserva
+                        </button>
+                      )}
 
-                    {status === 'disponible' && (
-                      <button
-                        onClick={() => {
-                          openAddModal()
-                          setForm(f => ({ ...f, accommodationId: accommodation.id }))
-                        }}
-                        className="w-full py-3 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-bold rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-sm"
-                      >
-                        Hospedar Ahora
-                      </button>
-                    )}
+                      {booking && (
+                        <button
+                          onClick={() => setSelectedBooking(booking)}
+                          className="p-2.5 bg-gray-50 hover:bg-gray-100 text-gray-500 rounded-2xl transition-all cursor-pointer"
+                          title="Ver ficha completa"
+                        >
+                          <Info size={16} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
         </div>
       )}
 
-      {/* TAB B: SEMANA VIEW (Highly intuitive visual board / Gantt-like) */}
+      {/* 5. Tab 2: PLANNER SEMANAL / CUADRÍCULA DE RESERVAS */}
       {activeTab === 'semana' && (
-        <div className={plannerFullscreen
-          ? 'fixed inset-0 z-[120] bg-white flex flex-col'
-          : 'bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden'}>
-          {/* En pantalla completa la leyenda y el resto de controles sobran: lo que hace
-              falta en el teléfono es que el calendario ocupe todo el alto disponible. */}
-          <div className={`flex flex-wrap items-center justify-between gap-4 px-5 py-3 border-b border-gray-100 bg-gray-50/40 ${plannerFullscreen ? 'hidden' : ''}`}>
-            <div className="flex flex-wrap items-center gap-4">
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Estatus de reserva</span>
-              {(['reservado', 'sin_pago', 'parcial', 'pagado'] as const).map(state => (
-                <div key={state} className="flex items-center gap-1.5">
-                  <span className={`w-2.5 h-2.5 rounded-full ${getPaymentColorClasses({ confirmed: state !== 'reservado', paymentStatus: state === 'pagado' ? 'completo' : state === 'parcial' ? 'parcial' : 'pendiente' }).bullet}`} />
-                  <span className="text-[10px] font-semibold text-gray-500">{paymentStateLabels[state]}</span>
-                </div>
-              ))}
-            </div>
-            <div className="flex rounded-xl overflow-hidden border border-gray-200 text-[10px] font-bold uppercase tracking-wider">
+        <div className={`space-y-4 ${plannerFullscreen ? 'fixed inset-0 z-50 bg-[#FDFBF7] p-4 overflow-y-auto' : ''}`}>
+          {/* Controls bar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-3xl border border-gray-100 shadow-sm">
+            <div className="flex items-center gap-3">
+              {/* Botón Pantalla Completa (especialmente útil en móviles para ver la rejilla cómoda) */}
               <button
-                onClick={() => setWeekViewMode('semana')}
-                className={`px-3 py-1.5 transition-colors ${weekViewMode === 'semana' ? 'bg-[#3D2B1F] text-white' : 'text-gray-400 hover:bg-white'}`}
+                type="button"
+                onClick={() => setPlannerFullscreen(f => !f)}
+                className={`p-2 rounded-2xl border transition-all cursor-pointer flex items-center gap-1.5 text-xs font-bold ${
+                  plannerFullscreen
+                    ? 'bg-[#C5A059] text-white border-[#C5A059]'
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                }`}
+                title={plannerFullscreen ? 'Salir de pantalla completa' : 'Ver planner en pantalla completa'}
               >
-                Semana
+                {plannerFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                <span className="hidden sm:inline">{plannerFullscreen ? 'Reducir' : 'Pantalla completa'}</span>
               </button>
+
               <button
-                onClick={() => setWeekViewMode('personalizado')}
-                className={`px-3 py-1.5 transition-colors ${weekViewMode === 'personalizado' ? 'bg-[#3D2B1F] text-white' : 'text-gray-400 hover:bg-white'}`}
+                type="button"
+                onClick={() => {
+                  setWeekViewMode('semana')
+                  setWeekAnchor(new Date(todayDate))
+                }}
+                className={`px-4 py-2 border rounded-2xl text-xs font-bold transition-all cursor-pointer ${
+                  weekViewMode === 'semana'
+                    ? 'border-[#C5A059] text-[#C5A059] bg-[#C5A059]/10'
+                    : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
               >
-                Rango Personalizado
+                Hoy
               </button>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 px-3 sm:px-5 py-3 border-b border-gray-100 bg-gray-50/40 shrink-0">
-            {weekViewMode === 'semana' ? (
-              <div className="flex items-center gap-2">
+
+              <div className="flex items-center gap-1">
                 <button
-                  onClick={() => setWeekAnchor(d => { const n = new Date(d); n.setDate(n.getDate() - 7); return n })}
-                  className="p-2 rounded-lg border border-gray-200 hover:bg-white text-gray-500 active:scale-95"
+                  type="button"
+                  onClick={() => {
+                    setWeekViewMode('semana')
+                    setWeekAnchor(prev => {
+                      const d = new Date(prev)
+                      d.setDate(d.getDate() - 7)
+                      return d
+                    })
+                  }}
+                  className="w-8 h-8 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-600 flex items-center justify-center font-bold text-sm cursor-pointer"
+                  title="7 días atrás"
                 >
                   ←
                 </button>
-                <span className="text-xs font-bold text-gray-700 min-w-[120px] sm:min-w-[140px] text-center">{weekRangeLabel}</span>
                 <button
-                  onClick={() => setWeekAnchor(d => { const n = new Date(d); n.setDate(n.getDate() + 7); return n })}
-                  className="p-2 rounded-lg border border-gray-200 hover:bg-white text-gray-500 active:scale-95"
+                  type="button"
+                  onClick={() => {
+                    setWeekViewMode('semana')
+                    setWeekAnchor(prev => {
+                      const d = new Date(prev)
+                      d.setDate(d.getDate() + 7)
+                      return d
+                    })
+                  }}
+                  className="w-8 h-8 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-600 flex items-center justify-center font-bold text-sm cursor-pointer"
+                  title="7 días adelante"
                 >
                   →
                 </button>
+              </div>
+
+              <span className="text-sm font-black text-gray-800">
+                {weekRangeLabel}
+              </span>
+            </div>
+
+            {/* Selector de Rango Personalizado (estilo Paxer "Buscar por fecha") */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                Rango libre:
+              </span>
+              <input
+                type="date"
+                value={weekRangeFrom}
+                onChange={e => {
+                  setWeekRangeFrom(e.target.value)
+                  if (e.target.value && weekRangeTo) setWeekViewMode('personalizado')
+                }}
+                className="border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs outline-none focus:border-[#C5A059]"
+                title="Fecha inicial del planner"
+              />
+              <span className="text-gray-400 text-xs">→</span>
+              <input
+                type="date"
+                value={weekRangeTo}
+                onChange={e => {
+                  setWeekRangeTo(e.target.value)
+                  if (weekRangeFrom && e.target.value) setWeekViewMode('personalizado')
+                }}
+                className="border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs outline-none focus:border-[#C5A059]"
+                title="Fecha final del planner"
+              />
+              {weekViewMode === 'personalizado' && (
                 <button
-                  onClick={() => setWeekAnchor(new Date(todayDate))}
-                  className="px-3 py-2 rounded-lg border border-gray-200 hover:bg-white text-[10px] font-bold text-gray-500 uppercase tracking-wider active:scale-95"
+                  type="button"
+                  onClick={() => {
+                    setWeekViewMode('semana')
+                    setWeekRangeFrom('')
+                    setWeekRangeTo('')
+                  }}
+                  className="text-xs font-bold text-gray-400 hover:text-gray-600 underline cursor-pointer"
                 >
-                  Hoy
+                  Volver a semanas
                 </button>
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Desde</label>
-                <input
-                  type="date"
-                  value={weekRangeFrom}
-                  onChange={e => setWeekRangeFrom(e.target.value)}
-                  className="border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059]"
-                />
-                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Hasta</label>
-                <input
-                  type="date"
-                  value={weekRangeTo}
-                  onChange={e => setWeekRangeTo(e.target.value)}
-                  className="border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059]"
-                />
-                {weekRangeFrom && weekRangeTo && weekRangeFrom <= weekRangeTo && (
-                  <span className="text-xs font-bold text-gray-700">{weekRangeLabel}</span>
-                )}
-              </div>
-            )}
+              )}
+            </div>
 
-            {/* Pantalla completa: en el teléfono el calendario cabía en 465px de una
-                pantalla de 844px, así que se veían 8 habitaciones y el recuadro peleaba
-                con el scroll de la página. Así ocupa todo y se desliza en las 4 direcciones. */}
-            <button
-              onClick={() => setPlannerFullscreen(v => !v)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 bg-white text-[10px] font-bold uppercase tracking-wider text-gray-600 active:scale-95"
-            >
-              {plannerFullscreen
-                ? <><Minimize2 size={14} /> Salir</>
-                : <><Maximize2 size={14} /> Pantalla completa</>}
-            </button>
-          </div>
-          {/* Guía del modo de dos toques: sin esto no hay forma de saber que el planner
-              está esperando el segundo toque. Solo aparece cuando se usó el dedo. */}
-          {pendingCheckIn && (() => {
-            const acc = activeAccommodationOptions.find(o => o.id === pendingCheckIn.accId)
-            const d = parseLocalDate(pendingCheckIn.dateStr)
-            return (
-              <div className="flex items-center gap-3 px-5 py-3 bg-[#C5A059]/10 border-b border-[#C5A059]/20">
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#C5A059]">
-                    Entrada · {acc ? `Hab. ${acc.roomNumber ?? '—'}` : ''}
-                  </p>
-                  <p className="text-xs font-bold text-gray-700 leading-tight">
-                    {d.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}
-                    <span className="font-medium text-gray-500"> — ahora toca el día de salida</span>
-                  </p>
-                </div>
-                <button
-                  onClick={() => setPendingCheckIn(null)}
-                  className="shrink-0 px-3 py-2 rounded-xl border border-gray-200 bg-white text-[10px] font-bold uppercase tracking-wider text-gray-500 active:scale-95"
-                >
-                  Cancelar
-                </button>
-              </div>
-            )
-          })()}
-
-          {/* overscroll-contain: sin esto, al llegar al final de la rejilla el gesto se
-              lo lleva la página y parece que el calendario "se traba". */}
-          <div
-            className={plannerFullscreen ? 'overflow-auto flex-1 min-h-0' : 'overflow-auto max-h-[70dvh]'}
-            style={{ overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch' }}
-          >
-            <div className="min-w-fit divide-y divide-gray-100">
-              {/* Header row (Dates) — fijo arriba al hacer scroll para siempre ver a qué día corresponde cada columna */}
-              <div className="flex bg-gray-50 sticky top-0 z-20 border-b border-gray-100 shadow-sm">
-                {/* Cabin column header spacer */}
-                <div className="w-20 sm:w-24 shrink-0 sticky left-0 z-30 p-2 font-bold text-[9px] text-gray-400 uppercase tracking-widest flex items-center justify-center border-r border-gray-100 bg-gray-50">
-                  Cabaña
-                </div>
-                {/* Columnas de días (21 en la vista amplia, o las que tenga el rango personalizado) */}
-                <div className="flex-1 grid divide-x divide-gray-100" style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(${isMobile ? 44 : 40}px, 1fr))` }}>
-                  {weekDays.map(day => {
-                    const isToday = day.dateStr === todayStr
-                    return (
-                      <div
-                        key={day.dateStr}
-                        className={`py-1.5 text-center flex flex-col items-center justify-center ${isToday ? 'bg-amber-500/10 text-amber-800' : 'text-gray-500'}`}
-                      >
-                        <span className="text-[8px] font-bold uppercase tracking-wider opacity-60 leading-none">{day.label}</span>
-                        <span className="text-xs font-extrabold leading-none mt-0.5">{day.dayNum}</span>
-                        <span className="text-[7px] font-medium uppercase tracking-widest opacity-60 leading-none mt-0.5">{day.monthLabel}</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-
-              {/* Rows per Cabin */}
-              {activeAccommodationOptions.map(acc => {
-                const weekStartStr = weekDays[0].dateStr
-                const weekEndStr = weekDays[weekDays.length - 1].dateStr
-                // Reservas de este cuarto que tocan la semana visible, como una sola barra continua
-                const rowBookings = bookings.filter(b =>
-                  b.accommodationId === acc.id && b.checkIn <= weekEndStr && b.checkOut > weekStartStr
-                )
-
+            {/* Leyenda de colores calcada de Paxer */}
+            <div className="flex items-center gap-3 flex-wrap">
+              {(['reservado', 'sin_pago', 'parcial', 'pagado'] as EffectivePaymentState[]).map(state => {
+                const sampleColors = getPaymentColorClasses({ confirmed: state !== 'reservado', paymentStatus: state === 'pagado' ? 'completo' : state === 'parcial' ? 'parcial' : 'pendiente' })
                 return (
-                <div key={acc.id} className="flex hover:bg-gray-50/40 transition-colors">
-                  {/* Cabin Details Info — nombre de la galería arriba, número de habitación abajo */}
-                  <div className="w-20 sm:w-24 shrink-0 sticky left-0 z-10 bg-white p-2 border-r border-gray-100 flex flex-col justify-center gap-0.5">
-                    <span className="text-[8px] uppercase tracking-wider text-[#C5A059] font-bold leading-tight truncate">
-                      {acc.title.replace('Galería ', '').split(' — ')[0]}
-                    </span>
-                    <span className="text-[11px] font-extrabold text-gray-800 leading-none">
-                      Hab. {acc.roomNumber ?? '—'}
-                    </span>
-                    <span className="text-[10px] text-gray-400 font-semibold leading-none">
-                      {acc.maxCapacity} pax
-                    </span>
+                  <div key={state} className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600">
+                    <span className={`w-2.5 h-2.5 rounded-full ${sampleColors.bullet}`} />
+                    <span>{paymentStateLabels[state]}</span>
                   </div>
-
-                  {/* Columnas: fondo con zonas de drop + barras de reserva superpuestas */}
-                  <div className="flex-1 relative">
-                    <div className="grid divide-x divide-gray-100 h-12 sm:h-10" style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(${isMobile ? 44 : 40}px, 1fr))` }}>
-                      {weekDays.map(day => {
-                        // No incluye el estatus de la reserva: así ella siempre ve quién sale ese día,
-                        // aunque todavía no haya marcado la limpieza, y aunque otro huésped entre ese mismo día.
-                        const isOccupied = rowBookings.some(b => day.dateStr >= b.checkIn && day.dateStr < b.checkOut)
-                        const isDragTarget = dragOverCell === `${acc.id}|${day.dateStr}`
-                        const isRangeSelected = !!rangeSelect && rangeSelect.accId === acc.id &&
-                          day.dateStr >= (rangeSelect.startDateStr <= rangeSelect.endDateStr ? rangeSelect.startDateStr : rangeSelect.endDateStr) &&
-                          day.dateStr <= (rangeSelect.startDateStr <= rangeSelect.endDateStr ? rangeSelect.endDateStr : rangeSelect.startDateStr)
-                        // Modo dos toques: el día de entrada ya elegido, y los días posteriores
-                        // de esa misma cabaña que se pueden tocar como día de salida.
-                        const isPendingCheckIn = !!pendingCheckIn && pendingCheckIn.accId === acc.id &&
-                          pendingCheckIn.dateStr === day.dateStr
-                        const isPendingCheckOutCandidate = !!pendingCheckIn && pendingCheckIn.accId === acc.id &&
-                          day.dateStr > pendingCheckIn.dateStr
-
-                        return (
-                          <div
-                            key={day.dateStr}
-                            data-planner-cell={`${acc.id}|${day.dateStr}`}
-                            className={`p-0.5 h-12 sm:h-10 flex items-center justify-center relative transition-colors ${isDragTarget || isRangeSelected ? 'bg-[#C5A059]/10' : ''}`}
-                          >
-                            {!isOccupied && (
-                              <button
-                                onPointerDown={e => {
-                                  rangeStartPosRef.current = { x: e.clientX, y: e.clientY }
-                                  rangeDraggedRef.current = false
-                                  rangePointerTypeRef.current = e.pointerType
-                                  setRangeSelect({ accId: acc.id, startDateStr: day.dateStr, endDateStr: day.dateStr })
-                                }}
-                                // Sin touch-action: none, para que el dedo pueda deslizar
-                                // la rejilla de lado y ver los 21 días. En táctil la reserva
-                                // se crea con dos toques (entrada y salida), no arrastrando.
-                                title="Toca el día de entrada y luego el de salida, o arrastra sobre las noches"
-                                className={`w-full h-full rounded-lg border transition-all flex items-center justify-center group select-none
-                                  ${isPendingCheckIn
-                                    ? 'border-[#C5A059] border-solid bg-[#C5A059] text-white shadow-sm'
-                                    : isPendingCheckOutCandidate
-                                      ? 'border-[#C5A059]/50 bg-[#C5A059]/10 text-[#C5A059]'
-                                      : isRangeSelected
-                                        ? 'border-[#C5A059] bg-[#C5A059]/10 text-[#C5A059]'
-                                        : 'border-dashed border-gray-100 hover:border-[#C5A059]/40 hover:bg-[#C5A059]/5 text-gray-300 hover:text-[#C5A059]'}`}
-                              >
-                                {isPendingCheckIn
-                                  ? <span className="text-[8px] font-extrabold uppercase tracking-wider leading-none">Entra</span>
-                                  : <Plus size={11} className="group-hover:scale-110 transition-transform" />}
-                              </button>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-
-                    {/* Barras arrastrables: mueve el bloque o estira un borde para cambiar fechas */}
-                    {rowBookings.map(b => {
-                      const occupiedIdx = weekDays.reduce<number[]>((acc2, day, i) => {
-                        if (day.dateStr >= b.checkIn && day.dateStr < b.checkOut) acc2.push(i)
-                        return acc2
-                      }, [])
-                      if (occupiedIdx.length === 0) return null
-                      const startIdx = occupiedIdx[0]
-                      const endIdx = occupiedIdx[occupiedIdx.length - 1]
-                      // Como en un hotel real: el check-in es de tarde y el check-out de mañana. Si el
-                      // día de llegada o de salida está dentro de la semana visible, la barra empieza o
-                      // termina a la MITAD de esa columna (no en el borde completo), para que dos
-                      // reservas de la misma habitación el mismo día (una sale, otra entra) se vean
-                      // como dos mitades que se juntan, en vez de un cuadrito de aviso aparte.
-                      const checkInVisible = b.checkIn >= weekDays[0].dateStr
-                      const checkOutVisible = b.checkOut <= weekDays[weekDays.length - 1].dateStr
-                      const leftEdgeIdx = checkInVisible ? startIdx + 0.5 : startIdx
-                      const rightEdgeIdx = checkOutVisible ? endIdx + 1.5 : endIdx + 1
-                      const leftPct = (leftEdgeIdx / weekDays.length) * 100
-                      const widthPct = ((rightEdgeIdx - leftEdgeIdx) / weekDays.length) * 100
-                      const colors = getBookingPaymentColors(b)
-                      const isBeingDragged = dragInfo?.bookingId === b.id
-
-                      return (
-                        <div
-                          key={b.id}
-                          style={{ left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)` }}
-                          className={`absolute top-1 bottom-1 rounded-lg border flex items-stretch overflow-hidden ${colors.bg} ${isBeingDragged ? 'opacity-40' : ''}`}
-                        >
-                          {/* Borde izquierdo: arrastrar para cambiar solo el check-in.
-                              Más ancho en táctil: 6px no se puede agarrar con el dedo. */}
-                          <div
-                            onPointerDown={e => { e.preventDefault(); dragStartPosRef.current = { x: e.clientX, y: e.clientY }; setDragInfo({ bookingId: b.id, mode: 'resize-left' }) }}
-                            title="Arrastra para cambiar el check-in"
-                            style={{ touchAction: 'none' }}
-                            className="w-3 sm:w-1.5 shrink-0 cursor-ew-resize hover:bg-black/10 active:bg-black/15 transition-colors select-none"
-                          />
-
-                          {/* Cuerpo: arrastrar para mover toda la reserva, toque simple para ver detalle */}
-                          <button
-                            onPointerDown={e => { dragStartPosRef.current = { x: e.clientX, y: e.clientY }; setDragInfo({ bookingId: b.id, mode: 'move' }) }}
-                            onClick={() => setSelectedBooking(b)}
-                            title="Arrastra para mover la reserva"
-                            style={{ touchAction: 'none' }}
-                            className="flex-1 min-w-0 px-1.5 text-left flex items-center gap-1 cursor-grab active:cursor-grabbing hover:brightness-95 transition-all select-none"
-                          >
-                            <span className={`w-1.5 h-1.5 rounded-full ${colors.bullet} shrink-0`} />
-                            <span className="text-[9px] font-extrabold truncate max-w-full block leading-none">
-                              {b.guestName.split(' ')[0]}
-                            </span>
-                            <span className="text-[10px] font-bold opacity-60 shrink-0 leading-none">
-                              · {b.guestsCount.adults + b.guestsCount.children}p
-                            </span>
-                          </button>
-
-                          {/* Borde derecho: arrastrar para cambiar solo el check-out */}
-                          <div
-                            onPointerDown={e => { e.preventDefault(); dragStartPosRef.current = { x: e.clientX, y: e.clientY }; setDragInfo({ bookingId: b.id, mode: 'resize-right' }) }}
-                            title="Arrastra para cambiar el check-out"
-                            style={{ touchAction: 'none' }}
-                            className="w-3 sm:w-1.5 shrink-0 cursor-ew-resize hover:bg-black/10 active:bg-black/15 transition-colors select-none"
-                          />
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
                 )
               })}
             </div>
           </div>
+
+          {/* Banner de ayuda: arrastrar vs dos toques con el dedo */}
+          <div className="rounded-2xl border border-gray-200/80 bg-white/70 px-4 py-2 text-[11px] text-gray-500 flex items-center justify-between flex-wrap gap-2">
+            <span>
+              💡 En computadora: <strong className="font-semibold text-gray-700">arrastra</strong> en un día libre para marcar la estadía.
+              En teléfono: <strong className="font-semibold text-gray-700">toca el día de entrada y luego el de salida</strong> para abrir Nueva Reserva.
+            </span>
+            {pendingCheckIn && (
+              <span className="font-bold text-[#8c6b2d] bg-[#C5A059]/20 px-2 py-0.5 rounded-full">
+                Entrada marcada: {pendingCheckIn.dateStr} (toca el día de salida)
+              </span>
+            )}
+          </div>
+
+          {/* Grid Container */}
+          <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-x-auto select-none touch-pan-x">
+            <table className="w-full min-w-[1200px] border-collapse">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50/60">
+                  <th className="p-3.5 text-left text-xs font-bold text-gray-400 uppercase tracking-widest sticky left-0 bg-gray-50 z-10 w-56 border-r border-gray-100">
+                    Habitación
+                  </th>
+                  {weekDays.map(d => {
+                    const isToday = d.dateStr === todayStr
+                    return (
+                      <th
+                        key={d.dateStr}
+                        className={`p-2.5 text-center text-xs font-bold border-r border-gray-100 min-w-[70px] ${
+                          isToday ? 'bg-amber-50/80 text-amber-900' : 'text-gray-500'
+                        }`}
+                      >
+                        <span className="block text-[10px] uppercase tracking-wider text-gray-400">
+                          {d.label}
+                        </span>
+                        <span className={`text-sm ${isToday ? 'font-black text-amber-700' : 'font-bold'}`}>
+                          {d.dayNum}
+                        </span>
+                        <span className="block text-[9px] text-gray-400">
+                          {d.monthLabel}
+                        </span>
+                      </th>
+                    )
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {activeAccommodationOptions.map(acc => {
+                  const accId = acc.id
+                  const dbPrice = dbAccommodations.find(o => Number(o.id) === accId)?.price
+                  return (
+                    <tr key={accId} className="border-b border-gray-100 hover:bg-gray-50/30 transition-colors">
+                      {/* Accommodation info sticky cell */}
+                      <td className="p-3 sticky left-0 bg-white z-10 border-r border-gray-100 shadow-xs">
+                        <div className="flex items-center gap-2.5">
+                          <img
+                            src={acc.image}
+                            alt={acc.title}
+                            className="w-10 h-10 rounded-xl object-cover"
+                          />
+                          <div className="truncate">
+                            <span className="text-[10px] uppercase tracking-wider text-[#C5A059] font-bold block">
+                              {acc.type}
+                            </span>
+                            <span className="text-xs font-black text-gray-800 truncate block">
+                              {acc.title}
+                            </span>
+                            <span className="text-[10px] text-gray-400">
+                              ${Number(dbPrice ?? acc.price)}/noche · Máx. {acc.maxCapacity} pax
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Day cells */}
+                      {weekDays.map(d => {
+                        const dateStr = d.dateStr
+                        const cellKey = `${accId}|${dateStr}`
+                        const isDragOver = dragOverCell === cellKey
+
+                        // Find booking that covers this night (checkIn <= dateStr < checkOut)
+                        const booking = bookings.find(b =>
+                          b.accommodationId === accId &&
+                          dateStr >= b.checkIn &&
+                          dateStr < b.checkOut
+                        )
+
+                        const isFirstDay = booking && booking.checkIn === dateStr
+                        const isToday = dateStr === todayStr
+
+                        // Detección de selección arrastrando
+                        const isSelectedRange = rangeSelect &&
+                          rangeSelect.accId === accId &&
+                          ((dateStr >= rangeSelect.startDateStr && dateStr <= rangeSelect.endDateStr) ||
+                           (dateStr >= rangeSelect.endDateStr && dateStr <= rangeSelect.startDateStr))
+
+                        const isPendingStart = pendingCheckIn &&
+                          pendingCheckIn.accId === accId &&
+                          pendingCheckIn.dateStr === dateStr
+
+                        return (
+                          <td
+                            key={dateStr}
+                            data-planner-cell={cellKey}
+                            className={`p-1 border-r border-gray-100 relative h-16 transition-colors ${
+                              isDragOver
+                                ? 'bg-amber-100/70 ring-2 ring-[#C5A059] ring-inset'
+                                : isSelectedRange || isPendingStart
+                                  ? 'bg-[#C5A059]/20'
+                                  : isToday
+                                    ? 'bg-amber-50/30'
+                                    : ''
+                            }`}
+                            onPointerDown={e => {
+                              // Solo si la celda está vacía
+                              if (booking) return
+                              rangeStartPosRef.current = { x: e.clientX, y: e.clientY }
+                              rangeDraggedRef.current = false
+                              rangePointerTypeRef.current = e.pointerType || 'mouse'
+                              setRangeSelect({
+                                accId,
+                                startDateStr: dateStr,
+                                endDateStr: dateStr
+                              })
+                            }}
+                          >
+                            {booking ? (
+                              <div
+                                onPointerDown={e => {
+                                  // Inicia arrastre para mover toda la reserva.
+                                  dragStartPosRef.current = { x: e.clientX, y: e.clientY }
+                                  hasDraggedRef.current = false
+                                  dragOverCellRef.current = cellKey
+                                  setDragInfo({ bookingId: booking.id, mode: 'move' })
+                                }}
+                                onClick={e => {
+                                  // Si el usuario arrastró no queremos abrir la ficha al soltar
+                                  if (hasDraggedRef.current) {
+                                    e.stopPropagation()
+                                    return
+                                  }
+                                  setSelectedBooking(booking)
+                                }}
+                                className={`w-full h-full rounded-xl border p-1.5 flex flex-col justify-between text-left transition-all hover:scale-[1.02] cursor-grab active:cursor-grabbing ${
+                                  getBookingPaymentColors(booking).bg
+                                }`}
+                              >
+                                {isFirstDay ? (
+                                  <>
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span className="text-[10px] font-black truncate text-gray-800">
+                                        {cleanGuestSuggestionName(booking.guestName)}
+                                      </span>
+                                      <span className={`w-2 h-2 rounded-full shrink-0 ${getBookingPaymentColors(booking).bullet}`} />
+                                    </div>
+                                    <div className="flex items-center justify-between text-[9px] text-gray-500">
+                                      <span>{calculateNights(booking.checkIn, booking.checkOut)}n</span>
+                                      <span className="font-bold">{fmt(booking.totalAmount)}</span>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div className="flex items-center justify-center h-full">
+                                    <span className="text-[9px] font-bold text-gray-400">···</span>
+                                  </div>
+                                )}
+                              </div>
+                            ) : null}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
-      {/* TAB C: MES VIEW (Month Analytics & Detailed Lists) */}
+      {/* 6. Tab 3: LISTA MENSUAL DE RESERVAS */}
       {activeTab === 'mes' && (
-        <div className="space-y-6">
-          {/* Period navigation */}
-          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-            {mesMode === 'mes' ? (
-              <div className="flex items-center gap-3">
+        <div className="space-y-4">
+          {/* Controls Bar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-3xl border border-gray-100 shadow-sm">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setMesMode('mes')
+                  setMonthAnchor(new Date(todayDate.getFullYear(), todayDate.getMonth(), 1))
+                  setMonthPage(1)
+                }}
+                className={`px-4 py-2 border rounded-2xl text-xs font-bold transition-all cursor-pointer ${
+                  mesMode === 'mes'
+                    ? 'border-[#C5A059] text-[#C5A059] bg-[#C5A059]/10'
+                    : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                Mes Actual
+              </button>
+
+              <div className="flex items-center gap-1">
                 <button
-                  onClick={() => { setMonthAnchor(d => new Date(d.getFullYear(), d.getMonth() - 1, 1)); setMonthPage(1) }}
-                  className="p-2 rounded-xl border border-gray-200 hover:bg-gray-50 text-gray-500"
+                  type="button"
+                  onClick={() => {
+                    setMesMode('mes')
+                    setMonthAnchor(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))
+                    setMonthPage(1)
+                  }}
+                  className="w-8 h-8 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-600 flex items-center justify-center font-bold text-sm cursor-pointer"
+                  title="Mes anterior"
                 >
                   ←
                 </button>
-                <span className="text-sm font-bold text-gray-800 min-w-[160px] text-center">{monthAnchorLabel}</span>
                 <button
-                  onClick={() => { setMonthAnchor(d => new Date(d.getFullYear(), d.getMonth() + 1, 1)); setMonthPage(1) }}
-                  className="p-2 rounded-xl border border-gray-200 hover:bg-gray-50 text-gray-500"
+                  type="button"
+                  onClick={() => {
+                    setMesMode('mes')
+                    setMonthAnchor(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))
+                    setMonthPage(1)
+                  }}
+                  className="w-8 h-8 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-600 flex items-center justify-center font-bold text-sm cursor-pointer"
+                  title="Mes siguiente"
                 >
                   →
                 </button>
+              </div>
+
+              <span className="text-sm font-black text-gray-800">
+                {mesMode === 'personalizado' ? `Del ${customFrom || '—'} al ${customTo || '—'}` : monthAnchorLabel}
+              </span>
+            </div>
+
+            {/* Selector de Rango Personalizado */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                Rango libre:
+              </span>
+              <input
+                type="date"
+                value={customFrom}
+                onChange={e => {
+                  setCustomFrom(e.target.value)
+                  if (e.target.value && customTo) {
+                    setMesMode('personalizado')
+                    setMonthPage(1)
+                  }
+                }}
+                className="border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs outline-none focus:border-[#C5A059]"
+                title="Fecha inicial"
+              />
+              <span className="text-gray-400 text-xs">→</span>
+              <input
+                type="date"
+                value={customTo}
+                onChange={e => {
+                  setCustomTo(e.target.value)
+                  if (customFrom && e.target.value) {
+                    setMesMode('personalizado')
+                    setMonthPage(1)
+                  }
+                }}
+                className="border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs outline-none focus:border-[#C5A059]"
+                title="Fecha final"
+              />
+              {mesMode === 'personalizado' && (
                 <button
-                  onClick={() => { setMonthAnchor(new Date(todayDate.getFullYear(), todayDate.getMonth(), 1)); setMonthPage(1) }}
-                  className="px-3 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wider"
+                  type="button"
+                  onClick={() => {
+                    setMesMode('mes')
+                    setCustomFrom('')
+                    setCustomTo('')
+                    setMonthPage(1)
+                  }}
+                  className="text-xs font-bold text-gray-400 hover:text-gray-600 underline cursor-pointer"
                 >
-                  Hoy
+                  Volver a meses
                 </button>
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Desde</label>
-                <input
-                  type="date"
-                  value={customFrom}
-                  onChange={e => { setCustomFrom(e.target.value); setMonthPage(1) }}
-                  className="border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059]"
-                />
-                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Hasta</label>
-                <input
-                  type="date"
-                  value={customTo}
-                  onChange={e => { setCustomTo(e.target.value); setMonthPage(1) }}
-                  className="border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059]"
-                />
-              </div>
-            )}
-            <div className="flex rounded-xl overflow-hidden border border-gray-200 text-xs font-bold uppercase tracking-wider">
-              <button
-                onClick={() => { setMesMode('mes'); setMonthPage(1) }}
-                className={`px-4 py-2 transition-colors ${mesMode === 'mes' ? 'bg-[#3D2B1F] text-white' : 'text-gray-400 hover:bg-gray-50'}`}
-              >
-                Por Mes
-              </button>
-              <button
-                onClick={() => { setMesMode('personalizado'); setMonthPage(1) }}
-                className={`px-4 py-2 transition-colors ${mesMode === 'personalizado' ? 'bg-[#3D2B1F] text-white' : 'text-gray-400 hover:bg-gray-50'}`}
-              >
-                Rango Personalizado
-              </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-4 text-xs">
+              <span className="font-bold text-gray-500">
+                {monthListBookings.length} {monthListBookings.length === 1 ? 'reserva' : 'reservas'}
+              </span>
+              <span className="font-extrabold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">
+                Total: {fmt(totalMonthlyRevenue)}
+              </span>
             </div>
           </div>
 
-          {/* Monthly KPI card summaries */}
-          <div className="bg-white rounded-[2.5rem] p-6 shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div className="text-center md:text-left">
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Periodo</span>
-              <h3 className="text-2xl font-bold font-serif text-gray-800 mt-1">
-                {mesMode === 'personalizado' ? (customFrom && customTo ? `${customFrom} → ${customTo}` : 'Selecciona un rango') : monthAnchorLabel}
-              </h3>
-              <p className="text-xs text-gray-400 mt-0.5">Estadísticas estimadas</p>
-            </div>
-
-            <div className="flex flex-col justify-center border-t md:border-t-0 md:border-l border-gray-100 pt-4 md:pt-0 md:pl-6">
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Reservas del Periodo</span>
-              <p className="text-2xl font-bold text-[#C5A059] mt-1">{monthListBookings.length} Reservas</p>
-              <p className="text-xs text-gray-400 mt-0.5">Ocupación total programada</p>
-            </div>
-
-            <div className="flex flex-col justify-center border-t md:border-t-0 md:border-l border-gray-100 pt-4 md:pt-0 md:pl-6">
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Ingresos del Mes</span>
-              <p className="text-2xl font-bold text-emerald-600 mt-1">{fmt(totalMonthlyRevenue)}</p>
-              <p className="text-xs text-gray-400 mt-0.5">Pagos totales estimados</p>
-            </div>
-
-            <div className="flex flex-col justify-center border-t md:border-t-0 md:border-l border-gray-100 pt-4 md:pt-0 md:pl-6">
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Cabaña Estrella</span>
-              <p className="text-2xl font-bold text-indigo-700 mt-1">Mitibibó 🪵</p>
-              <p className="text-xs text-gray-400 mt-0.5">Mayor tasa de ocupación</p>
-            </div>
-          </div>
-
-          {/* Bookings table list */}
-          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-gray-700 uppercase tracking-widest">Lista Detallada de Reservas</h3>
-              <span className="text-xs text-gray-400 font-medium">Mostrando {Math.min(monthPage * PAGE_SIZE, monthListBookings.length)} de {monthListBookings.length} reservas</span>
-            </div>
-
+          {/* Bookings Table */}
+          <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50/50">
-                    <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-6 py-4">Huésped</th>
-                    <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4">Cabaña</th>
-                    <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4">Fecha Estadía</th>
-                    <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4">Huéspedes</th>
-                    <th className="text-left text-xs font-bold text-gray-400 uppercase tracking-widest px-4 py-4">Estado</th>
-                    <th className="text-right text-xs font-bold text-gray-400 uppercase tracking-widest px-6 py-4">Total</th>
+                  <tr className="border-b border-gray-100 bg-gray-50/60 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                    <th className="p-4">Localizador</th>
+                    <th className="p-4">Huésped Titular</th>
+                    <th className="p-4">Habitación</th>
+                    <th className="p-4">Entrada / Salida</th>
+                    <th className="p-4">Ocupantes</th>
+                    <th className="p-4">Total</th>
+                    <th className="p-4">Estado Pago</th>
+                    <th className="p-4 text-right">Acción</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {monthListBookings.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="text-center py-16">
-                        <Calendar size={32} className="text-gray-200 mx-auto mb-3" />
-                        <p className="text-sm text-gray-400 font-medium">
-                          {mesMode === 'personalizado' && (!customFrom || !customTo)
-                            ? 'Selecciona una fecha de inicio y fin.'
-                            : 'No se encontraron reservas en este periodo.'}
-                        </p>
-                      </td>
-                    </tr>
-                  ) : (
-                    monthListBookings.slice((monthPage - 1) * PAGE_SIZE, monthPage * PAGE_SIZE).map(b => {
+                <tbody className="divide-y divide-gray-100 text-xs">
+                  {monthListBookings
+                    .slice((monthPage - 1) * PAGE_SIZE, monthPage * PAGE_SIZE)
+                    .map(b => {
                       const acc = getAccommodation(b.accommodationId)
-                      const conf = statusConfig[b.status]
+                      const isGroup = getBookingGroup(b).length > 1
                       return (
                         <tr
                           key={b.id}
                           onClick={() => setSelectedBooking(b)}
-                          className="hover:bg-gray-50/50 cursor-pointer transition-colors"
+                          className="hover:bg-gray-50/50 transition-colors cursor-pointer"
                         >
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-2">
-                              <p className="text-sm font-bold text-gray-800">{b.guestName}</p>
-                              {b.locator && (
-                                <span className="font-mono text-[8px] font-extrabold text-[#C5A059] bg-[#C5A059]/10 px-2 py-0.5 rounded-md tracking-wider">
-                                  {b.locator}
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-xs text-gray-400 mt-0.5">{b.guestPhone}</p>
+                          <td className="p-4 font-mono font-bold text-gray-700">
+                            {b.locator ? (
+                              <span className="bg-[#C5A059]/10 text-[#8c6b2d] px-2 py-0.5 rounded-md">
+                                {b.locator}
+                              </span>
+                            ) : (
+                              <span className="text-gray-300">—</span>
+                            )}
                           </td>
-                          <td className="px-4 py-4">
-                            <p className="text-sm font-semibold text-gray-700">{acc?.title}</p>
-                            <span className="text-[9px] uppercase tracking-widest text-[#C5A059] font-bold block mt-0.5">{acc?.type}</span>
-                          </td>
-                          <td className="px-4 py-4 text-xs font-medium text-gray-600">
-                            {parseLocalDate(b.checkIn).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
-                            {' al '}
-                            {parseLocalDate(b.checkOut).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })}
-                          </td>
-                          <td className="px-4 py-4">
-                            <span className="text-xs font-medium text-gray-600 flex items-center gap-1">
-                              <Users size={14} className="text-gray-400" />
-                              {b.guestsCount.adults} Ad. {b.guestsCount.children > 0 && `+ ${b.guestsCount.children} Niñ.`}
+                          <td className="p-4">
+                            <span className="font-extrabold text-gray-800 block">
+                              {cleanGuestSuggestionName(b.guestName)}
                             </span>
-                            {b.guestsCount.pets > 0 && (
-                              <span className="text-[9px] uppercase tracking-widest bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-0.5 rounded-full font-bold inline-block mt-1">
-                                🐾 {b.guestsCount.pets} {b.guestsCount.pets === 1 ? 'Mascota' : 'Mascotas'}
+                            {isGroup && (
+                              <span className="text-[10px] font-bold text-[#C5A059]">
+                                Grupo ({getBookingGroup(b).length} hab)
                               </span>
                             )}
                           </td>
-                          <td className="px-4 py-4">
-                            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-[9px] font-extrabold uppercase tracking-widest ${conf.bg}`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${conf.bullet}`} />
-                              {conf.label}
+                          <td className="p-4 font-medium text-gray-600">
+                            {acc?.title || `Habitación ${b.accommodationId}`}
+                          </td>
+                          <td className="p-4">
+                            <span className="font-bold text-gray-700 block">{b.checkIn}</span>
+                            <span className="text-[10px] text-gray-400">al {b.checkOut} ({calculateNights(b.checkIn, b.checkOut)}n)</span>
+                          </td>
+                          <td className="p-4 text-gray-600">
+                            {b.guestsCount.adults} ad, {b.guestsCount.children} niñ
+                            {b.guestsCount.pets > 0 && <span className="ml-1 text-emerald-700 font-bold">🐾 {b.guestsCount.pets}</span>}
+                          </td>
+                          <td className="p-4 font-black text-gray-800">
+                            {fmt(b.totalAmount)}
+                          </td>
+                          <td className="p-4">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${
+                              getBookingPaymentColors(b).badge
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${getBookingPaymentColors(b).bullet}`} />
+                              {paymentStateLabels[getBookingPaymentState(b)]}
                             </span>
                           </td>
-                          <td className="px-6 py-4 text-right">
-                            <span className="text-sm font-bold text-gray-900">{fmt(b.totalAmount)}</span>
-                            <span className={`block text-[9px] font-bold mt-0.5 ${getBookingPaymentColors(b).text}`}>
-                              {paymentStateLabels[getBookingPaymentState(b)].toUpperCase()}
-                            </span>
+                          <td className="p-4 text-right">
+                            <button
+                              onClick={e => {
+                                e.stopPropagation()
+                                setSelectedBooking(b)
+                              }}
+                              className="px-3 py-1.5 bg-gray-50 hover:bg-gray-100 text-gray-600 rounded-xl font-bold text-xs transition-colors"
+                            >
+                              Ver ficha
+                            </button>
                           </td>
                         </tr>
                       )
-                    })
-                  )}
+                    })}
                 </tbody>
               </table>
             </div>
 
             {/* Pagination Controls */}
             {monthListBookings.length > PAGE_SIZE && (
-              <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between">
-                <button
-                  onClick={() => setMonthPage(p => Math.max(1, p - 1))}
-                  disabled={monthPage === 1}
-                  className="px-4 py-2 border border-gray-200 rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95"
-                >
-                  ← Anterior
-                </button>
-                <span className="text-xs font-semibold text-gray-500">
-                  Página {monthPage} de {Math.ceil(monthListBookings.length / PAGE_SIZE)}
+              <div className="flex items-center justify-between p-4 border-t border-gray-100 bg-gray-50/30 text-xs">
+                <span className="text-gray-400 font-medium">
+                  Mostrando {((monthPage - 1) * PAGE_SIZE) + 1} - {Math.min(monthPage * PAGE_SIZE, monthListBookings.length)} de {monthListBookings.length} reservas
                 </span>
-                <button
-                  onClick={() => setMonthPage(p => Math.min(Math.ceil(monthListBookings.length / PAGE_SIZE), p + 1))}
-                  disabled={monthPage >= Math.ceil(monthListBookings.length / PAGE_SIZE)}
-                  className="px-4 py-2 border border-gray-200 rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95"
-                >
-                  Siguiente →
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    disabled={monthPage === 1}
+                    onClick={() => setMonthPage(p => Math.max(1, p - 1))}
+                    className="px-3 py-1 rounded-xl border border-gray-200 text-gray-600 font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                  >
+                    Anterior
+                  </button>
+                  <span className="px-3 py-1 text-gray-700 font-bold">
+                    Página {monthPage} de {Math.ceil(monthListBookings.length / PAGE_SIZE)}
+                  </span>
+                  <button
+                    disabled={monthPage >= Math.ceil(monthListBookings.length / PAGE_SIZE)}
+                    onClick={() => setMonthPage(p => p + 1)}
+                    className="px-3 py-1 rounded-xl border border-gray-200 text-gray-600 font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                  >
+                    Siguiente
+                  </button>
+                </div>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* 5. SIDE DRAWER MODAL: Detailed Booking Information Card */}
+      {/* 7. MODAL DETALLE DE RESERVA (Guest Card + Financial History) */}
       {selectedBooking && (
-        <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-end p-0 bg-black/40 backdrop-blur-sm">
-          {/* Overlay click to close */}
-          <div className="absolute inset-0" onClick={() => { setSelectedBooking(null); setEditingGuest(false); setEditingRoomId(null); setAddingRoomsToBooking(false); setAdditionalAccommodationIds([]); setEditingDates(false); setEditingFinancials(false); setEditingNotes(false); setAddingPayment(false) }} />
-          
-          {/* En teléfonos, el detalle ocupa todo el viewport. El antiguo 90dvh dejaba
-              visible una franja gris del overlay en la parte superior. Los insets
-              mantienen el encabezado y las acciones fuera del notch y del indicador
-              de inicio cuando el panel se abre desde la app instalada en iPhone. */}
-          <div className="relative w-full max-w-none sm:max-w-md h-[100dvh] sm:h-screen bg-white rounded-none sm:rounded-l-3xl sm:rounded-tr-none shadow-2xl px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(1.25rem,env(safe-area-inset-top))] sm:p-6 flex flex-col justify-between overflow-y-auto overscroll-contain animate-in slide-in-from-bottom sm:slide-in-from-right duration-300">
-            <div>
-              <div className="flex items-center justify-between pb-4 border-b border-gray-100">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[9px] uppercase tracking-widest text-[#C5A059] font-extrabold block">Ficha de Reserva</span>
-                    {selectedBooking.locator && (
-                      <span className="font-mono text-[9px] font-extrabold text-[#C5A059] bg-[#C5A059]/10 px-2 py-0.5 rounded-md tracking-wider">
-                        {selectedBooking.locator}
-                      </span>
-                    )}
-                  </div>
-                  <h2 className="text-xl font-bold font-serif text-gray-800 mt-1">Detalle del Huésped</h2>
-                  <span className={`inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full border text-[9px] font-extrabold uppercase tracking-widest ${getBookingPaymentColors(selectedBooking).badge}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${getBookingPaymentColors(selectedBooking).bullet}`} />
-                    {paymentStateLabels[getBookingPaymentState(selectedBooking)]}
-                  </span>
-                </div>
-                <button
-                  onClick={() => { setSelectedBooking(null); setEditingGuest(false); setEditingRoomId(null); setAddingRoomsToBooking(false); setAdditionalAccommodationIds([]); setEditingDates(false); setEditingFinancials(false); setEditingNotes(false); setAddingPayment(false) }}
-                  className="p-2 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600"
-                >
-                  <X size={20} />
-                </button>
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl border border-gray-100 max-w-2xl w-full p-6 space-y-6 animate-scale-in my-8 max-h-[90vh] overflow-y-auto custom-scrollbar">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between pb-4 border-b border-gray-100">
+              <div>
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">
+                  Ficha de Reserva {selectedBooking.locator && `· ${selectedBooking.locator}`}
+                </span>
+                <h2 className="text-xl font-black text-gray-800">
+                  {cleanGuestSuggestionName(selectedBooking.guestName)}
+                </h2>
+              </div>
+              <button
+                onClick={() => setSelectedBooking(null)}
+                className="p-2 rounded-2xl bg-gray-50 hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Quick Status Bar */}
+            <div className="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-2xl flex-wrap">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-gray-500">Estado de Pago:</span>
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider border ${
+                  getBookingPaymentColors(selectedBooking).badge
+                }`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${getBookingPaymentColors(selectedBooking).bullet}`} />
+                  {paymentStateLabels[getBookingPaymentState(selectedBooking)]}
+                </span>
               </div>
 
-              {/* Guest profile card layout */}
-              <div className="py-6 space-y-6">
-                {/* 1. Guest profile banner */}
-                <div className="bg-gray-50/50 p-4 rounded-3xl border border-gray-100">
-                  {editingGuest ? (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Editar datos del huésped</span>
-                        {selectedBooking.locator && bookings.filter(b => b.locator === selectedBooking.locator).length > 1 && (
-                          <span className="text-[9px] font-bold text-sky-600">Se actualiza todo el grupo</span>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="text-[9px] font-bold text-gray-400 uppercase block mb-1">Nombre</label>
-                          <input
-                            value={editGuestForm.firstName}
-                            onChange={e => setEditGuestForm(f => ({ ...f, firstName: e.target.value }))}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white outline-none focus:border-[#C5A059]"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[9px] font-bold text-gray-400 uppercase block mb-1">Apellido</label>
-                          <input
-                            value={editGuestForm.lastName}
-                            onChange={e => setEditGuestForm(f => ({ ...f, lastName: e.target.value }))}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white outline-none focus:border-[#C5A059]"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[9px] font-bold text-gray-400 uppercase block mb-1">Cédula</label>
-                          <input
-                            value={editGuestForm.ci}
-                            onChange={e => setEditGuestForm(f => ({ ...f, ci: e.target.value }))}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white outline-none focus:border-[#C5A059]"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[9px] font-bold text-gray-400 uppercase block mb-1">Teléfono</label>
-                          <input
-                            value={editGuestForm.phone}
-                            onChange={e => setEditGuestForm(f => ({ ...f, phone: e.target.value }))}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white outline-none focus:border-[#C5A059]"
-                          />
-                        </div>
-                        <div className="col-span-2">
-                          <label className="text-[9px] font-bold text-gray-400 uppercase block mb-1">Correo electrónico</label>
-                          <input
-                            type="email"
-                            value={editGuestForm.email}
-                            onChange={e => setEditGuestForm(f => ({ ...f, email: e.target.value }))}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white outline-none focus:border-[#C5A059]"
-                          />
-                        </div>
-                        <div className="col-span-2">
-                          <label className="text-[9px] font-bold text-gray-400 uppercase block mb-1">Acompañantes</label>
-                          <textarea
-                            rows={2}
-                            value={editGuestForm.companions}
-                            onChange={e => setEditGuestForm(f => ({ ...f, companions: e.target.value }))}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white outline-none focus:border-[#C5A059] resize-none"
-                          />
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={handleSaveGuestDetails}
-                          disabled={savingGuest || !editGuestForm.firstName.trim() || !editGuestForm.lastName.trim()}
-                          className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider hover:underline disabled:opacity-40"
-                        >
-                          {savingGuest ? 'Guardando...' : 'Guardar datos'}
-                        </button>
-                        <button
-                          onClick={() => setEditingGuest(false)}
-                          disabled={savingGuest}
-                          className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:underline"
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-4">
-                      <div className="w-14 h-14 shrink-0 bg-[#C5A059]/15 text-[#C5A059] border border-[#C5A059]/10 rounded-2xl flex items-center justify-center text-xl font-bold font-serif">
-                        {selectedBooking.guestName.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <h3 className="text-base font-bold text-gray-800 leading-tight">{selectedBooking.guestName}</h3>
-                        {selectedBooking.guestCi && (
-                          <span className="text-[11px] text-gray-400 font-semibold">CI {selectedBooking.guestCi}</span>
-                        )}
-                        <div className="flex flex-col gap-1 mt-1.5 text-xs text-gray-500">
-                          <a href={`tel:${selectedBooking.guestPhone}`} className="flex items-center gap-1 hover:text-[#C5A059]"><Phone size={12} /> {selectedBooking.guestPhone}</a>
-                          <a href={`mailto:${selectedBooking.guestEmail}`} className="flex items-center gap-1 hover:text-[#C5A059] truncate"><Mail size={12} className="shrink-0" /> {selectedBooking.guestEmail}</a>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          const { firstName, lastName } = splitPersonName(selectedBooking.guestName.replace(/\s+\(\d+\/\d+\)$/, ''))
-                          setEditGuestForm({
-                            firstName,
-                            lastName,
-                            ci: selectedBooking.guestCi || '',
-                            phone: selectedBooking.guestPhone || '',
-                            email: selectedBooking.guestEmail || '',
-                            companions: selectedBooking.companions || ''
-                          })
-                          setEditingGuest(true)
-                        }}
-                        className="shrink-0 text-[10px] font-bold text-[#C5A059] uppercase tracking-wider hover:underline"
-                      >
-                        Editar datos
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* 2. Cabin detail */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">
-                      Habitaciones de la reserva ({getBookingGroup(selectedBooking).length})
-                    </span>
-                    {!addingRoomsToBooking && (
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => setAddingRoomsToBooking(true)}
-                          className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider hover:underline flex items-center gap-1"
-                        >
-                          <Plus size={11} /> Añadir habitación
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    {getBookingGroup(selectedBooking).map(roomBooking => {
-                      const acc = getAccommodation(roomBooking.accommodationId)
-                      const isEditing = editingRoomId === roomBooking.id
-                      const hasValidEditDates = editingDates && Boolean(editDatesForm.checkIn && editDatesForm.checkOut && editDatesForm.checkOut > editDatesForm.checkIn)
-                      const effectiveCheckIn = hasValidEditDates ? editDatesForm.checkIn : roomBooking.checkIn
-                      const effectiveCheckOut = hasValidEditDates ? editDatesForm.checkOut : roomBooking.checkOut
-                      const effectiveNights = calculateNights(effectiveCheckIn, effectiveCheckOut)
-
-                      const previewStandard = isEditing
-                        ? getStandardRate(editRoomForm.accommodationId, effectiveCheckIn, effectiveCheckOut, editRoomForm.adults, editRoomForm.children)
-                        : getStandardRate(roomBooking.accommodationId, effectiveCheckIn, effectiveCheckOut, roomBooking.guestsCount.adults, roomBooking.guestsCount.children)
-                      const previewTotal = getAdjustedBookingTotal(previewStandard, roomBooking.specialNotes)
-                      const datesDiffer = hasValidEditDates && (editDatesForm.checkIn !== roomBooking.checkIn || editDatesForm.checkOut !== roomBooking.checkOut)
-
-                      return (
-                        <div key={roomBooking.id} className="bg-white p-3 border border-gray-100 rounded-2xl">
-                          {isEditing ? (
-                            <div className="space-y-3">
-                              <select
-                                value={editRoomForm.accommodationId}
-                                onChange={e => setEditRoomForm(f => ({ ...f, accommodationId: Number(e.target.value) }))}
-                                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white"
-                              >
-                                {activeAccommodationOptions.map(option => (
-                                  <option key={option.id} value={option.id}>{option.title} — Máx. {option.maxCapacity} pax</option>
-                                ))}
-                              </select>
-                              <div className="grid grid-cols-4 gap-2">
-                                {(['adults', 'children', 'babies', 'pets'] as const).map(key => (
-                                  <div key={key}>
-                                    <label className="text-[8px] font-bold text-gray-400 uppercase block mb-1">
-                                      {key === 'adults' ? 'Adultos' : key === 'children' ? 'Niños' : key === 'babies' ? 'Bebés' : 'Mascotas'}
-                                    </label>
-                                    <input
-                                      type="number"
-                                      min={0}
-                                      value={editRoomForm[key]}
-                                      onChange={e => setEditRoomForm(f => ({ ...f, [key]: Math.max(0, Number(e.target.value)) }))}
-                                      className="w-full border border-gray-200 rounded-lg px-2 py-2 text-xs outline-none focus:border-[#C5A059]"
-                                    />
-                                  </div>
-                                ))}
-                              </div>
-                              <div className="flex justify-between items-center rounded-xl bg-amber-50/70 border border-amber-200/50 px-3 py-2 text-xs">
-                                <div className="flex flex-col">
-                                  <span className="font-semibold text-gray-700">Precio recalculado</span>
-                                  <span className="text-[10px] text-gray-500">
-                                    {effectiveNights} {effectiveNights === 1 ? 'noche' : 'noches'}
-                                    {hasValidEditDates ? ' (según fechas en edición)' : ''}
-                                  </span>
-                                </div>
-                                <span className="font-extrabold text-[#8A6D33] text-sm">{fmt(previewTotal)}</span>
-                              </div>
-                              <div className="flex gap-3">
-                                <button onClick={handleSaveRoomDetails} disabled={savingRoom} className="text-[10px] font-bold text-emerald-600 uppercase hover:underline disabled:opacity-40">
-                                  {savingRoom ? 'Guardando...' : 'Guardar habitación'}
-                                </button>
-                                <button onClick={() => setEditingRoomId(null)} disabled={savingRoom} className="text-[10px] font-bold text-gray-400 uppercase hover:underline">Cancelar</button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-3">
-                              <img src={acc?.image} alt={acc?.title} className="w-14 h-14 object-cover rounded-xl" />
-                              <div className="min-w-0 flex-1">
-                                <h4 className="text-xs font-bold text-gray-800">{acc?.title}</h4>
-                                <p className="text-[10px] text-gray-400 mt-0.5">
-                                  {roomBooking.guestsCount.adults} adultos · {roomBooking.guestsCount.children} niños
-                                  {roomBooking.guestsCount.babies > 0 && ` · ${roomBooking.guestsCount.babies} bebés`}
-                                </p>
-                                {datesDiffer ? (
-                                  <div className="flex items-baseline gap-1.5 mt-1">
-                                    <span className="text-xs font-extrabold text-emerald-700">{fmt(previewTotal)}</span>
-                                    <span className="text-[10px] text-gray-400 line-through">{fmt(roomBooking.totalAmount)}</span>
-                                    <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100/70 px-1.5 py-0.5 rounded-full">
-                                      {previewTotal - roomBooking.totalAmount >= 0 ? `+${fmt(previewTotal - roomBooking.totalAmount)}` : fmt(previewTotal - roomBooking.totalAmount)}
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <p className="text-xs font-bold text-[#8A6D33] mt-1">{fmt(roomBooking.totalAmount)}</p>
-                                )}
-                              </div>
-                              <div className="flex flex-col items-end gap-2">
-                                <button
-                                  onClick={() => {
-                                    setEditRoomForm({
-                                      accommodationId: roomBooking.accommodationId,
-                                      adults: roomBooking.guestsCount.adults,
-                                      children: roomBooking.guestsCount.children,
-                                      babies: roomBooking.guestsCount.babies,
-                                      pets: roomBooking.guestsCount.pets
-                                    })
-                                    setEditingRoomId(roomBooking.id)
-                                  }}
-                                  className="text-[9px] font-bold text-[#C5A059] uppercase hover:underline"
-                                >
-                                  Editar
-                                </button>
-                                {getBookingGroup(selectedBooking).length > 1 && (
-                                  <button onClick={() => handleDeleteBooking(roomBooking.id)} className="text-[9px] font-bold text-rose-500 uppercase hover:underline">
-                                    Anular
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-
-                  {addingRoomsToBooking && (() => {
-                    const groupBookings = selectedBooking.locator
-                      ? bookings.filter(b => b.locator === selectedBooking.locator)
-                      : [selectedBooking]
-                    const assignedIds = new Set(groupBookings.map(b => b.accommodationId))
-                    const remainingSlots = Math.max(0, 4 - groupBookings.length)
-                    const capacity = additionalAccommodationIds.reduce((sum, id) => sum + getMaxCapacity(id), 0)
-                    const guests = additionalGuests.adults + additionalGuests.children
-                    const selectedAdditionalId = additionalAccommodationIds[0]
-                    const additionalStandardTotal = selectedAdditionalId
-                      ? getStandardRate(selectedAdditionalId, selectedBooking.checkIn, selectedBooking.checkOut, additionalGuests.adults, additionalGuests.children)
-                      : 0
-                    const additionalDiscount = getBookingDiscountPercent(selectedBooking.specialNotes)
-                    const additionalTotal = Math.round(additionalStandardTotal * (1 - additionalDiscount / 100) * 100) / 100
-                    return (
-                      <div className="border border-emerald-100 bg-emerald-50/40 rounded-2xl p-3 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-xs font-bold text-emerald-800">Agregar a esta reserva</p>
-                            <p className="text-[10px] text-emerald-700/70">Agrega una por vez para asignar correctamente sus ocupantes.</p>
-                          </div>
-                          <span className="text-[10px] font-bold text-emerald-700">Quedan {remainingSlots} cupos</span>
-                        </div>
-
-                        <div className="max-h-44 overflow-y-auto custom-scrollbar space-y-1.5">
-                          {activeAccommodationOptions.map(acc => {
-                            if (assignedIds.has(acc.id)) return null
-                            const occupied = bookings.some(b =>
-                              b.accommodationId === acc.id &&
-                              selectedBooking.checkIn < b.checkOut && selectedBooking.checkOut > b.checkIn
-                            )
-                            const selected = additionalAccommodationIds.includes(acc.id)
-                            return (
-                              <label key={acc.id} className={`flex items-center gap-2 rounded-xl border p-2 ${occupied ? 'opacity-50 bg-rose-50 border-rose-100' : selected ? 'bg-white border-emerald-300' : 'bg-white border-gray-100'}`}>
-                                <input
-                                  type="checkbox"
-                                  checked={selected}
-                                  disabled={occupied}
-                                  onChange={() => {
-                                    if (selected) {
-                                      setAdditionalAccommodationIds([])
-                                    } else if (remainingSlots > 0) {
-                                      setAdditionalAccommodationIds([acc.id])
-                                    }
-                                  }}
-                                  className="rounded text-emerald-600 focus:ring-emerald-500"
-                                />
-                                <div className="min-w-0 flex-1">
-                                  <p className="text-[11px] font-bold text-gray-700 truncate">{acc.title}</p>
-                                  <p className="text-[9px] text-gray-400">Máx. {acc.maxCapacity} pax</p>
-                                </div>
-                                {occupied && <span className="text-[8px] font-bold text-rose-500 uppercase">Ocupada</span>}
-                              </label>
-                            )
-                          })}
-                        </div>
-
-                        <div className="grid grid-cols-4 gap-2">
-                          {(['adults', 'children', 'babies', 'pets'] as const).map(key => (
-                            <div key={key}>
-                              <label className="text-[8px] font-bold text-gray-400 uppercase block mb-1">
-                                {key === 'adults' ? 'Adultos' : key === 'children' ? 'Niños' : key === 'babies' ? 'Bebés' : 'Mascotas'}
-                              </label>
-                              <input
-                                type="number"
-                                min={0}
-                                value={additionalGuests[key]}
-                                onChange={e => setAdditionalGuests(prev => ({ ...prev, [key]: Math.max(0, Number(e.target.value)) }))}
-                                className="w-full border border-gray-200 rounded-lg px-2 py-2 text-xs bg-white outline-none focus:border-emerald-400"
-                              />
-                            </div>
-                          ))}
-                        </div>
-                        {capacity > 0 && guests > capacity && (
-                          <p className="text-[10px] font-semibold text-rose-600">Capacidad excedida: {guests} huéspedes para {capacity} plazas.</p>
-                        )}
-                        {selectedAdditionalId && (
-                          <div className="flex items-center justify-between rounded-xl border border-emerald-100 bg-white px-3 py-2.5 text-xs">
-                            <span className="font-semibold text-gray-600">Precio de esta habitación</span>
-                            <span className="font-bold text-emerald-700">{fmt(additionalTotal)}</span>
-                          </div>
-                        )}
-
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={handleAddRoomsToBooking}
-                            disabled={savingAdditionalRooms || additionalAccommodationIds.length === 0 || guests > capacity}
-                            className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider hover:underline disabled:opacity-40"
-                          >
-                            {savingAdditionalRooms ? 'Agregando...' : 'Agregar a la reserva'}
-                          </button>
-                          <button
-                            onClick={() => { setAddingRoomsToBooking(false); setAdditionalAccommodationIds([]) }}
-                            disabled={savingAdditionalRooms}
-                            className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:underline"
-                          >
-                            Cancelar
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })()}
-                </div>
-
-                {/* 3. Dates and Guests */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Fechas de la Estadía</span>
-                    {!editingDates && (
-                      <button
-                        onClick={() => {
-                          setEditDatesForm({ checkIn: selectedBooking.checkIn, checkOut: selectedBooking.checkOut })
-                          setEditingDates(true)
-                        }}
-                        className="text-[10px] font-bold text-[#C5A059] uppercase tracking-wider hover:underline"
-                      >
-                        Cambiar
-                      </button>
-                    )}
-                  </div>
-                  {editingDates ? (
-                    <div className="space-y-3 bg-amber-50/40 p-3.5 border border-amber-200/60 rounded-2xl">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Check-In</label>
-                          <input
-                            type="date"
-                            value={editDatesForm.checkIn}
-                            onChange={e => setEditDatesForm(f => ({ ...f, checkIn: e.target.value }))}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Check-Out</label>
-                          <input
-                            type="date"
-                            value={editDatesForm.checkOut}
-                            onChange={e => setEditDatesForm(f => ({ ...f, checkOut: e.target.value }))}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Resumen en vivo de noches y tarifas recalculadas */}
-                      {(() => {
-                        const isValidRange = Boolean(editDatesForm.checkIn && editDatesForm.checkOut && editDatesForm.checkOut > editDatesForm.checkIn)
-                        if (!isValidRange) {
-                          return (
-                            <p className="text-[11px] font-semibold text-rose-600 bg-rose-50 border border-rose-200 p-2.5 rounded-xl">
-                              La fecha de check-out debe ser posterior al check-in.
-                            </p>
-                          )
-                        }
-
-                        const currentGroup = getBookingGroup(selectedBooking)
-                        const oldNights = calculateNights(selectedBooking.checkIn, selectedBooking.checkOut)
-                        const newNights = calculateNights(editDatesForm.checkIn, editDatesForm.checkOut)
-                        const diffNights = newNights - oldNights
-
-                        const oldTotal = currentGroup.reduce((sum, r) => sum + r.totalAmount, 0)
-                        const totalPaid = currentGroup.reduce((sum, r) => sum + r.amountPaid, 0)
-
-                        const newTotal = currentGroup.reduce((sum, room) => {
-                          const isRoomBeingEdited = editingRoomId === room.id
-                          const accId = isRoomBeingEdited ? editRoomForm.accommodationId : room.accommodationId
-                          const adults = isRoomBeingEdited ? editRoomForm.adults : room.guestsCount.adults
-                          const children = isRoomBeingEdited ? editRoomForm.children : room.guestsCount.children
-                          const standard = getStandardRate(accId, editDatesForm.checkIn, editDatesForm.checkOut, adults, children)
-                          return sum + getAdjustedBookingTotal(standard, room.specialNotes)
-                        }, 0)
-
-                        const diffAmount = newTotal - oldTotal
-                        const pendingBalance = Math.max(0, newTotal - totalPaid)
-
-                        return (
-                          <div className="bg-white border border-[#C5A059]/30 rounded-xl p-3 space-y-2 shadow-xs">
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="text-gray-500 font-medium">Estadía:</span>
-                              <div className="flex items-center gap-1.5 font-bold">
-                                <span className="text-gray-800">{newNights} {newNights === 1 ? 'noche' : 'noches'}</span>
-                                {diffNights !== 0 && (
-                                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${diffNights > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                                    {diffNights > 0 ? `+${diffNights} ${diffNights === 1 ? 'noche' : 'noches'}` : `${diffNights} noches`}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="flex items-center justify-between text-xs pt-1.5 border-t border-gray-100">
-                              <span className="text-gray-500 font-medium">Nueva tarifa recalculada:</span>
-                              <div className="flex items-center gap-2">
-                                {diffAmount !== 0 && (
-                                  <span className="text-[11px] text-gray-400 line-through">{fmt(oldTotal)}</span>
-                                )}
-                                <span className="font-extrabold text-[#8A6D33] text-sm">{fmt(newTotal)}</span>
-                              </div>
-                            </div>
-
-                            {diffAmount !== 0 && (
-                              <div className="flex items-center justify-between text-[11px] text-gray-600 bg-amber-500/10 px-2.5 py-1.5 rounded-lg font-medium">
-                                <span>{diffAmount > 0 ? 'Diferencia a cobrar:' : 'Diferencia a favor del huésped:'}</span>
-                                <span className={`font-bold ${diffAmount > 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                                  {diffAmount > 0 ? `+${fmt(diffAmount)}` : fmt(diffAmount)}
-                                </span>
-                              </div>
-                            )}
-
-                            <div className="flex items-center justify-between text-xs pt-1.5 border-t border-gray-100 text-[11px]">
-                              <span className="text-gray-500">Ya pagado: <strong className="text-gray-700">{fmt(totalPaid)}</strong></span>
-                              <span className="text-gray-500">Saldo pendiente: <strong className={pendingBalance > 0 ? 'text-rose-600' : 'text-emerald-600'}>{fmt(pendingBalance)}</strong></span>
-                            </div>
-                          </div>
-                        )
-                      })()}
-
-                      <div className="flex items-center gap-3 pt-1">
-                        <button
-                          onClick={handleSaveDates}
-                          disabled={savingDates}
-                          className="text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-2 rounded-xl uppercase tracking-wider transition-colors disabled:opacity-50 flex items-center gap-1.5"
-                        >
-                          {savingDates ? (
-                            <>
-                              <div className="w-3 h-3 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
-                              Guardando nuevas fechas...
-                            </>
-                          ) : (
-                            'Guardar en toda la reserva'
-                          )}
-                        </button>
-                        <button
-                          onClick={() => setEditingDates(false)}
-                          disabled={savingDates}
-                          className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:underline disabled:opacity-40"
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="bg-gray-50/50 p-4 border border-gray-100 rounded-2xl">
-                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Check-In</span>
-                        <span className="text-sm font-bold text-gray-700">{parseLocalDate(selectedBooking.checkIn).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
-                      </div>
-                      <div className="bg-gray-50/50 p-4 border border-gray-100 rounded-2xl">
-                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Check-Out</span>
-                        <span className="text-sm font-bold text-gray-700">{parseLocalDate(selectedBooking.checkOut).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* 4. Guests count list */}
-                <div className="bg-gray-50/30 p-4 border border-gray-100 rounded-2xl space-y-3">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Resumen de ocupantes</span>
-                  <div className="grid grid-cols-2 gap-4 text-xs font-semibold text-gray-600">
-                    <div className="flex items-center gap-2">
-                      <Users size={16} className="text-gray-400" />
-                      <span>{getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.guestsCount.adults, 0)} Adultos</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Baby size={16} className="text-gray-400" />
-                      <span>
-                        {getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.guestsCount.children, 0)} Niños
-                        {getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.guestsCount.babies, 0) > 0 && ` (${getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.guestsCount.babies, 0)} bebés)`}
-                      </span>
-                    </div>
-                    {getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.guestsCount.pets, 0) > 0 && (
-                      <div className="flex items-center gap-2 col-span-2 text-emerald-700 font-bold">
-                        <span>🐾 Traen {getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.guestsCount.pets, 0)} mascota(s)</span>
-                      </div>
-                    )}
-                  </div>
-                  {selectedBooking.companions && (
-                    <div className="pt-2 border-t border-gray-100 text-xs text-gray-600">
-                      <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Nombres de Acompañantes</span>
-                      {selectedBooking.companions}
-                    </div>
-                  )}
-                </div>
-
-                {/* 5. Special Notes */}
-                <div className="bg-amber-500/5 border border-amber-500/10 p-4 rounded-2xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-amber-800 font-bold text-xs">
-                      <Info size={14} /> Notas de la Administración
-                    </div>
-                    {!editingNotes && (
-                      <button
-                        onClick={() => { setEditNotes(selectedBooking.specialNotes || ''); setEditingNotes(true) }}
-                        className="text-[9px] font-bold text-amber-700 uppercase hover:underline"
-                      >
-                        Editar
-                      </button>
-                    )}
-                  </div>
-                  {editingNotes ? (
-                    <div className="space-y-2">
-                      <textarea
-                        rows={4}
-                        value={editNotes}
-                        onChange={e => setEditNotes(e.target.value)}
-                        className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-xs bg-white outline-none focus:border-amber-400 resize-none"
-                        placeholder="Notas internas, solicitudes especiales, referencias..."
-                      />
-                      <div className="flex gap-3">
-                        <button onClick={handleSaveBookingNotes} disabled={savingNotes} className="text-[9px] font-bold text-emerald-600 uppercase hover:underline disabled:opacity-40">
-                          {savingNotes ? 'Guardando...' : 'Guardar notas'}
-                        </button>
-                        <button onClick={() => setEditingNotes(false)} disabled={savingNotes} className="text-[9px] font-bold text-gray-400 uppercase hover:underline">Cancelar</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-amber-700/80 leading-relaxed font-medium">
-                      {selectedBooking.specialNotes ? '"' + selectedBooking.specialNotes + '"' : 'Sin notas registradas.'}
-                    </p>
-                  )}
-                </div>
-
-                {/* 6. Finanzas */}
-                <div className="bg-gray-50/50 p-4 border border-gray-100 rounded-2xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Estado Financiero</span>
-                    {!editingFinancials && (
-                      <button
-                        onClick={() => {
-                          const group = getBookingGroup(selectedBooking)
-                          setEditDiscountPercent(getBookingDiscountPercent(selectedBooking.specialNotes))
-                          setEditFixedDiscountAmount(group.reduce(
-                            (sum, room) => sum + getBookingFixedDiscountAmount(room.specialNotes),
-                            0
-                          ))
-                          setEditingFinancials(true)
-                        }}
-                        className="text-[10px] font-bold text-[#C5A059] uppercase tracking-wider hover:underline flex items-center gap-1"
-                      >
-                        <Percent size={11} /> Editar tarifa / descuento
-                      </button>
-                    )}
-                  </div>
-
-                  {editingFinancials ? (() => {
-                    const groupBookings = getBookingGroup(selectedBooking)
-                    const standardTotal = groupBookings.reduce((sum, room) => sum + getStandardRate(
-                      room.accommodationId,
-                      room.checkIn,
-                      room.checkOut,
-                      room.guestsCount.adults,
-                      room.guestsCount.children
-                    ), 0)
-                    const totalAfterPercent = standardTotal * (1 - editDiscountPercent / 100)
-                    const normalizedFixedDiscount = Math.min(
-                      totalAfterPercent,
-                      Math.max(0, Number(editFixedDiscountAmount) || 0)
-                    )
-                    const previewTotal = Math.max(0, Math.round((totalAfterPercent - normalizedFixedDiscount) * 100) / 100)
-                    return (
-                      <div className="pt-2 space-y-3 border-t border-gray-200/70">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-gray-500 font-semibold">Tarifa estándar calculada</span>
-                          <span className="font-bold text-gray-700">{fmt(standardTotal)}</span>
-                        </div>
-                        <div>
-                          <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Descuento individual (%)</label>
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="number"
-                              min={0}
-                              max={100}
-                              step="0.01"
-                              value={editDiscountPercent}
-                              onChange={e => setEditDiscountPercent(Math.min(100, Math.max(0, Number(e.target.value))))}
-                              className="w-24 border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white"
-                            />
-                            {[0, 10, 15, 20].map(value => (
-                              <button
-                                key={value}
-                                type="button"
-                                onClick={() => setEditDiscountPercent(value)}
-                                className={`px-2 py-2 rounded-lg text-[9px] font-bold border transition-colors ${editDiscountPercent === value ? 'bg-[#C5A059] text-white border-[#C5A059]' : 'bg-white text-gray-500 border-gray-200'}`}
-                              >
-                                {value}%
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        <div>
-                          <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Descuento fijo (USD)</label>
-                          <div className="relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400">$</span>
-                            <input
-                              type="number"
-                              min={0}
-                              max={totalAfterPercent}
-                              step="0.01"
-                              value={editFixedDiscountAmount}
-                              onChange={e => setEditFixedDiscountAmount(Math.min(
-                                totalAfterPercent,
-                                Math.max(0, Number(e.target.value))
-                              ))}
-                              className="w-full border border-gray-200 rounded-xl pl-7 pr-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white"
-                              placeholder="Ejemplo: 5"
-                            />
-                          </div>
-                          <p className="text-[9px] text-gray-400 mt-1">Se resta directamente del total, después del porcentaje.</p>
-                        </div>
-                        <div className="flex justify-between text-xs bg-white border border-[#C5A059]/20 rounded-xl p-3">
-                          <span className="text-gray-600 font-semibold">Nuevo total de toda la reserva</span>
-                          <span className="font-bold text-[#8A6D33]">{fmt(previewTotal)}</span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={handleSaveBookingDiscount}
-                            disabled={savingFinancials}
-                            className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider hover:underline disabled:opacity-50"
-                          >
-                            {savingFinancials ? 'Guardando...' : 'Guardar cambios'}
-                          </button>
-                          <button
-                            onClick={() => setEditingFinancials(false)}
-                            disabled={savingFinancials}
-                            className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:underline disabled:opacity-50"
-                          >
-                            Cancelar
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })() : (() => {
-                    const groupBookings = getBookingGroup(selectedBooking)
-                    const percent = getBookingDiscountPercent(selectedBooking.specialNotes)
-                    const fixedDiscount = groupBookings.reduce(
-                      (sum, room) => sum + getBookingFixedDiscountAmount(room.specialNotes),
-                      0
-                    )
-                    const standardTotals = groupBookings.map(room => getStandardRate(
-                      room.accommodationId,
-                      room.checkIn,
-                      room.checkOut,
-                      room.guestsCount.adults,
-                      room.guestsCount.children
-                    ))
-                    const totalAfterPercent = standardTotals.reduce(
-                      (sum, total) => sum + Math.max(0, Math.round(total * (1 - percent / 100) * 100) / 100),
-                      0
-                    )
-                    const percentageDiscount = Math.max(
-                      0,
-                      Math.round((standardTotals.reduce((sum, total) => sum + total, 0) - totalAfterPercent) * 100) / 100
-                    )
-                    const hasDiscount = percentageDiscount > 0 || fixedDiscount > 0
-                    const finalTotal = groupBookings.reduce((sum, room) => sum + room.totalAmount, 0)
-
-                    return (
-                      <>
-                        {hasDiscount && (
-                          <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block pt-1">
-                            Tarifa estándar por alojamiento
-                          </span>
-                        )}
-                        {groupBookings.map((room, index) => (
-                          <div key={room.id} className="flex justify-between gap-3 text-[10px] py-1 border-b border-gray-100/50">
-                            <span className="text-gray-500 truncate">{getAccommodation(room.accommodationId)?.title}</span>
-                            <span className="font-bold text-gray-700 shrink-0">
-                              {fmt(hasDiscount ? standardTotals[index] : room.totalAmount)}
-                            </span>
-                          </div>
-                        ))}
-                        {percentageDiscount > 0 && (
-                          <div className="flex justify-between gap-3 text-xs py-1 border-b border-gray-100/50">
-                            <span className="text-gray-500 font-semibold">Descuento individual ({percent}%)</span>
-                            <span className="font-bold text-emerald-600 shrink-0">-{fmt(percentageDiscount)}</span>
-                          </div>
-                        )}
-                        {fixedDiscount > 0 && (
-                          <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
-                            <span className="text-gray-500 font-semibold">Descuento fijo</span>
-                            <span className="font-bold text-emerald-600">-{fmt(fixedDiscount)}</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between text-xs py-1 border-b border-gray-100/50">
-                          <span className="text-gray-500 font-semibold">Costo total de la reserva</span>
-                          <span className="font-bold text-gray-800">{fmt(finalTotal)}</span>
-                        </div>
-                      </>
-                    )
-                  })()}
-                </div>
-
-                {/* 7. Historial de Pagos: cada abono con su fecha, método y número de operación */}
-                <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Historial de Pagos</span>
-                    {!addingPayment && (
-                      <button
-                        onClick={() => setAddingPayment(true)}
-                        className="text-[10px] font-bold text-[#C5A059] uppercase tracking-wider hover:underline flex items-center gap-1"
-                      >
-                        <Plus size={12} /> Agregar Pago
-                      </button>
-                    )}
-                  </div>
-
-                  {loadingPayments ? (
-                    <p className="text-xs text-gray-400 text-center py-2">Cargando...</p>
-                  ) : bookingPayments.length === 0 && !addingPayment ? (
-                    <p className="text-xs text-gray-400 text-center py-2">Todavía no hay abonos registrados.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {bookingPayments.map(p => (
-                        <div key={p.id} className="flex items-center justify-between gap-2 bg-gray-50/50 border border-gray-100 rounded-xl px-3 py-2">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-bold text-gray-800">{fmt(p.amount)}</span>
-                              <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-full px-1.5 py-0.5">
-                                {p.status === 'verificado' ? 'Verificado' : 'Pendiente'}
-                              </span>
-                            </div>
-                            <p className="text-[10px] text-gray-400 mt-0.5 truncate">
-                              {parseLocalDate(p.paymentDate).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
-                              {textoEnBolivares(p.amountBs, p.exchangeRate) && (
-                                <span className="block text-[10px] text-gray-400">
-                                  {textoEnBolivares(p.amountBs, p.exchangeRate)}
-                                </span>
-                              )}
-                              {' · '}<span className="capitalize">{p.method}</span>
-                              {p.reference && <> · <span className="select-all">{p.reference}</span></>}
-                            </p>
-                          </div>
-                          <button
-                            onClick={() => handleDeletePayment(p)}
-                            className="p-1.5 text-gray-300 hover:text-rose-500 transition-colors shrink-0"
-                            title="Eliminar abono"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {(() => {
-                    const group = getBookingGroup(selectedBooking)
-                    const totalCost = group.reduce((sum, room) => sum + room.totalAmount, 0)
-                    const totalPaid = group.reduce((sum, room) => sum + room.amountPaid, 0)
-                    const balance = Math.max(0, totalCost - totalPaid)
-                    const credit = Math.max(0, totalPaid - totalCost)
-                    return (
-                      <div className="mt-3 pt-3 border-t-2 border-gray-200 space-y-2">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-bold text-gray-600">Costo total</span>
-                          <span className="font-bold text-gray-900">{fmt(totalCost)}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-bold text-gray-600">Monto abonado</span>
-                          <span className="font-bold text-emerald-600">{fmt(totalPaid)}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm pt-1">
-                          <span className="font-bold text-gray-900">Deuda del cliente</span>
-                          <span className={balance > 0 ? 'font-bold text-rose-500' : 'font-bold text-emerald-600'}>{fmt(balance)}</span>
-                        </div>
-                        {credit > 0 && (
-                          <div className="flex items-center justify-between text-xs pt-1 border-t border-emerald-100">
-                            <span className="font-bold text-emerald-700">Saldo a favor del cliente</span>
-                            <span className="font-bold text-emerald-600">{fmt(credit)}</span>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })()}
-
-                  {addingPayment && (
-                    <div className="space-y-2 pt-2 border-t border-gray-100">
-                      <p className="text-[10px] text-sky-700 bg-sky-50 border border-sky-100 rounded-xl px-3 py-2">
-                        Este pago se registrará como un abono global de la reserva. Deuda actual: <strong>{fmt(Math.max(0, getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.totalAmount, 0) - getBookingGroup(selectedBooking).reduce((sum, room) => sum + room.amountPaid, 0)))}</strong>.
-                      </p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Monto ($)</label>
-                          <input
-                            type="number"
-                            min={0}
-                            value={nuevoAbonoBs.activo
-                              ? (dolaresDeBolivares(nuevoAbonoBs.bolivares, nuevoAbonoBs.tasa) || '')
-                              : paymentForm.amount}
-                            onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))}
-                            disabled={nuevoAbonoBs.activo}
-                            placeholder="0"
-                            title={nuevoAbonoBs.activo ? 'Sale de los bolívares y la tasa' : undefined}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] disabled:bg-gray-50 disabled:text-gray-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Fecha</label>
-                          <input
-                            type="date"
-                            value={paymentForm.date}
-                            onChange={e => setPaymentForm(f => ({ ...f, date: e.target.value }))}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059]"
-                          />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Método</label>
-                          <select
-                            value={paymentForm.method}
-                            onChange={e => setPaymentForm(f => ({ ...f, method: e.target.value as typeof paymentForm.method }))}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white capitalize"
-                          >
-                            <option value="transferencia">Transferencia</option>
-                            <option value="pago_movil">Pago Móvil</option>
-                            <option value="zelle">Zelle</option>
-                            <option value="efectivo">Efectivo</option>
-                            <option value="tarjeta">Tarjeta</option>
-                            <option value="cheque">Cheque</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">N° de Operación</label>
-                          <input
-                            type="text"
-                            value={paymentForm.reference}
-                            onChange={e => setPaymentForm(f => ({ ...f, reference: e.target.value }))}
-                            placeholder="Ej. 30226263971"
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059]"
-                          />
-                        </div>
-                      </div>
-                      <CobroEnBolivares
-                        compacto
-                        activo={nuevoAbonoBs.activo}
-                        onActivo={v => {
-                          setNuevoAbonoBs(prev => ({ ...prev, activo: v }))
-                          if (v) setPaymentForm(prev => ({ ...prev, amount: '' }))
-                        }}
-                        bolivares={nuevoAbonoBs.bolivares}
-                        onBolivares={v => setNuevoAbonoBs(prev => ({ ...prev, bolivares: v }))}
-                        tasa={nuevoAbonoBs.tasa}
-                        onTasa={v => setNuevoAbonoBs(prev => ({ ...prev, tasa: v }))}
-                        referencia={bcvEuro}
-                      />
-
-                      <div className="flex items-center gap-3 pt-1">
-                        <button onClick={handleAddPayment} disabled={envioAbono.ocupado} className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider hover:underline disabled:opacity-40">
-                          Guardar Abono
-                        </button>
-                        <button
-                          onClick={() => { setAddingPayment(false); setPaymentForm({ amount: '', date: todayStr, method: 'transferencia', reference: '' }) }}
-                          className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:underline"
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
+              {/* Selector directo de estado de pago */}
+              <div className="flex items-center gap-1">
+                {(['pendiente', 'parcial', 'completo'] as const).map(st => (
+                  <button
+                    key={st}
+                    onClick={() => handleUpdatePaymentStatus(selectedBooking.id, st)}
+                    className={`px-2.5 py-1 rounded-xl text-[10px] font-bold uppercase transition-all cursor-pointer ${
+                      selectedBooking.paymentStatus === st
+                        ? 'bg-gray-800 text-white shadow-xs'
+                        : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    {st === 'completo' ? 'Pagado' : st === 'parcial' ? 'Parcial' : 'Sin Pago'}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* Quick Actions Drawer Footer */}
-            <div className="border-t border-gray-100 pt-4 space-y-2">
-              {/* Reenviar el comprobante: sirve tanto si el huésped lo perdió como para
-                  las reservas viejas, que se crearon antes de que existiera el voucher. */}
-              <button
-                onClick={() => handleSendVoucher(selectedBooking)}
-                disabled={sendingVoucher || !selectedBooking.guestEmail?.trim()}
-                title={selectedBooking.guestEmail?.trim() ? '' : 'Esta reserva no tiene correo cargado'}
-                className="w-full flex items-center justify-center gap-1.5 py-3.5 border border-[#C5A059]/40 bg-[#C5A059]/10 hover:bg-[#C5A059]/20 text-[#8A6D33] font-bold rounded-2xl text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
-              >
-                <Mail size={15} />
-                {sendingVoucher
-                  ? 'Enviando…'
-                  : voucherSentFor === selectedBooking.id
-                    ? '✓ Comprobante enviado'
-                    : 'Enviar comprobante por correo'}
-              </button>
+            {/* Section 1: Guest Contact Info */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                  Datos del Huésped
+                </span>
+                {!editingGuest && (
+                  <button
+                    onClick={() => {
+                      const { firstName, lastName } = splitPersonName(cleanGuestSuggestionName(selectedBooking.guestName))
+                      setEditGuestForm({
+                        firstName,
+                        lastName,
+                        ci: selectedBooking.guestCi || '',
+                        phone: cleanSavedGuestPhone(selectedBooking.guestPhone),
+                        email: cleanSavedGuestEmail(selectedBooking.guestEmail),
+                        companions: selectedBooking.companions || ''
+                      })
+                      setEditingGuest(true)
+                    }}
+                    className="text-xs font-bold text-[#C5A059] hover:underline cursor-pointer"
+                  >
+                    Editar datos
+                  </button>
+                )}
+              </div>
 
-              {!selectedBooking.confirmed && (
-                <button
-                  onClick={() => handleConfirmBooking(selectedBooking.id)}
-                  className="w-full flex items-center justify-center gap-1.5 py-3.5 bg-sky-500 hover:bg-sky-600 text-white font-bold rounded-2xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-lg shadow-sky-500/10"
-                >
-                  <Check size={15} /> Confirmar Reserva
-                </button>
+              {editingGuest ? (
+                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200/80 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Nombre</label>
+                      <input
+                        type="text"
+                        value={editGuestForm.firstName}
+                        onChange={e => setEditGuestForm(f => ({ ...f, firstName: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs bg-white outline-none focus:border-[#C5A059]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Apellido</label>
+                      <input
+                        type="text"
+                        value={editGuestForm.lastName}
+                        onChange={e => setEditGuestForm(f => ({ ...f, lastName: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs bg-white outline-none focus:border-[#C5A059]"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Cédula / Pasaporte</label>
+                      <input
+                        type="text"
+                        placeholder="V-12345678"
+                        value={editGuestForm.ci}
+                        onChange={e => setEditGuestForm(f => ({ ...f, ci: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs bg-white outline-none focus:border-[#C5A059]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Teléfono</label>
+                      <input
+                        type="text"
+                        placeholder="+58 412..."
+                        value={editGuestForm.phone}
+                        onChange={e => setEditGuestForm(f => ({ ...f, phone: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs bg-white outline-none focus:border-[#C5A059]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Correo</label>
+                      <input
+                        type="email"
+                        placeholder="correo@ejemplo.com"
+                        value={editGuestForm.email}
+                        onChange={e => setEditGuestForm(f => ({ ...f, email: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs bg-white outline-none focus:border-[#C5A059]"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Acompañantes</label>
+                    <input
+                      type="text"
+                      placeholder="Nombres de otros huéspedes del grupo"
+                      value={editGuestForm.companions}
+                      onChange={e => setEditGuestForm(f => ({ ...f, companions: e.target.value }))}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs bg-white outline-none focus:border-[#C5A059]"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      onClick={() => setEditingGuest(false)}
+                      className="px-3 py-1.5 border border-gray-200 text-gray-500 rounded-xl text-xs font-bold hover:bg-gray-100"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      disabled={savingGuest}
+                      onClick={handleSaveGuestInfo}
+                      className="px-4 py-1.5 bg-[#C5A059] text-white rounded-xl text-xs font-bold hover:bg-[#b8904a] disabled:opacity-40"
+                    >
+                      {savingGuest ? 'Guardando...' : 'Guardar'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-gray-50 p-4 rounded-2xl grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Cédula</span>
+                    <span className="font-semibold text-gray-700">{selectedBooking.guestCi || 'No registrada'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Teléfono</span>
+                    <span className="font-semibold text-gray-700 flex items-center gap-1">
+                      <Phone size={12} className="text-gray-400" />
+                      {cleanSavedGuestPhone(selectedBooking.guestPhone) || 'No registrado'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Correo</span>
+                    <span className="font-semibold text-gray-700 flex items-center gap-1 truncate">
+                      <Mail size={12} className="text-gray-400 shrink-0" />
+                      <span className="truncate">{cleanSavedGuestEmail(selectedBooking.guestEmail) || 'No registrado'}</span>
+                    </span>
+                  </div>
+                  {selectedBooking.companions && (
+                    <div className="col-span-1 sm:col-span-3 pt-2 border-t border-gray-200/60">
+                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Acompañantes</span>
+                      <p className="text-gray-700 font-medium">{selectedBooking.companions}</p>
+                    </div>
+                  )}
+                </div>
               )}
+            </div>
 
-              {(selectedBooking.status === 'checkin_hoy' || (selectedBooking.status === 'confirmado' && todayStr >= selectedBooking.checkIn && todayStr < selectedBooking.checkOut)) && (
-                <button
-                  onClick={() => handleCheckIn(selectedBooking.id)}
-                  className="w-full flex items-center justify-center gap-1.5 py-3.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-2xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-lg shadow-amber-500/10"
-                >
-                  <LogIn size={15} /> Completar Check-In
-                </button>
-              )}
+            {/* Section 2: Habitaciones de la Reserva (Soporta Reservas Grupales) */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                  Habitaciones Asignadas ({getBookingGroup(selectedBooking).length})
+                </span>
+                {!addingRoomsToBooking && (
+                  <button
+                    onClick={handleStartAddRooms}
+                    className="text-xs font-bold text-[#C5A059] hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    <Plus size={13} /> Añadir habitación a este grupo
+                  </button>
+                )}
+              </div>
 
-              {(selectedBooking.status === 'checkout_hoy' || (selectedBooking.status === 'ocupado' && selectedBooking.checkOut === todayStr)) && (
-                <button
-                  onClick={() => handleCheckOut(selectedBooking.id)}
-                  className="w-full flex items-center justify-center gap-1.5 py-3.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-2xl text-xs uppercase tracking-wider transition-all active:scale-95 shadow-lg shadow-orange-500/10"
-                >
-                  <LogOut size={15} /> Completar Check-Out
-                </button>
-              )}
+              {/* Formulario para añadir más habitaciones al grupo */}
+              {addingRoomsToBooking && (
+                <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-200/80 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-extrabold text-amber-900">
+                      Selecciona las habitaciones a incorporar al localizador {selectedBooking.locator || 'nuevo'}
+                    </span>
+                    <button
+                      onClick={() => setAddingRoomsToBooking(false)}
+                      className="text-xs font-bold text-gray-400 hover:text-gray-600"
+                    >
+                      ✕
+                    </button>
+                  </div>
 
-              {selectedBooking.locator && bookings.filter(b => b.locator === selectedBooking.locator).length > 1 && (
-                <div className="rounded-2xl border border-sky-100 bg-sky-50 p-3 text-[11px] leading-relaxed text-sky-800">
-                  <strong>Reserva grupal:</strong> esta habitación forma parte de un grupo de {bookings.filter(b => b.locator === selectedBooking.locator).length} unidades. Puedes anularla sin afectar las demás ni modificar los abonos entregados por el cliente.
+                  <div className="max-h-40 overflow-y-auto space-y-1.5 p-1 bg-white rounded-xl border border-gray-200">
+                    {activeAccommodationOptions
+                      .filter(acc => !getBookingGroup(selectedBooking).some(r => r.accommodationId === acc.id))
+                      .map(acc => {
+                        const collision = bookings.find(b =>
+                          b.accommodationId === acc.id &&
+                          selectedBooking.checkIn < b.checkOut && selectedBooking.checkOut > b.checkIn
+                        )
+                        const isSelected = additionalAccommodationIds.includes(acc.id)
+                        return (
+                          <label
+                            key={acc.id}
+                            className={`flex items-center justify-between p-2 rounded-lg text-xs cursor-pointer border ${
+                              collision
+                                ? 'bg-rose-50/50 border-rose-100 opacity-50 cursor-not-allowed'
+                                : isSelected
+                                  ? 'bg-[#C5A059]/10 border-[#C5A059]/40'
+                                  : 'hover:bg-gray-50 border-transparent'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                disabled={!!collision}
+                                checked={isSelected}
+                                onChange={e => {
+                                  if (e.target.checked) {
+                                    setAdditionalAccommodationIds(prev => [...prev, acc.id])
+                                  } else {
+                                    setAdditionalAccommodationIds(prev => prev.filter(id => id !== acc.id))
+                                  }
+                                }}
+                                className="rounded text-[#C5A059]"
+                              />
+                              <span className="font-bold text-gray-700">{acc.title}</span>
+                            </div>
+                            <span className="text-[10px] text-gray-400">
+                              {collision ? 'Ocupada en esas fechas' : `Máx. ${acc.maxCapacity} pax`}
+                            </span>
+                          </label>
+                        )
+                      })}
+                  </div>
+
+                  {additionalAccommodationIds.length > 0 && (
+                    <div className="grid grid-cols-3 gap-2 bg-white p-3 rounded-xl border border-gray-200 text-xs">
+                      <div>
+                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Adultos extras</label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={additionalGuests.adults}
+                          onChange={e => setAdditionalGuests(g => ({ ...g, adults: Number(e.target.value) }))}
+                          className="w-full border border-gray-200 rounded-lg p-1.5 font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Niños extras</label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={additionalGuests.children}
+                          onChange={e => setAdditionalGuests(g => ({ ...g, children: Number(e.target.value) }))}
+                          className="w-full border border-gray-200 rounded-lg p-1.5 font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Bebés extras</label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={additionalGuests.babies}
+                          onChange={e => setAdditionalGuests(g => ({ ...g, babies: Number(e.target.value) }))}
+                          className="w-full border border-gray-200 rounded-lg p-1.5 font-bold"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => setAddingRoomsToBooking(false)}
+                      className="px-3 py-1.5 border border-gray-200 text-gray-500 rounded-xl text-xs font-bold hover:bg-gray-100"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      disabled={additionalAccommodationIds.length === 0 || savingAdditionalRooms}
+                      onClick={handleSaveAdditionalRooms}
+                      className="px-4 py-1.5 bg-[#C5A059] text-white rounded-xl text-xs font-bold hover:bg-[#b8904a] disabled:opacity-40"
+                    >
+                      {savingAdditionalRooms ? 'Añadiendo...' : `Añadir ${additionalAccommodationIds.length} habitación(es)`}
+                    </button>
+                  </div>
                 </div>
               )}
 
-              <div className="flex gap-2">
+              {/* Lista de habitaciones asignadas con sus opciones de edición */}
+              <div className="space-y-2">
+                {getBookingGroup(selectedBooking).map(roomBooking => {
+                  const acc = getAccommodation(roomBooking.accommodationId)
+                  const isEditing = editingRoomId === roomBooking.id
+
+                  return (
+                    <div
+                      key={roomBooking.id}
+                      className="bg-gray-50 p-3.5 rounded-2xl border border-gray-100 flex flex-col gap-2"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <img
+                            src={acc?.image}
+                            alt={acc?.title}
+                            className="w-9 h-9 rounded-xl object-cover"
+                          />
+                          <div>
+                            <span className="text-xs font-extrabold text-gray-800 block">
+                              {acc?.title || `Habitación ${roomBooking.accommodationId}`}
+                            </span>
+                            <span className="text-[10px] text-gray-400">
+                              {roomBooking.guestsCount.adults} adultos, {roomBooking.guestsCount.children} niños
+                              {roomBooking.guestsCount.babies > 0 && ` (${roomBooking.guestsCount.babies} bebés)`}
+                              {roomBooking.guestsCount.pets > 0 && ` · 🐾 ${roomBooking.guestsCount.pets} mascota`}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-black text-gray-800">
+                            {fmt(roomBooking.totalAmount)}
+                          </span>
+                          {!isEditing && (
+                            <button
+                              onClick={() => handleStartEditRoom(roomBooking)}
+                              className="text-[11px] font-bold text-[#C5A059] hover:underline ml-2"
+                            >
+                              Cambiar
+                            </button>
+                          )}
+                          {getBookingGroup(selectedBooking).length > 1 && (
+                            <button
+                              onClick={() => handleRemoveRoomFromGroup(roomBooking.id)}
+                              className="text-gray-300 hover:text-rose-500 p-1"
+                              title="Quitar esta habitación del grupo"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Sub-formulario de edición de esta habitación */}
+                      {isEditing && (
+                        <div className="bg-white p-3 rounded-xl border border-gray-200 mt-1 space-y-2.5">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                            <div className="sm:col-span-2">
+                              <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Mover a otra habitación</label>
+                              <select
+                                value={editRoomForm.accommodationId}
+                                onChange={e => setEditRoomForm(f => ({ ...f, accommodationId: Number(e.target.value) }))}
+                                className="w-full border border-gray-200 rounded-lg p-1.5 font-bold bg-white text-xs"
+                              >
+                                {activeAccommodationOptions.map(o => (
+                                  <option key={o.id} value={o.id}>
+                                    {o.title} (Máx. {o.maxCapacity} pax) — ${o.price}/n
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Adultos</label>
+                              <input
+                                type="number"
+                                min={1}
+                                value={editRoomForm.adults}
+                                onChange={e => setEditRoomForm(f => ({ ...f, adults: Number(e.target.value) }))}
+                                className="w-full border border-gray-200 rounded-lg p-1.5 font-bold text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Niños</label>
+                              <input
+                                type="number"
+                                min={0}
+                                value={editRoomForm.children}
+                                onChange={e => setEditRoomForm(f => ({ ...f, children: Number(e.target.value) }))}
+                                className="w-full border border-gray-200 rounded-lg p-1.5 font-bold text-xs"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end gap-2 pt-1">
+                            <button
+                              onClick={() => setEditingRoomId(null)}
+                              className="px-2.5 py-1 border border-gray-200 text-gray-500 rounded-lg text-xs font-bold"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              disabled={savingRoom}
+                              onClick={handleSaveRoom}
+                              className="px-3 py-1 bg-[#C5A059] text-white rounded-lg text-xs font-bold hover:bg-[#b8904a]"
+                            >
+                              {savingRoom ? 'Guardando...' : 'Aplicar cambio'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Section 3: Stay Dates with Edit option */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                  Fechas de Estadía
+                </span>
+                {!editingDates && (
+                  <button
+                    onClick={handleStartEditDates}
+                    className="text-xs font-bold text-[#C5A059] hover:underline cursor-pointer"
+                  >
+                    Cambiar fechas
+                  </button>
+                )}
+              </div>
+
+              {editingDates ? (
+                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200/80 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Check-In</label>
+                      <input
+                        type="date"
+                        value={editDatesForm.checkIn}
+                        onChange={e => setEditDatesForm(f => ({ ...f, checkIn: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Check-Out</label>
+                      <input
+                        type="date"
+                        value={editDatesForm.checkOut}
+                        onChange={e => setEditDatesForm(f => ({ ...f, checkOut: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Resumen en vivo de noches y tarifas recalculadas */}
+                  {(() => {
+                    const { checkIn, checkOut } = editDatesForm
+                    if (!checkIn || !checkOut || checkOut <= checkIn) return null
+                    const group = getBookingGroup(selectedBooking)
+                    const nNights = calculateNights(checkIn, checkOut)
+                    const newTotal = group.reduce((sum, r) => {
+                      const std = getStandardRate(r.accommodationId, checkIn, checkOut, r.guestsCount.adults, r.guestsCount.children)
+                      return sum + getAdjustedBookingTotal(std, r.specialNotes)
+                    }, 0)
+                    return (
+                      <div className="p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-xs flex items-center justify-between text-amber-900">
+                        <span>{nNights} noche(s) seleccionadas</span>
+                        <span className="font-extrabold">Nuevo total: {fmt(newTotal)}</span>
+                      </div>
+                    )
+                  })()}
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      onClick={() => setEditingDates(false)}
+                      className="px-3 py-1.5 border border-gray-200 text-gray-500 rounded-xl text-xs font-bold hover:bg-gray-100"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      disabled={savingDates}
+                      onClick={handleSaveDates}
+                      className="px-4 py-1.5 bg-[#C5A059] text-white rounded-xl text-xs font-bold hover:bg-[#b8904a] disabled:opacity-40"
+                    >
+                      {savingDates ? 'Guardando...' : 'Aplicar nuevas fechas'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-gray-50 p-4 rounded-2xl grid grid-cols-2 gap-4 text-xs">
+                  <div>
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Entrada</span>
+                    <span className="font-bold text-gray-800 text-sm">{selectedBooking.checkIn}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Salida</span>
+                    <span className="font-bold text-gray-800 text-sm">{selectedBooking.checkOut}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Section 4: Financial Summary & Discount Editor */}
+            <div className="bg-[#FAF7F0] p-5 rounded-3xl border border-[#C5A059]/20 space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-extrabold text-gray-800">
+                  Resumen Económico {getBookingGroup(selectedBooking).length > 1 && '(Total Grupo)'}
+                </span>
+                {!editingFinancials && (
+                  <button
+                    onClick={handleStartEditFinancials}
+                    className="text-xs font-bold text-[#C5A059] hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <Percent size={13} /> Modificar tarifa o descuento
+                  </button>
+                )}
+              </div>
+
+              {/* Editor de Descuento (Porcentual o Monto Fijo) */}
+              {editingFinancials ? (
+                <div className="bg-white p-4 rounded-2xl border border-gray-200 space-y-3 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1">
+                        Descuento (%)
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={editDiscountPercent}
+                          onChange={e => setEditDiscountPercent(Math.max(0, Math.min(100, Number(e.target.value))))}
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-[#C5A059]"
+                        />
+                        <span className="text-gray-400 font-bold">%</span>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1">
+                        Descuento Fijo (USD)
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <span className="text-gray-400 font-bold">$</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step="any"
+                          value={editFixedDiscountAmount}
+                          onChange={e => setEditFixedDiscountAmount(Math.max(0, Number(e.target.value)))}
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-[#C5A059]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      onClick={() => setEditingFinancials(false)}
+                      className="px-3 py-1.5 border border-gray-200 text-gray-500 rounded-xl text-xs font-bold hover:bg-gray-50"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      disabled={savingFinancials}
+                      onClick={handleSaveFinancials}
+                      className="px-4 py-1.5 bg-[#C5A059] text-white rounded-xl text-xs font-bold hover:bg-[#b8904a] disabled:opacity-40"
+                    >
+                      {savingFinancials ? 'Guardando...' : 'Aplicar Descuento'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                (() => {
+                  const group = getBookingGroup(selectedBooking)
+                  const total = group.reduce((sum, r) => sum + r.totalAmount, 0)
+                  const paid = group.reduce((sum, r) => sum + r.amountPaid, 0)
+                  const pending = Math.max(0, total - paid)
+                  const discountPct = getBookingDiscountPercent(selectedBooking.specialNotes)
+                  const fixedDesc = getBookingFixedDiscountAmount(selectedBooking.specialNotes)
+
+                  return (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-3 gap-3 text-center">
+                        <div className="bg-white p-3 rounded-2xl border border-gray-100 shadow-2xs">
+                          <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block">Total</span>
+                          <span className="text-base font-black text-gray-800">{fmt(total)}</span>
+                        </div>
+                        <div className="bg-white p-3 rounded-2xl border border-gray-100 shadow-2xs">
+                          <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block">Abonado</span>
+                          <span className="text-base font-black text-emerald-600">{fmt(paid)}</span>
+                        </div>
+                        <div className="bg-white p-3 rounded-2xl border border-gray-100 shadow-2xs">
+                          <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block">Por Cobrar</span>
+                          <span className={`text-base font-black ${pending > 0 ? 'text-amber-700' : 'text-gray-400'}`}>
+                            {fmt(pending)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {(discountPct > 0 || fixedDesc > 0) && (
+                        <p className="text-[11px] text-[#8c6b2d] font-bold flex items-center gap-1">
+                          <span>✨</span>
+                          <span>
+                            Beneficio aplicado: {discountPct > 0 ? `${discountPct}% de descuento` : ''}
+                            {discountPct > 0 && fixedDesc > 0 ? ' + ' : ''}
+                            {fixedDesc > 0 ? `$${fixedDesc.toFixed(2)} USD de rebaja fija` : ''}
+                          </span>
+                        </p>
+                      )}
+                    </div>
+                  )
+                })()
+              )}
+            </div>
+
+            {/* Section 5: Historial de Abonos (Estilo Paxer) */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                  Historial de Abonos y Pagos ({bookingPayments.length})
+                </span>
+                {!addingPayment && (
+                  <button
+                    onClick={() => setAddingPayment(true)}
+                    className="text-xs font-bold text-[#C5A059] hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus size={13} /> Registrar Nuevo Abono
+                  </button>
+                )}
+              </div>
+
+              {/* Formulario de Registro de Nuevo Abono */}
+              {addingPayment && (
+                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200/80 space-y-3">
+                  <span className="text-xs font-extrabold text-gray-800 block">
+                    Registrar Cobro / Abono
+                  </span>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Monto en USD ($)</label>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        placeholder="Ej. 50.00"
+                        value={paymentForm.amount}
+                        onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2 bg-white font-bold outline-none focus:border-[#C5A059]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Fecha del Pago</label>
+                      <input
+                        type="date"
+                        value={paymentForm.date}
+                        onChange={e => setPaymentForm(f => ({ ...f, date: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2 bg-white font-medium outline-none focus:border-[#C5A059]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Método</label>
+                      <select
+                        value={paymentForm.method}
+                        onChange={e => setPaymentForm(f => ({ ...f, method: e.target.value as any }))}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2 bg-white font-medium outline-none focus:border-[#C5A059]"
+                      >
+                        <option value="transferencia">Transferencia</option>
+                        <option value="pago_movil">Pago Móvil</option>
+                        <option value="zelle">Zelle</option>
+                        <option value="efectivo">Efectivo</option>
+                        <option value="tarjeta">Tarjeta</option>
+                        <option value="cheque">Cheque</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Número de Referencia</label>
+                      <input
+                        type="text"
+                        placeholder="Ej. 12345678"
+                        value={paymentForm.reference}
+                        onChange={e => setPaymentForm(f => ({ ...f, reference: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2 bg-white font-medium outline-none focus:border-[#C5A059]"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Cobro en bolivares para este abono */}
+                  <CobroEnBolivares
+                    value={nuevoAbonoBs}
+                    onChange={setNuevoAbonoBs}
+                    onUsdCalculated={usd => setPaymentForm(f => ({ ...f, amount: String(usd) }))}
+                    bcvRate={bcvEuro}
+                    usdTarget={parseFloat(paymentForm.amount) || 0}
+                  />
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      onClick={() => setAddingPayment(false)}
+                      className="px-3 py-1.5 border border-gray-200 text-gray-500 rounded-xl text-xs font-bold hover:bg-gray-100"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      disabled={addingPayment}
+                      onClick={handleAddPayment}
+                      className="px-4 py-1.5 bg-[#C5A059] text-white rounded-xl text-xs font-bold hover:bg-[#b8904a] disabled:opacity-40"
+                    >
+                      {addingPayment ? 'Guardando...' : 'Guardar Abono'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Lista de Abonos */}
+              {loadingPayments ? (
+                <p className="text-xs text-gray-400 py-2">Cargando historial de pagos...</p>
+              ) : bookingPayments.length === 0 ? (
+                <div className="p-4 bg-gray-50 rounded-2xl text-center text-xs text-gray-400">
+                  No hay pagos registrados para esta reserva aún.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {bookingPayments.map((p, idx) => (
+                    <div
+                      key={p.id}
+                      className="bg-white p-3 rounded-2xl border border-gray-100 flex items-center justify-between text-xs hover:border-gray-200 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="w-6 h-6 rounded-full bg-emerald-50 text-emerald-600 font-bold flex items-center justify-center text-[10px]">
+                          {idx + 1}
+                        </span>
+                        <div>
+                          <span className="font-extrabold text-gray-800 block">
+                            {fmt(p.amount)}
+                          </span>
+                          <span className="text-[10px] text-gray-400">
+                            {p.paymentDate} · {p.method}
+                            {p.reference && ` · Ref: ${p.reference}`}
+                          </span>
+                          {p.amountBs && p.exchangeRate && (
+                            <span className="block text-[10px] text-amber-700 font-semibold">
+                              {textoEnBolivares(p.amountBs, p.exchangeRate)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleDeletePayment(p.id)}
+                        className="text-gray-300 hover:text-rose-500 p-1.5 rounded-lg transition-colors cursor-pointer"
+                        title="Eliminar este abono"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Section 6: Special Notes */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                  Notas Especiales / Observaciones
+                </span>
+                {!editingNotes && (
+                  <button
+                    onClick={handleStartEditNotes}
+                    className="text-xs font-bold text-[#C5A059] hover:underline cursor-pointer"
+                  >
+                    Editar notas
+                  </button>
+                )}
+              </div>
+
+              {editingNotes ? (
+                <div className="bg-gray-50 p-3 rounded-2xl border border-gray-200/80 space-y-2">
+                  <textarea
+                    rows={3}
+                    value={editNotes}
+                    onChange={e => setEditNotes(e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl p-2.5 text-xs bg-white outline-none focus:border-[#C5A059] font-medium"
+                    placeholder="Instrucciones especiales para cocina, llaves o solicitudes del huésped..."
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => setEditingNotes(false)}
+                      className="px-3 py-1 border border-gray-200 text-gray-500 rounded-lg text-xs font-bold"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      disabled={savingNotes}
+                      onClick={handleSaveNotes}
+                      className="px-3 py-1 bg-[#C5A059] text-white rounded-lg text-xs font-bold hover:bg-[#b8904a] disabled:opacity-40"
+                    >
+                      {savingNotes ? 'Guardando...' : 'Guardar notas'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-600 bg-gray-50 p-3.5 rounded-2xl font-medium">
+                  {selectedBooking.specialNotes || 'Sin notas especiales registradas.'}
+                </p>
+              )}
+            </div>
+
+            {/* Modal Footer / Delete & Close */}
+            <div className="flex items-center justify-between pt-4 border-t border-gray-100 flex-wrap gap-2">
+              <button
+                onClick={() => handleDeleteBooking(selectedBooking.id)}
+                className="flex items-center gap-1.5 text-xs font-bold text-rose-600 hover:text-rose-700 cursor-pointer"
+              >
+                <Trash2 size={14} /> Eliminar Reserva
+              </button>
+
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => handleDeleteBooking(selectedBooking.id)}
-                  className="flex-1 py-3 border border-rose-100 hover:bg-rose-50 text-rose-500 font-bold rounded-2xl text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5"
+                  type="button"
+                  disabled={sendingVoucher}
+                  onClick={handleSendBookingVoucher}
+                  className="px-3 py-2 bg-white border border-[#C5A059] text-[#8c6b2d] font-bold rounded-2xl text-xs hover:bg-[#C5A059]/10 transition-colors flex items-center gap-1.5 disabled:opacity-40 cursor-pointer"
+                  title="Enviar comprobante de pago con desglose al correo del huésped"
                 >
-                  <Trash2 size={14} />
-                  {selectedBooking.locator && bookings.filter(b => b.locator === selectedBooking.locator).length > 1
-                    ? 'Anular esta habitación'
-                    : 'Eliminar reserva'}
+                  <Mail size={13} />
+                  <span>{voucherSentFor === selectedBooking.id ? '¡Enviado! ✓' : sendingVoucher ? 'Enviando...' : 'Enviar Comprobante'}</span>
+                </button>
+
+                <button
+                  onClick={() => setSelectedBooking(null)}
+                  className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-2xl text-xs transition-colors cursor-pointer"
+                >
+                  Cerrar
                 </button>
               </div>
             </div>
@@ -4151,109 +4111,105 @@ export default function BookingsPage() {
         </div>
       )}
 
-      {/* 6. CREATE BOOKING MODAL (Administrador Form) */}
+      {/* 8. MODAL NUEVA RESERVA MANUAL */}
       {showAddModal && (
-        <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          {/* Overlay click to close */}
-          <div className="absolute inset-0" onClick={() => closeAddModal()} />
-          
-          {/* dvh, no vh: con el teclado del telefono abierto, 90vh deja los botones de
-              Cancelar/Registrar fuera de la pantalla y no se puede guardar la reserva. */}
-          <div className="relative bg-white rounded-t-[2rem] sm:rounded-[2.5rem] shadow-2xl w-full max-w-lg p-5 sm:p-6 space-y-5 overflow-y-auto max-h-[92dvh] sm:max-h-[90dvh] z-10 animate-in slide-in-from-bottom sm:zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl border border-gray-100 max-w-xl w-full p-6 space-y-5 animate-scale-in my-8 max-h-[90vh] overflow-y-auto custom-scrollbar">
+            {/* Header */}
             <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-              <h2 className="text-xl font-bold font-serif text-gray-800">Registrar Nueva Reserva</h2>
+              <div>
+                <h3 className="text-base font-extrabold text-gray-800">Nueva Reserva Manual</h3>
+                <p className="text-[10px] text-gray-400">
+                  Localizador único: <span className="font-mono font-bold text-[#8c6b2d] bg-[#C5A059]/10 px-1.5 py-0.5 rounded">{locatorCode}</span>
+                </p>
+              </div>
               <button
                 onClick={() => closeAddModal()}
-                className="p-1.5 hover:bg-gray-100 rounded-xl transition-colors text-gray-500"
+                className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
               >
-                <X size={18} />
+                <X size={16} />
               </button>
             </div>
 
+            {/* Form */}
             <div className="space-y-4">
-              {/* Localizador pre-generado */}
-              <div className="bg-brand-neutral/60 border border-gray-100 rounded-2xl p-3.5 flex justify-between items-center text-xs">
-                <span className="text-gray-500 font-semibold uppercase tracking-wider text-[10px]">Localizador de Reserva</span>
-                <span className="font-mono font-bold text-[#C5A059] tracking-widest bg-[#C5A059]/10 px-3.5 py-1.5 rounded-xl text-sm select-all">
-                  {locatorCode}
-                </span>
+              {/* Guest Names with Autocomplete */}
+              <div className="relative">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Nombre</label>
+                    <input
+                      type="text"
+                      autoComplete="off"
+                      placeholder="Ej. Roberto"
+                      value={form.guestFirstName}
+                      onFocus={() => setShowSuggestions(true)}
+                      onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                      onChange={e => {
+                        setForm(f => ({ ...f, guestFirstName: e.target.value }))
+                        setShowSuggestions(true)
+                      }}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Apellido</label>
+                    <input
+                      type="text"
+                      autoComplete="off"
+                      placeholder="Ej. Peralta"
+                      value={form.guestLastName}
+                      onFocus={() => setShowSuggestions(true)}
+                      onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                      onChange={e => {
+                        setForm(f => ({ ...f, guestLastName: e.target.value }))
+                        setShowSuggestions(true)
+                      }}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                    />
+                  </div>
+                </div>
+                {/* Autocomplete Dropdown — busca coincidencias por nombre o por apellido */}
+                {shouldShowGuestSuggestions && guestSuggestions.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-100 rounded-xl shadow-xl overflow-hidden max-h-48 custom-scrollbar">
+                    {guestSuggestions.map((g, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onMouseDown={() => {
+                          const { firstName, lastName } = splitPersonName(g.name)
+                          setForm(f => ({
+                            ...f,
+                            guestFirstName: firstName,
+                            guestLastName: lastName,
+                            guestPhone: g.phone || f.guestPhone,
+                            guestEmail: g.email || f.guestEmail,
+                            guestCi: g.ci || f.guestCi,
+                            companions: g.companions || f.companions
+                          }))
+                          setShowSuggestions(false)
+                        }}
+                        className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center justify-between text-xs border-b border-gray-50 last:border-0"
+                      >
+                        <div>
+                          <p className="font-bold text-gray-800">{g.name}</p>
+                          <p className="text-[10px] text-gray-400">{g.phone || g.email || 'Sin contacto'}</p>
+                        </div>
+                        {g.ci && <span className="text-[10px] font-mono text-gray-400">{g.ci}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* Guest details */}
+              {/* Guest CI, Phone, Email & Companions */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="col-span-1 sm:col-span-2 relative">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Nombre</label>
-                      <input
-                        type="text"
-                        autoComplete="off"
-                        placeholder="Ej. Ana"
-                        value={form.guestFirstName}
-                        onFocus={() => setShowSuggestions(true)}
-                        onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
-                        onChange={e => {
-                          setForm(f => ({ ...f, guestFirstName: e.target.value }))
-                          setShowSuggestions(true)
-                        }}
-                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Apellido</label>
-                      <input
-                        type="text"
-                        autoComplete="off"
-                        placeholder="Ej. Peralta"
-                        value={form.guestLastName}
-                        onFocus={() => setShowSuggestions(true)}
-                        onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
-                        onChange={e => {
-                          setForm(f => ({ ...f, guestLastName: e.target.value }))
-                          setShowSuggestions(true)
-                        }}
-                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
-                      />
-                    </div>
-                  </div>
-                  {/* Autocomplete Dropdown — busca coincidencias por nombre o por apellido */}
-                  {shouldShowGuestSuggestions && guestSuggestions.length > 0 && (
-                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-100 rounded-xl shadow-xl overflow-hidden max-h-48 custom-scrollbar">
-                      {guestSuggestions.map((g, i) => (
-                        <div
-                          key={i}
-                          onClick={() => {
-                            const { firstName, lastName } = splitPersonName(cleanGuestSuggestionName(g.name))
-                            setForm(f => ({
-                              ...f,
-                              guestFirstName: firstName,
-                              guestLastName: lastName,
-                              guestPhone: g.phone || f.guestPhone,
-                              guestEmail: g.email || f.guestEmail,
-                              guestCi: g.ci || f.guestCi,
-                              companions: g.companions || f.companions
-                            }))
-                            setShowSuggestions(false)
-                          }}
-                          className="px-4 py-2 hover:bg-[#C5A059]/10 cursor-pointer flex flex-col gap-0.5 border-b border-gray-50 last:border-0"
-                        >
-                          <span className="text-xs font-bold text-gray-800">{g.name}</span>
-                          {(g.ci || g.phone || g.email) && (
-                            <span className="text-[10px] text-gray-400">
-                              {[g.ci, g.phone, g.email].filter(Boolean).join(' • ')}
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
                 <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Cédula de Identidad (CI)</label>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Cédula / Pasaporte</label>
                   <input
                     type="text"
                     autoComplete="off"
-                    placeholder="Ej. V-15395394"
+                    placeholder="Ej. V-12345678"
                     value={form.guestCi}
                     onChange={e => setForm(f => ({ ...f, guestCi: e.target.value }))}
                     className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
@@ -4264,7 +4220,7 @@ export default function BookingsPage() {
                   <input
                     type="text"
                     autoComplete="off"
-                    placeholder="+58 412-000-0000"
+                    placeholder="+58 412-123-4567"
                     value={form.guestPhone}
                     onChange={e => setForm(f => ({ ...f, guestPhone: e.target.value }))}
                     className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
@@ -4295,8 +4251,8 @@ export default function BookingsPage() {
               </div>
 
               {/* Selección de uno o varios alojamientos bajo el mismo localizador */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="col-span-1 sm:col-span-3">
+              <div className="space-y-3">
+                <div>
                   <div className="flex items-center justify-between mb-2">
                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Habitaciones o cabañas</label>
                     <span className="text-[10px] font-bold text-[#C5A059]">{selectedAccommodationIds.length}/4 seleccionadas</span>
@@ -4328,15 +4284,56 @@ export default function BookingsPage() {
                                 if (selectedAccommodationIds.length === 1) return
                                 const next = selectedAccommodationIds.filter(id => id !== acc.id)
                                 setSelectedAccommodationIds(next)
-                                setForm(f => ({ ...f, accommodationId: next[0] }))
+                                setForm(f => {
+                                  let totalAdults = 0
+                                  let totalChildren = 0
+                                  let totalBabies = 0
+                                  next.forEach(id => {
+                                    const r = roomGuestsMap[id] || { adults: 2, children: 0, babies: 0 }
+                                    totalAdults += r.adults
+                                    totalChildren += r.children
+                                    totalBabies += r.babies
+                                  })
+                                  return {
+                                    ...f,
+                                    accommodationId: next[0],
+                                    adults: totalAdults,
+                                    children: totalChildren,
+                                    babies: totalBabies
+                                  }
+                                })
                               } else {
                                 if (selectedAccommodationIds.length >= 4) {
                                   alert('Puedes seleccionar hasta 4 habitaciones o cabañas por reserva.')
                                   return
                                 }
                                 const next = [...selectedAccommodationIds, acc.id]
+                                const roomCap = getMaxCapacity(acc.id) || 2
+                                const defaultPax = Math.min(2, roomCap) || 1
+                                const updatedMap = {
+                                  ...roomGuestsMap,
+                                  [acc.id]: roomGuestsMap[acc.id] || { adults: defaultPax, children: 0, babies: 0 }
+                                }
+                                setRoomGuestsMap(updatedMap)
                                 setSelectedAccommodationIds(next)
-                                setForm(f => ({ ...f, accommodationId: next[0] }))
+                                setForm(f => {
+                                  let totalAdults = 0
+                                  let totalChildren = 0
+                                  let totalBabies = 0
+                                  next.forEach(id => {
+                                    const r = updatedMap[id] || { adults: defaultPax, children: 0, babies: 0 }
+                                    totalAdults += r.adults
+                                    totalChildren += r.children
+                                    totalBabies += r.babies
+                                  })
+                                  return {
+                                    ...f,
+                                    accommodationId: next[0],
+                                    adults: totalAdults,
+                                    children: totalChildren,
+                                    babies: totalBabies
+                                  }
+                                }})
                               }
                             }}
                             className="rounded text-[#C5A059] focus:ring-[#C5A059]"
@@ -4356,37 +4353,31 @@ export default function BookingsPage() {
                     </p>
                   )}
                 </div>
-                <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Check-In</label>
-                  <input
-                    type="date"
-                    value={form.checkIn}
-                    onChange={e => setForm(f => ({ ...f, checkIn: e.target.value }))}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Check-Out</label>
-                  <input
-                    type="date"
-                    value={form.checkOut}
-                    onChange={e => setForm(f => ({ ...f, checkOut: e.target.value }))}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Adultos</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={form.adults}
-                    onChange={e => setForm(f => ({ ...f, adults: Number(e.target.value) }))}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
-                  />
+
+                {/* Check-In and Check-Out */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Check-In</label>
+                    <input
+                      type="date"
+                      value={form.checkIn}
+                      onChange={e => setForm(f => ({ ...f, checkIn: e.target.value }))}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Check-Out</label>
+                    <input
+                      type="date"
+                      value={form.checkOut}
+                      onChange={e => setForm(f => ({ ...f, checkOut: e.target.value }))}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* Collision / Date range warning */}
+              {/* Collision / Date range / Capacity warnings */}
               {(() => {
                 if (form.checkOut <= form.checkIn) {
                   return (
@@ -4413,47 +4404,319 @@ export default function BookingsPage() {
                 if (maxCapacity > 0 && totalGuests > maxCapacity) {
                   return (
                     <div className="bg-rose-50 border border-rose-100 text-rose-800 text-xs p-3.5 rounded-2xl flex flex-col gap-0.5 animate-fade-in">
-                      <span className="font-bold">⚠️ Capacidad Excedida</span>
+                      <span className="font-bold">⚠️ Capacidad Total Excedida</span>
                       <span>Las unidades seleccionadas admiten hasta <strong>{maxCapacity} personas</strong> y se ingresaron <strong>{totalGuests}</strong>.</span>
                     </div>
                   )
                 }
+                if (selectedAccommodationIds.length > 1) {
+                  const overRoom = selectedAccommodationIds.find(id => {
+                    const r = roomGuestsMap[id] || { adults: 0, children: 0, babies: 0 }
+                    const cap = getMaxCapacity(id)
+                    return cap > 0 && (r.adults + r.children) > cap
+                  })
+                  if (overRoom) {
+                    const cap = getMaxCapacity(overRoom)
+                    const r = roomGuestsMap[overRoom] || { adults: 0, children: 0, babies: 0 }
+                    return (
+                      <div className="bg-rose-50 border border-rose-100 text-rose-800 text-xs p-3.5 rounded-2xl flex flex-col gap-0.5 animate-fade-in">
+                        <span className="font-bold">⚠️ Capacidad Excedida en {getAccommodation(overRoom)?.title}</span>
+                        <span>Esta habitación admite máx. <strong>{cap} personas</strong> y tiene asignadas <strong>{r.adults + r.children}</strong>.</span>
+                      </div>
+                    )
+                  }
+                  const emptyRoom = selectedAccommodationIds.find(id => {
+                    const r = roomGuestsMap[id] || { adults: 0, children: 0, babies: 0 }
+                    return (r.adults + r.children) === 0
+                  })
+                  if (emptyRoom) {
+                    return (
+                      <div className="bg-amber-50 border border-amber-200 text-amber-900 text-xs p-3.5 rounded-2xl flex flex-col gap-0.5 animate-fade-in">
+                        <span className="font-bold">⚠️ Habitación sin huéspedes asignados</span>
+                        <span>La unidad <strong>{getAccommodation(emptyRoom)?.title}</strong> no tiene ningún adulto o niño asignado.</span>
+                      </div>
+                    )
+                  }
+                }
                 return null
               })()}
 
-              {/* Extras count */}
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Niños</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={form.children}
-                    onChange={e => setForm(f => ({ ...f, children: Number(e.target.value) }))}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
-                  />
+              {/* Distribución de Huéspedes */}
+              {selectedAccommodationIds.length > 1 ? (
+                <div className="bg-amber-50/50 border border-amber-200/80 rounded-2xl p-3.5 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <div>
+                      <h4 className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
+                        <span>👥</span> Distribución de Huéspedes por Habitación
+                      </h4>
+                      <p className="text-[10px] text-gray-500">
+                        Indica cuántos adultos, niños y bebés van en cada habitación
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-bold text-[#8c6b2d] bg-[#C5A059]/20 px-2 py-0.5 rounded-full self-start sm:self-auto">
+                      Total: {form.adults} ad · {form.children} niñ{form.babies > 0 ? ` · ${form.babies} beb` : ''}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {selectedAccommodationIds.map((accId, idx) => {
+                      const acc = getAccommodation(accId)
+                      const cap = getMaxCapacity(accId)
+                      const roomDist = roomGuestsMap[accId] || { adults: 2, children: 0, babies: 0 }
+                      const roomPax = roomDist.adults + roomDist.children
+                      const isOver = cap > 0 && roomPax > cap
+                      const isEmpty = roomPax === 0
+
+                      return (
+                        <div
+                          key={accId}
+                          className={`bg-white rounded-xl border p-2.5 transition-all ${
+                            isOver
+                              ? 'border-rose-300 ring-1 ring-rose-300 bg-rose-50/20'
+                              : isEmpty
+                                ? 'border-amber-300 ring-1 ring-amber-300 bg-amber-50/20'
+                                : 'border-gray-200 shadow-sm'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-gray-100">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="w-5 h-5 rounded-full bg-[#C5A059]/20 text-[#8c6b2d] text-[10px] font-black flex items-center justify-center shrink-0">
+                                {idx + 1}
+                              </span>
+                              <div className="truncate">
+                                <p className="text-xs font-bold text-gray-800 truncate">{acc?.title || `Habitación ${accId}`}</p>
+                                <p className="text-[10px] text-gray-400">
+                                  Máximo: <strong className={isOver ? 'text-rose-600' : 'text-gray-600'}>{cap} pax</strong>
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {isOver && (
+                                <span className="text-[9px] font-bold text-rose-600 bg-rose-100 px-1.5 py-0.5 rounded-full uppercase">
+                                  Excede máx
+                                </span>
+                              )}
+                              {isEmpty && (
+                                <span className="text-[9px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full uppercase">
+                                  Vacía
+                                </span>
+                              )}
+                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                                isOver ? 'bg-rose-100 text-rose-700' : 'bg-gray-100 text-gray-700'
+                              }`}>
+                                {roomPax} pax
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2">
+                            {/* Adultos */}
+                            <div className="bg-gray-50 rounded-lg p-1 flex flex-col items-center">
+                              <span className="text-[9px] font-bold text-gray-500 uppercase tracking-wide mb-1">Adultos</span>
+                              <div className="flex items-center gap-1 w-full justify-center">
+                                <button
+                                  type="button"
+                                  onClick={() => updateRoomGuests(accId, 'adults', -1)}
+                                  disabled={roomDist.adults <= 0}
+                                  className="w-5 h-5 rounded bg-white border border-gray-200 text-gray-700 font-bold text-xs flex items-center justify-center hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                  -
+                                </button>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={roomDist.adults}
+                                  onChange={e => updateRoomGuests(accId, 'adults', Number(e.target.value), true)}
+                                  className="w-9 text-center text-xs font-bold text-gray-800 bg-white border border-gray-200 rounded py-0.5"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => updateRoomGuests(accId, 'adults', 1)}
+                                  className="w-5 h-5 rounded bg-white border border-gray-200 text-gray-700 font-bold text-xs flex items-center justify-center hover:bg-gray-100"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Niños */}
+                            <div className="bg-gray-50 rounded-lg p-1 flex flex-col items-center">
+                              <span className="text-[9px] font-bold text-gray-500 uppercase tracking-wide mb-1">Niños (4-11)</span>
+                              <div className="flex items-center gap-1 w-full justify-center">
+                                <button
+                                  type="button"
+                                  onClick={() => updateRoomGuests(accId, 'children', -1)}
+                                  disabled={roomDist.children <= 0}
+                                  className="w-5 h-5 rounded bg-white border border-gray-200 text-gray-700 font-bold text-xs flex items-center justify-center hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                  -
+                                </button>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={roomDist.children}
+                                  onChange={e => updateRoomGuests(accId, 'children', Number(e.target.value), true)}
+                                  className="w-9 text-center text-xs font-bold text-gray-800 bg-white border border-gray-200 rounded py-0.5"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => updateRoomGuests(accId, 'children', 1)}
+                                  className="w-5 h-5 rounded bg-white border border-gray-200 text-gray-700 font-bold text-xs flex items-center justify-center hover:bg-gray-100"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Bebés */}
+                            <div className="bg-gray-50 rounded-lg p-1 flex flex-col items-center">
+                              <span className="text-[9px] font-bold text-gray-500 uppercase tracking-wide mb-1">Bebés (&lt;4)</span>
+                              <div className="flex items-center gap-1 w-full justify-center">
+                                <button
+                                  type="button"
+                                  onClick={() => updateRoomGuests(accId, 'babies', -1)}
+                                  disabled={roomDist.babies <= 0}
+                                  className="w-5 h-5 rounded bg-white border border-gray-200 text-gray-700 font-bold text-xs flex items-center justify-center hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                  -
+                                </button>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={roomDist.babies}
+                                  onChange={e => updateRoomGuests(accId, 'babies', Number(e.target.value), true)}
+                                  className="w-9 text-center text-xs font-bold text-gray-800 bg-white border border-gray-200 rounded py-0.5"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => updateRoomGuests(accId, 'babies', 1)}
+                                  className="w-5 h-5 rounded bg-white border border-gray-200 text-gray-700 font-bold text-xs flex items-center justify-center hover:bg-gray-100"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {/* Mascotas del grupo */}
+                  <div className="flex items-center justify-between bg-white rounded-xl border border-gray-200 p-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">🐾</span>
+                      <div>
+                        <span className="text-xs font-bold text-gray-700">Mascotas en la reserva grupal</span>
+                        <p className="text-[10px] text-gray-400">Total de mascotas que acompañan al grupo</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, pets: Math.max(0, f.pets - 1) }))}
+                        disabled={form.pets <= 0}
+                        className="w-6 h-6 rounded bg-gray-100 border border-gray-200 text-gray-600 font-bold text-xs flex items-center justify-center hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min={0}
+                        value={form.pets}
+                        onChange={e => setForm(f => ({ ...f, pets: Math.max(0, Number(e.target.value)) }))}
+                        className="w-10 text-center text-xs font-bold text-gray-800 bg-white border border-gray-200 rounded py-0.5"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, pets: f.pets + 1 }))}
+                        className="w-6 h-6 rounded bg-gray-100 border border-gray-200 text-gray-600 font-bold text-xs flex items-center justify-center hover:bg-gray-200"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Bebés</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={form.babies}
-                    onChange={e => setForm(f => ({ ...f, babies: Number(e.target.value) }))}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
-                  />
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Adultos</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={form.adults}
+                      onChange={e => {
+                        const val = Math.max(1, Number(e.target.value))
+                        setForm(f => ({ ...f, adults: val }))
+                        if (selectedAccommodationIds[0]) {
+                          setRoomGuestsMap(prev => ({
+                            ...prev,
+                            [selectedAccommodationIds[0]]: {
+                              ...(prev[selectedAccommodationIds[0]] || { adults: 2, children: 0, babies: 0 }),
+                              adults: val
+                            }
+                          }))
+                        }
+                      }}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Niños</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={form.children}
+                      onChange={e => {
+                        const val = Math.max(0, Number(e.target.value))
+                        setForm(f => ({ ...f, children: val }))
+                        if (selectedAccommodationIds[0]) {
+                          setRoomGuestsMap(prev => ({
+                            ...prev,
+                            [selectedAccommodationIds[0]]: {
+                              ...(prev[selectedAccommodationIds[0]] || { adults: 2, children: 0, babies: 0 }),
+                              children: val
+                            }
+                          }))
+                        }
+                      }}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Bebés</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={form.babies}
+                      onChange={e => {
+                        const val = Math.max(0, Number(e.target.value))
+                        setForm(f => ({ ...f, babies: val }))
+                        if (selectedAccommodationIds[0]) {
+                          setRoomGuestsMap(prev => ({
+                            ...prev,
+                            [selectedAccommodationIds[0]]: {
+                              ...(prev[selectedAccommodationIds[0]] || { adults: 2, children: 0, babies: 0 }),
+                              babies: val
+                            }
+                          }))
+                        }
+                      }}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">🐾 Mascotas</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={form.pets}
+                      onChange={e => setForm(f => ({ ...f, pets: Math.max(0, Number(e.target.value)) }))}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">🐾 Mascotas</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={form.pets}
-                    onChange={e => setForm(f => ({ ...f, pets: Number(e.target.value) }))}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
-                  />
-                </div>
-              </div>
+              )}
 
               {/* Tarifa y Descuento */}
               <div className="bg-brand-neutral/40 p-4 rounded-2xl border border-gray-100 space-y-3">
@@ -4475,128 +4738,106 @@ export default function BookingsPage() {
                     }}
                     className="text-[#C5A059] focus:ring-[#C5A059] rounded"
                   />
-                  <label htmlFor="useCustomRate" className="text-xs font-semibold text-gray-700 cursor-pointer">
-                    Modificar tarifa o aplicar descuento
+                  <label htmlFor="useCustomRate" className="text-xs font-bold text-gray-700 cursor-pointer">
+                    Tarifa Especial / Descuento Manual
                   </label>
                 </div>
 
                 {useCustomRate && (
-                  <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-200/50 animate-fade-in">
-                    <div>
-                      <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1 text-gray-500">Descuento (%)</label>
-                      <select
-                        value={discountPercent}
-                        onChange={e => setDiscountPercent(Number(e.target.value))}
-                        className="w-full border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs outline-none focus:border-[#C5A059] bg-white text-gray-700"
-                      >
-                        <option value={0}>Sin Descuento</option>
-                        <option value={10}>10% OFF</option>
-                        <option value={15}>15% OFF</option>
-                        <option value={20}>20% OFF</option>
-                        <option value={25}>25% OFF</option>
-                        <option value={50}>50% OFF (Cortesía)</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1 text-gray-500">Descuento Manual (%)</label>
-                      <input
-                        type="number"
-                        placeholder="%"
-                        min={0}
-                        max={100}
-                        value={discountPercent || ''}
-                        onChange={e => setDiscountPercent(Math.min(100, Math.max(0, Number(e.target.value))))}
-                        className="w-full border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs outline-none focus:border-[#C5A059] text-gray-700"
-                      />
+                  <div className="space-y-3 pt-2 border-t border-gray-200/40 animate-fade-in">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">
+                          Descuento (%)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={discountPercent}
+                          onChange={e => setDiscountPercent(Number(e.target.value))}
+                          placeholder="Ej. 10"
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">
+                          Total Cobrado (USD)
+                        </label>
+                        <input
+                          type="number"
+                          value={calculatedTotal}
+                          onChange={e => {
+                            setDiscountPercent(0)
+                            setForm(f => ({ ...f, totalAmount: Number(e.target.value) }))
+                          }}
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white font-bold text-gray-800"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}
-              </div>
 
-              {/* Finance details */}
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Costo Total ($)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={calculatedTotal}
-                    onChange={e => setForm(f => ({ ...f, totalAmount: Number(e.target.value) }))}
-                    readOnly={!useCustomRate}
-                    className={`w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] transition-colors ${
-                      !useCustomRate 
-                        ? 'bg-gray-50 text-gray-500 cursor-not-allowed' 
-                        : 'bg-white text-gray-800'
-                    }`}
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Abonado ($)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={form.amountPaid}
-                    onChange={e => setForm(f => ({ ...f, amountPaid: Number(e.target.value) }))}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">
-                    Fecha del abono
-                  </label>
-                  <input
-                    type="date"
-                    value={form.paymentDate}
-                    onChange={e => setForm(f => ({ ...f, paymentDate: e.target.value }))}
-                    disabled={Number(form.amountPaid) <= 0}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] disabled:bg-gray-50 disabled:text-gray-400"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">Método</label>
-                  <select
-                    value={form.paymentMethod}
-                    onChange={e => setForm(f => ({ ...f, paymentMethod: e.target.value as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' | 'zelle' | 'pago_movil' }))}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white capitalize"
-                  >
-                    <option value="transferencia">Transferencia</option>
-                    <option value="pago_movil">Pago Móvil</option>
-                    <option value="zelle">Zelle</option>
-                    <option value="efectivo">Efectivo</option>
-                    <option value="tarjeta">Tarjeta</option>
-                    <option value="cheque">Cheque</option>
-                  </select>
+                <div className="flex justify-between items-center text-sm font-extrabold text-gray-900 pt-2 border-t border-gray-100">
+                  <span>Monto Total a Pagar:</span>
+                  <span className="text-base text-[#C5A059]">${calculatedTotal} USD</span>
                 </div>
               </div>
 
-              <CobroEnBolivares
-                  activo={abonoInicialBs.activo}
-                  onActivo={v => {
-                    setAbonoInicialBs(prev => ({ ...prev, activo: v }))
-                    if (!v) return
-                    // Al activarlo, el monto en dolares pasa a salir de los bolivares.
-                    setForm(prevForm => ({ ...prevForm, amountPaid: 0 }))
-                  }}
-                  bolivares={abonoInicialBs.bolivares}
-                  onBolivares={v => {
-                    setAbonoInicialBs(prev => ({ ...prev, bolivares: v }))
-                    setForm(prevForm => ({
-                      ...prevForm,
-                      amountPaid: dolaresDeBolivares(v, abonoInicialBs.tasa),
-                    }))
-                  }}
-                  tasa={abonoInicialBs.tasa}
-                  onTasa={v => {
-                    setAbonoInicialBs(prev => ({ ...prev, tasa: v }))
-                    setForm(prevForm => ({
-                      ...prevForm,
-                      amountPaid: dolaresDeBolivares(abonoInicialBs.bolivares, v),
-                    }))
-                  }}
-                referencia={bcvEuro}
-              />
+              {/* Registro de Abono Inicial */}
+              <div className="bg-gray-50/50 p-4 rounded-2xl border border-gray-100 space-y-3">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">
+                  Abono o Pago Inicial (Opcional)
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Monto Abonado (USD)</label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      placeholder="0.00"
+                      value={form.amountPaid || ''}
+                      onChange={e => setForm(f => ({ ...f, amountPaid: Number(e.target.value) }))}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Fecha del Abono</label>
+                    <input
+                      type="date"
+                      value={form.paymentDate}
+                      onChange={e => setForm(f => ({ ...f, paymentDate: e.target.value }))}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Método de Pago</label>
+                    <select
+                      value={form.paymentMethod}
+                      onChange={e => setForm(f => ({ ...f, paymentMethod: e.target.value as any }))}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
+                    >
+                      <option value="transferencia">Transferencia Bancaria</option>
+                      <option value="pago_movil">Pago Móvil</option>
+                      <option value="zelle">Zelle</option>
+                      <option value="efectivo">Efectivo (USD)</option>
+                      <option value="tarjeta">Punto de Venta / Tarjeta</option>
+                    </select>
+                  </div>
+                </div>
 
-              {/* Código de pago — solo aplica a métodos bancarios que se puedan verificar contra el banco */}
+                {/* Cobro en bolivares para el abono inicial */}
+                <CobroEnBolivares
+                  value={abonoInicialBs}
+                  onChange={setAbonoInicialBs}
+                  onUsdCalculated={usd => setForm(f => ({ ...f, amountPaid: usd }))}
+                  bcvRate={bcvEuro}
+                  usdTarget={Number(form.amountPaid) || 0}
+                />
+              </div>
+
+              {/* Referencia de pago */}
               {(form.paymentMethod === 'transferencia' || form.paymentMethod === 'zelle' || form.paymentMethod === 'pago_movil') && (
                 <div>
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">
@@ -4641,9 +4882,15 @@ export default function BookingsPage() {
                   !(form.guestFirstName.trim() && form.guestLastName.trim()) ||
                   form.checkOut <= form.checkIn ||
                   selectedAccommodationIds.length === 0 ||
+                  (Number(form.adults) + Number(form.children)) === 0 ||
                   bookings.some(b => selectedAccommodationIds.includes(b.accommodationId) && form.checkIn < b.checkOut && form.checkOut > b.checkIn) ||
                   (selectedAccommodationIds.reduce((sum, id) => sum + getMaxCapacity(id), 0) > 0 &&
-                    (Number(form.adults) + Number(form.children)) > selectedAccommodationIds.reduce((sum, id) => sum + getMaxCapacity(id), 0))
+                    (Number(form.adults) + Number(form.children)) > selectedAccommodationIds.reduce((sum, id) => sum + getMaxCapacity(id), 0)) ||
+                  (selectedAccommodationIds.length > 1 && selectedAccommodationIds.some(id => {
+                    const r = roomGuestsMap[id] || { adults: 0, children: 0, babies: 0 }
+                    const cap = getMaxCapacity(id)
+                    return (r.adults + r.children === 0) || (cap > 0 && (r.adults + r.children) > cap)
+                  }))
                 }
                 className="flex-1 py-3 bg-[#C5A059] hover:bg-[#b8904a] text-white font-bold rounded-2xl text-xs uppercase tracking-wider disabled:opacity-40 transition-all flex items-center justify-center gap-1.5 active:scale-95"
               >
