@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react'
-import { Plus, Search, X, Check, CalendarDays, ChevronDown, Loader2, Receipt, Building2, ArrowUpDown, ArrowUp, ArrowDown, Filter, RotateCcw, Calculator, Tag, Pencil, Trash2 } from 'lucide-react'
+import { Plus, Search, X, Check, CalendarDays, ChevronDown, Loader2, Receipt, Building2, ArrowUpDown, ArrowUp, ArrowDown, Filter, RotateCcw, Calculator, Tag, Pencil, Trash2, Coins, AlertCircle } from 'lucide-react'
 import { categoryLabels, categoryColors } from '../data/mockData'
 import LoadErrorBanner from './LoadErrorBanner'
 import { getBcvUsdRate, getParallelUsdRate } from '../../utils/exchangeRate'
@@ -291,6 +291,81 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   const [bcvUsd, setBcvUsd] = useState(0)
   const [paraleloUsd, setParaleloUsd] = useState(0)
   const [mathExpression, setMathExpression] = useState('')
+  const [cashBoxError, setCashBoxError] = useState(false)
+
+  const handleBsChange = (newBsStr: string) => {
+    setAmountBs(newBsStr)
+    setCashBoxError(false)
+    const numBs = parseLocalNumber(newBsStr)
+    if (numBs > 0) {
+      if (exchangeRate > 0) {
+        const usd = Number((numBs / exchangeRate).toFixed(2))
+        setForm(f => ({
+          ...f,
+          amount: usd,
+          amountBs: numBs,
+          exchangeRate,
+        }))
+      } else {
+        setForm(f => ({
+          ...f,
+          amountBs: numBs,
+        }))
+      }
+    } else {
+      setForm(f => ({
+        ...f,
+        amountBs: null,
+      }))
+    }
+  }
+
+  const handleRateChange = (newRate: number) => {
+    setExchangeRate(newRate)
+    setCashBoxError(false)
+    const numBs = parseLocalNumber(amountBs)
+    if (newRate > 0) {
+      if (numBs > 0) {
+        const usd = Number((numBs / newRate).toFixed(2))
+        setForm(f => ({
+          ...f,
+          amount: usd,
+          amountBs: numBs,
+          exchangeRate: newRate,
+        }))
+      } else if (form.amount > 0) {
+        const calculatedBs = Number((form.amount * newRate).toFixed(2))
+        const bsFormatted = calculatedBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        setAmountBs(bsFormatted)
+        setForm(f => ({
+          ...f,
+          amountBs: calculatedBs,
+          exchangeRate: newRate,
+        }))
+      } else {
+        setForm(f => ({
+          ...f,
+          exchangeRate: newRate,
+        }))
+      }
+    } else {
+      setForm(f => ({
+        ...f,
+        exchangeRate: null,
+      }))
+    }
+  }
+
+  const handleAmountChange = (newAmount: number) => {
+    setCashBoxError(false)
+    if (form.cashBox === 'bs' && exchangeRate > 0 && newAmount > 0) {
+      const calcBs = Number((newAmount * exchangeRate).toFixed(2))
+      setAmountBs(calcBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+      setForm(f => ({ ...f, amount: newAmount, amountBs: calcBs, exchangeRate }))
+    } else {
+      setForm(f => ({ ...f, amount: newAmount }))
+    }
+  }
 
   // Lista de distribuidores/proveedores con conteo de movimientos para el menú de filtro
   const availableDistributors = useMemo(() => {
@@ -525,7 +600,11 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       amountBs: null,
       cashBox: null,
     })
+    setAmountBs('')
+    setExchangeRate(0)
+    setMathExpression('')
     setShowCalculator(false)
+    setCashBoxError(false)
     setShowModal(true)
   }
 
@@ -543,7 +622,11 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       amountBs: tx.amountBs ?? null,
       cashBox: tx.cashBox ?? null,
     })
+    setAmountBs(tx.amountBs ? tx.amountBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '')
+    setExchangeRate(tx.exchangeRate ?? 0)
+    setMathExpression('')
     setShowCalculator(false)
+    setCashBoxError(false)
     setShowModal(true)
   }
 
@@ -577,9 +660,16 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
   const handleSave = async () => {
     if (!form.description.trim() || form.amount <= 0) return
 
-    if (form.cashBox === 'bs' && !(form.amountBs && form.amountBs > 0)) {
-      alert('Para descontarlo de la caja en bolívares hace falta saber cuántos bolívares fueron.'
-        + ' Abra la calculadora y anote los bolívares y la tasa.')
+    const effectiveBs = form.amountBs || parseLocalNumber(amountBs)
+    const effectiveRate = form.exchangeRate || exchangeRate
+
+    if (form.cashBox === 'bs' && (!effectiveBs || effectiveBs <= 0)) {
+      setCashBoxError(true)
+      const el = document.getElementById('caja-chica-amount-bs')
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        el.focus()
+      }
       return
     }
     // Un segundo toque mientras se guarda duplicaría el gasto: dinero contado dos veces.
@@ -596,8 +686,8 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
       amount: form.amount,
       payment_method: form.paymentMethod,
       related_to: cleanRelatedTo || null,
-      exchange_rate: form.exchangeRate ?? null,
-      amount_bs: form.amountBs ?? null,
+      exchange_rate: effectiveRate ?? null,
+      amount_bs: effectiveBs ?? null,
       cash_box: form.cashBox ?? null,
     }
 
@@ -1380,7 +1470,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                       step="any"
                       placeholder="0.00"
                       value={form.amount || ''}
-                      onChange={e => setForm(f => ({ ...f, amount: Number(e.target.value) }))}
+                      onChange={e => handleAmountChange(Number(e.target.value))}
                       className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-semibold outline-none focus:border-[#C5A059] transition-colors"
                     />
                   </div>
@@ -1391,7 +1481,12 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                       </p>
                       <button
                         type="button"
-                        onClick={() => setForm(f => ({ ...f, amountBs: null, exchangeRate: null }))}
+                        onClick={() => {
+                          setForm(f => ({ ...f, amountBs: null, exchangeRate: null }))
+                          setAmountBs('')
+                          setExchangeRate(0)
+                          setCashBoxError(false)
+                        }}
                         className="text-[11px] font-bold text-gray-400 hover:text-red-500 transition-colors shrink-0"
                         title="Quitar la tasa de este movimiento"
                       >
@@ -1455,7 +1550,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                             type="text"
                             placeholder="Ej. 15.000,00"
                             value={amountBs}
-                            onChange={e => setAmountBs(e.target.value)}
+                            onChange={e => handleBsChange(e.target.value)}
                             className="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-sm font-semibold outline-none focus:border-amber-500"
                           />
                         </div>
@@ -1471,7 +1566,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                             inputMode="decimal"
                             placeholder="Ej. 942,53"
                             value={exchangeRate || ''}
-                            onChange={e => setExchangeRate(Number(e.target.value))}
+                            onChange={e => handleRateChange(Number(e.target.value))}
                             className="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-sm font-semibold outline-none focus:border-amber-500"
                           />
                         </div>
@@ -1484,7 +1579,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                         {bcvUsd > 0 && (
                           <button
                             type="button"
-                            onClick={() => setExchangeRate(bcvUsd)}
+                            onClick={() => handleRateChange(bcvUsd)}
                             className="px-2 py-0.5 rounded bg-white hover:bg-amber-50 text-amber-900 border border-amber-200 font-semibold flex items-center gap-1 shadow-2xs"
                           >
                             <span>BCV:</span>
@@ -1494,7 +1589,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                         {paraleloUsd > 0 && (
                           <button
                             type="button"
-                            onClick={() => setExchangeRate(paraleloUsd)}
+                            onClick={() => handleRateChange(paraleloUsd)}
                             className="px-2 py-0.5 rounded bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-semibold flex items-center gap-1 shadow-2xs"
                           >
                             <span>Paralelo:</span>
@@ -1505,7 +1600,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
 
                       {/* Desglose y resultado del cálculo */}
                       {(() => {
-                        const numBs = parseFloat(amountBs.replace(/\./g, '').replace(',', '.')) || (parseFloat(amountBs) || 0)
+                        const numBs = parseLocalNumber(amountBs)
                         const result = (numBs > 0 && exchangeRate > 0) ? Number((numBs / exchangeRate).toFixed(2)) : 0
 
                         return (
@@ -1684,26 +1779,171 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
               </div>
 
               {form.type === 'egreso' && (
-                <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">
-                    ¿De dónde salió el dinero?
-                  </label>
-                  <select
-                    value={form.cashBox ?? ''}
-                    onChange={e => setForm(f => ({
-                      ...f,
-                      cashBox: (e.target.value || null) as 'usd' | 'bs' | null,
-                    }))}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059] transition-colors bg-white"
-                  >
-                    <option value="">Del banco o de otra parte</option>
-                    <option value="usd">Caja chica en dólares</option>
-                    <option value="bs">Caja chica en bolívares</option>
-                  </select>
-                  {form.cashBox === 'bs' && !(form.amountBs && form.amountBs > 0) && (
-                    <p className="text-[11px] text-amber-700 mt-1.5">
-                      Anote los bolívares con la calculadora para poder descontarlos de la caja.
-                    </p>
+                <div className="space-y-2.5">
+                  <div>
+                    <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">
+                      ¿De dónde salió el dinero?
+                    </label>
+                    <select
+                      value={form.cashBox ?? ''}
+                      onChange={e => {
+                        const val = (e.target.value || null) as 'usd' | 'bs' | null
+                        setCashBoxError(false)
+                        setForm(f => ({ ...f, cashBox: val }))
+                        if (val === 'bs' && form.amount > 0 && exchangeRate > 0 && !amountBs) {
+                          const calcBs = Number((form.amount * exchangeRate).toFixed(2))
+                          const formatted = calcBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                          setAmountBs(formatted)
+                          setForm(f => ({ ...f, cashBox: val, amountBs: calcBs, exchangeRate }))
+                        }
+                      }}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059] transition-colors bg-white"
+                    >
+                      <option value="">Del banco o de otra parte</option>
+                      <option value="usd">Caja chica en dólares</option>
+                      <option value="bs">Caja chica en bolívares</option>
+                    </select>
+                  </div>
+
+                  {form.cashBox === 'bs' && (
+                    <div className={`p-3.5 rounded-2xl border transition-all ${
+                      cashBoxError && !(form.amountBs && form.amountBs > 0)
+                        ? 'border-red-400 bg-red-50/70 shadow-sm'
+                        : form.amountBs && form.amountBs > 0
+                          ? 'border-emerald-300 bg-emerald-50/50'
+                          : 'border-amber-300 bg-amber-50/60'
+                    }`}>
+                      <div className="flex items-center justify-between mb-2.5">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-gray-800">
+                          <Coins size={15} className={cashBoxError && !(form.amountBs && form.amountBs > 0) ? 'text-red-500' : 'text-amber-600'} />
+                          <span>Salida de Caja Chica en Bolívares</span>
+                        </div>
+                        {form.amountBs && form.amountBs > 0 ? (
+                          <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100/90 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Check size={12} /> Se descontará Bs. {form.amountBs.toLocaleString('es-VE', { maximumFractionDigits: 2 })}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold text-amber-800 bg-amber-100/90 border border-amber-200 px-2 py-0.5 rounded-full">
+                            Obligatorio para la caja
+                          </span>
+                        )}
+                      </div>
+
+                      {cashBoxError && !(form.amountBs && form.amountBs > 0) && (
+                        <div className="mb-2.5 p-2 bg-red-100/90 border border-red-200 rounded-xl text-xs text-red-700 font-semibold flex items-center gap-1.5">
+                          <AlertCircle size={14} className="shrink-0 text-red-600" />
+                          <span>Indique cuántos bolívares salieron y la tasa para descontarlos de la caja.</span>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-600 uppercase tracking-widest block mb-1">
+                            Monto en Bolívares (Bs.)
+                          </label>
+                          <input
+                            id="caja-chica-amount-bs"
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="Ej. 15.000,00"
+                            value={amountBs}
+                            onChange={e => handleBsChange(e.target.value)}
+                            className={`w-full bg-white border rounded-xl px-3 py-2 text-sm font-bold outline-none transition-colors ${
+                              cashBoxError && !(form.amountBs && form.amountBs > 0)
+                                ? 'border-red-400 focus:border-red-500 ring-2 ring-red-100'
+                                : 'border-gray-300 focus:border-amber-500'
+                            }`}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-600 uppercase tracking-widest block mb-1">
+                            Tasa de cambio (Bs./$)
+                          </label>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            inputMode="decimal"
+                            placeholder="Ej. 942.53"
+                            value={exchangeRate || ''}
+                            onChange={e => handleRateChange(Number(e.target.value))}
+                            className="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:border-amber-500"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Botones de referencia rápida */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-2 text-[11px]">
+                        <span className="text-gray-500 font-medium">Tasa de hoy:</span>
+                        {bcvUsd > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRateChange(bcvUsd)}
+                            className={`px-2 py-0.5 rounded-lg border font-bold flex items-center gap-1 transition-all ${
+                              exchangeRate === bcvUsd
+                                ? 'bg-amber-600 text-white border-amber-600 shadow-2xs'
+                                : 'bg-white hover:bg-amber-50 text-amber-900 border-amber-200 shadow-2xs'
+                            }`}
+                          >
+                            <span>BCV:</span>
+                            <span>{bcvUsd.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs/$</span>
+                          </button>
+                        )}
+                        {paraleloUsd > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRateChange(paraleloUsd)}
+                            className={`px-2 py-0.5 rounded-lg border font-bold flex items-center gap-1 transition-all ${
+                              exchangeRate === paraleloUsd
+                                ? 'bg-gray-800 text-white border-gray-800 shadow-2xs'
+                                : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-200 shadow-2xs'
+                            }`}
+                          >
+                            <span>Paralelo:</span>
+                            <span>{paraleloUsd.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs/$</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Atajo si hay dólares pero falta calcular Bs */}
+                      {form.amount > 0 && (!amountBs || parseLocalNumber(amountBs) <= 0) && exchangeRate > 0 && (
+                        <div className="mt-2 flex items-center justify-between bg-white/90 p-2 rounded-xl border border-amber-200/60">
+                          <span className="text-[11px] text-gray-600">
+                            Tienes <strong>${form.amount}</strong> anotados. A esta tasa son <strong>Bs. {(form.amount * exchangeRate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const calculatedBs = Number((form.amount * exchangeRate).toFixed(2))
+                              handleBsChange(calculatedBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+                            }}
+                            className="text-xs font-bold text-amber-800 hover:text-amber-950 underline shrink-0 ml-2"
+                          >
+                            Usar estos Bs.
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Resumen del cálculo resultante */}
+                      {(() => {
+                        const numBs = parseLocalNumber(amountBs)
+                        const usdResult = numBs > 0 && exchangeRate > 0 ? Number((numBs / exchangeRate).toFixed(2)) : 0
+                        if (usdResult > 0) {
+                          return (
+                            <div className="pt-2 text-xs text-gray-700 flex items-center justify-between border-t border-amber-200/60 mt-2">
+                              <span>
+                                Registrado en dólares: <strong className="text-emerald-700">${usdResult.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</strong>
+                              </span>
+                              <span className="text-[11px] text-gray-500 font-medium">
+                                (Reflejado en contabilidad)
+                              </span>
+                            </div>
+                          )
+                        }
+                        return null
+                      })()}
+                    </div>
                   )}
                 </div>
               )}
