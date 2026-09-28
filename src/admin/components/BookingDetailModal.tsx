@@ -184,9 +184,18 @@ export default function BookingDetailModal({
   const [additionalAccommodationIds, setAdditionalAccommodationIds] = useState<number[]>([])
   const [savingAdditionalRooms, setSavingAdditionalRooms] = useState(false)
   const [additionalGuests, setAdditionalGuests] = useState({ adults: 2, children: 0, babies: 0, pets: 0 })
+  const [additionalDates, setAdditionalDates] = useState({ checkIn: '', checkOut: '' })
   const [editingRoomId, setEditingRoomId] = useState<string | null>(null)
   const [savingRoom, setSavingRoom] = useState(false)
-  const [editRoomForm, setEditRoomForm] = useState({ accommodationId: 0, adults: 0, children: 0, babies: 0, pets: 0 })
+  const [editRoomForm, setEditRoomForm] = useState({
+    accommodationId: 0,
+    checkIn: '',
+    checkOut: '',
+    adults: 0,
+    children: 0,
+    babies: 0,
+    pets: 0
+  })
   const [editingDates, setEditingDates] = useState(false)
   const [savingDates, setSavingDates] = useState(false)
   const [editDatesForm, setEditDatesForm] = useState({ checkIn: '', checkOut: '' })
@@ -379,9 +388,12 @@ export default function BookingDetailModal({
       return
     }
 
-    const hasValidEditDates = editingDates && Boolean(editDatesForm.checkIn && editDatesForm.checkOut && editDatesForm.checkOut > editDatesForm.checkIn)
-    const effectiveCheckIn = hasValidEditDates ? editDatesForm.checkIn : roomBooking.checkIn
-    const effectiveCheckOut = hasValidEditDates ? editDatesForm.checkOut : roomBooking.checkOut
+    const effectiveCheckIn = editRoomForm.checkIn || roomBooking.checkIn
+    const effectiveCheckOut = editRoomForm.checkOut || roomBooking.checkOut
+    if (!effectiveCheckIn || !effectiveCheckOut || effectiveCheckOut <= effectiveCheckIn) {
+      alert('Error: La fecha de check-out debe ser posterior al check-in.')
+      return
+    }
 
     const collision = bookings.find(item =>
       item.id !== roomBooking.id &&
@@ -530,9 +542,16 @@ export default function BookingDetailModal({
       return
     }
 
+    const checkInToAdd = additionalDates.checkIn || selectedBooking.checkIn
+    const checkOutToAdd = additionalDates.checkOut || selectedBooking.checkOut
+    if (!checkInToAdd || !checkOutToAdd || checkOutToAdd <= checkInToAdd) {
+      alert('Error: La fecha de check-out debe ser posterior al check-in.')
+      return
+    }
+
     const collision = bookings.find(b =>
       additionalAccommodationIds.includes(b.accommodationId) &&
-      selectedBooking.checkIn < b.checkOut && selectedBooking.checkOut > b.checkIn
+      checkInToAdd < b.checkOut && checkOutToAdd > b.checkIn
     )
     if (collision) {
       alert(`${getAccommodation(collision.accommodationId)?.title || 'Una unidad'} ya no está disponible para esas fechas.`)
@@ -550,7 +569,7 @@ export default function BookingDetailModal({
     const discountPercent = getBookingDiscountPercent(selectedBooking.specialNotes)
 
     const rows = additionalAccommodationIds.map((accId) => {
-      const standardTotal = getStandardRate(accId, selectedBooking.checkIn, selectedBooking.checkOut, additionalGuests.adults, additionalGuests.children)
+      const standardTotal = getStandardRate(accId, checkInToAdd, checkOutToAdd, additionalGuests.adults, additionalGuests.children)
       const totalAmount = discountPercent > 0 ? Math.round(standardTotal * (1 - discountPercent / 100)) : standardTotal
       const specialNotes = withBookingDiscountNote(selectedBooking.specialNotes, discountPercent)
 
@@ -561,8 +580,8 @@ export default function BookingDetailModal({
         guest_ci: selectedBooking.guestCi || null,
         companions: selectedBooking.companions || null,
         accommodation_id: accId,
-        check_in: selectedBooking.checkIn,
-        check_out: selectedBooking.checkOut,
+        check_in: checkInToAdd,
+        check_out: checkOutToAdd,
         adults: additionalGuests.adults,
         children: additionalGuests.children,
         babies: additionalGuests.babies,
@@ -688,8 +707,7 @@ export default function BookingDetailModal({
       })
 
       setAddingPayment(false)
-      setPaymentForm({ amount: '', date: todayStr, method: 'transferencia', reference: '' })
-      setNuevoAbonoBs({ activo: false, bolivares: '', tasa: '' })
+      setPaymentForm({ amount: '', date: todayStr, method: 'transferencia', reference: '' })\n      setNuevoAbonoBs({ activo: false, bolivares: '', tasa: '' })
     } finally {
       envioAbono.terminar()
     }
@@ -927,7 +945,13 @@ export default function BookingDetailModal({
                 {!addingRoomsToBooking && (
                   <div className="flex items-center gap-3">
                     <button
-                      onClick={() => setAddingRoomsToBooking(true)}
+                      onClick={() => {
+                        setAdditionalDates({
+                          checkIn: selectedBooking.checkIn,
+                          checkOut: selectedBooking.checkOut
+                        })
+                        setAddingRoomsToBooking(true)
+                      }}
                       className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider hover:underline flex items-center gap-1"
                     >
                       <Plus size={11} /> Añadir habitación
@@ -940,8 +964,12 @@ export default function BookingDetailModal({
                   const acc = getAccommodation(roomBooking.accommodationId)
                   const isEditing = editingRoomId === roomBooking.id
                   const hasValidEditDates = editingDates && Boolean(editDatesForm.checkIn && editDatesForm.checkOut && editDatesForm.checkOut > editDatesForm.checkIn)
-                  const effectiveCheckIn = hasValidEditDates ? editDatesForm.checkIn : roomBooking.checkIn
-                  const effectiveCheckOut = hasValidEditDates ? editDatesForm.checkOut : roomBooking.checkOut
+                  const effectiveCheckIn = isEditing
+                    ? (editRoomForm.checkIn || roomBooking.checkIn)
+                    : (hasValidEditDates ? editDatesForm.checkIn : roomBooking.checkIn)
+                  const effectiveCheckOut = isEditing
+                    ? (editRoomForm.checkOut || roomBooking.checkOut)
+                    : (hasValidEditDates ? editDatesForm.checkOut : roomBooking.checkOut)
                   const effectiveNights = calculateNights(effectiveCheckIn, effectiveCheckOut)
 
                   const previewStandard = isEditing
@@ -953,16 +981,41 @@ export default function BookingDetailModal({
                   return (
                     <div key={roomBooking.id} className="bg-white p-3 border border-gray-100 rounded-2xl">
                       {isEditing ? (
-                        <div className="space-y-3">
-                          <select
-                            value={editRoomForm.accommodationId}
-                            onChange={e => setEditRoomForm(f => ({ ...f, accommodationId: Number(e.target.value) }))}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white"
-                          >
-                            {activeAccommodationOptions.map(option => (
-                              <option key={option.id} value={option.id}>{option.title} — Máx. {option.maxCapacity} pax</option>
-                            ))}
-                          </select>
+                        <div className="space-y-3 bg-amber-50/20 p-2.5 rounded-xl border border-amber-200/50">
+                          <div>
+                            <label className="text-[8px] font-bold text-gray-400 uppercase block mb-1">Cabaña</label>
+                            <select
+                              value={editRoomForm.accommodationId}
+                              onChange={e => setEditRoomForm(f => ({ ...f, accommodationId: Number(e.target.value) }))}
+                              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
+                            >
+                              {activeAccommodationOptions.map(option => (
+                                <option key={option.id} value={option.id}>{option.title} — Máx. {option.maxCapacity} pax</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[8px] font-bold text-gray-400 uppercase block mb-1">Check-In</label>
+                              <input
+                                type="date"
+                                value={editRoomForm.checkIn}
+                                onChange={e => setEditRoomForm(f => ({ ...f, checkIn: e.target.value }))}
+                                className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[8px] font-bold text-gray-400 uppercase block mb-1">Check-Out</label>
+                              <input
+                                type="date"
+                                value={editRoomForm.checkOut}
+                                onChange={e => setEditRoomForm(f => ({ ...f, checkOut: e.target.value }))}
+                                className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
+                              />
+                            </div>
+                          </div>
+
                           <div className="grid grid-cols-4 gap-2">
                             {(['adults', 'children', 'babies', 'pets'] as const).map(key => (
                               <div key={key}>
@@ -974,36 +1027,39 @@ export default function BookingDetailModal({
                                   min={0}
                                   value={editRoomForm[key]}
                                   onChange={e => setEditRoomForm(f => ({ ...f, [key]: Math.max(0, Number(e.target.value)) }))}
-                                  className="w-full border border-gray-200 rounded-lg px-2 py-2 text-xs outline-none focus:border-[#C5A059]"
+                                  className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#C5A059] bg-white"
                                 />
                               </div>
                             ))}
                           </div>
-                          <div className="flex justify-between items-center rounded-xl bg-amber-50/70 border border-amber-200/50 px-3 py-2 text-xs">
+                          <div className="flex justify-between items-center rounded-xl bg-white border border-amber-200/80 px-3 py-2 text-xs">
                             <div className="flex flex-col">
-                              <span className="font-semibold text-gray-700">Precio recalculado</span>
+                              <span className="font-semibold text-gray-700">Precio de esta cabaña</span>
                               <span className="text-[10px] text-gray-500">
                                 {effectiveNights} {effectiveNights === 1 ? 'noche' : 'noches'}
-                                {hasValidEditDates ? ' (según fechas en edición)' : ''}
                               </span>
                             </div>
                             <span className="font-extrabold text-[#8A6D33] text-sm">{fmt(previewTotal)}</span>
                           </div>
-                          <div className="flex gap-3">
-                            <button onClick={handleSaveRoomDetails} disabled={savingRoom} className="text-[10px] font-bold text-emerald-600 uppercase hover:underline disabled:opacity-40">
-                              {savingRoom ? 'Guardando...' : 'Guardar habitación'}
+                          <div className="flex items-center gap-3 pt-1">
+                            <button onClick={handleSaveRoomDetails} disabled={savingRoom} className="text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-lg uppercase tracking-wider transition-colors disabled:opacity-40">
+                              {savingRoom ? 'Guardando...' : 'Guardar habitación y fechas'}
                             </button>
-                            <button onClick={() => setEditingRoomId(null)} disabled={savingRoom} className="text-[10px] font-bold text-gray-400 uppercase hover:underline">Cancelar</button>
+                            <button onClick={() => setEditingRoomId(null)} disabled={savingRoom} className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:underline">Cancelar</button>
                           </div>
                         </div>
                       ) : (
                         <div className="flex items-center gap-3">
-                          <img src={acc?.image} alt={acc?.title} className="w-14 h-14 object-cover rounded-xl" />
+                          <img src={acc?.image} alt={acc?.title} className="w-14 h-14 object-cover rounded-xl shrink-0" />
                           <div className="min-w-0 flex-1">
                             <h4 className="text-xs font-bold text-gray-800">{acc?.title}</h4>
-                            <p className="text-[10px] text-gray-400 mt-0.5">
+                            <p className="text-[10px] text-gray-500 mt-0.5">
                               {roomBooking.guestsCount.adults} adultos · {roomBooking.guestsCount.children} niños
                               {roomBooking.guestsCount.babies > 0 && ` · ${roomBooking.guestsCount.babies} bebés`}
+                            </p>
+                            <p className="text-[10px] font-bold text-[#C5A059] mt-0.5 flex items-center gap-1">
+                              <span>📅 {parseLocalDate(roomBooking.checkIn).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} — {parseLocalDate(roomBooking.checkOut).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}</span>
+                              <span className="text-gray-400 font-medium">({calculateNights(roomBooking.checkIn, roomBooking.checkOut)} {calculateNights(roomBooking.checkIn, roomBooking.checkOut) === 1 ? 'noche' : 'noches'})</span>
                             </p>
                             {datesDiffer ? (
                               <div className="flex items-baseline gap-1.5 mt-1">
@@ -1017,11 +1073,13 @@ export default function BookingDetailModal({
                               <p className="text-xs font-bold text-[#8A6D33] mt-1">{fmt(roomBooking.totalAmount)}</p>
                             )}
                           </div>
-                          <div className="flex flex-col items-end gap-2">
+                          <div className="flex flex-col items-end gap-2 shrink-0">
                             <button
                               onClick={() => {
                                 setEditRoomForm({
                                   accommodationId: roomBooking.accommodationId,
+                                  checkIn: roomBooking.checkIn,
+                                  checkOut: roomBooking.checkOut,
                                   adults: roomBooking.guestsCount.adults,
                                   children: roomBooking.guestsCount.children,
                                   babies: roomBooking.guestsCount.babies,
@@ -1055,8 +1113,13 @@ export default function BookingDetailModal({
                 const capacity = additionalAccommodationIds.reduce((sum, id) => sum + getMaxCapacity(id), 0)
                 const guests = additionalGuests.adults + additionalGuests.children
                 const selectedAdditionalId = additionalAccommodationIds[0]
-                const additionalStandardTotal = selectedAdditionalId
-                  ? getStandardRate(selectedAdditionalId, selectedBooking.checkIn, selectedBooking.checkOut, additionalGuests.adults, additionalGuests.children)
+                const checkInToAdd = additionalDates.checkIn || selectedBooking.checkIn
+                const checkOutToAdd = additionalDates.checkOut || selectedBooking.checkOut
+                const additionalNights = (checkInToAdd && checkOutToAdd && checkOutToAdd > checkInToAdd)
+                  ? calculateNights(checkInToAdd, checkOutToAdd)
+                  : 0
+                const additionalStandardTotal = (selectedAdditionalId && additionalNights > 0)
+                  ? getStandardRate(selectedAdditionalId, checkInToAdd, checkOutToAdd, additionalGuests.adults, additionalGuests.children)
                   : 0
                 const additionalDiscount = getBookingDiscountPercent(selectedBooking.specialNotes)
                 const additionalTotal = Math.round(additionalStandardTotal * (1 - additionalDiscount / 100) * 100) / 100
@@ -1065,7 +1128,7 @@ export default function BookingDetailModal({
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-xs font-bold text-emerald-800">Agregar a esta reserva</p>
-                        <p className="text-[10px] text-emerald-700/70">Agrega una por vez para asignar correctamente sus ocupantes.</p>
+                        <p className="text-[10px] text-emerald-700/70">Selecciona la cabaña, sus fechas de estadía y ocupantes.</p>
                       </div>
                       <span className="text-[10px] font-bold text-emerald-700">Quedan {remainingSlots} cupos</span>
                     </div>
@@ -1075,7 +1138,7 @@ export default function BookingDetailModal({
                         if (assignedIds.has(acc.id)) return null
                         const occupied = bookings.some(b =>
                           b.accommodationId === acc.id &&
-                          selectedBooking.checkIn < b.checkOut && selectedBooking.checkOut > b.checkIn
+                          checkInToAdd < b.checkOut && checkOutToAdd > b.checkIn
                         )
                         const selected = additionalAccommodationIds.includes(acc.id)
                         return (
@@ -1103,6 +1166,27 @@ export default function BookingDetailModal({
                       })}
                     </div>
 
+                    <div className="grid grid-cols-2 gap-2 bg-white/80 p-2.5 rounded-xl border border-emerald-200/60">
+                      <div>
+                        <label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Check-In habitación</label>
+                        <input
+                          type="date"
+                          value={checkInToAdd}
+                          onChange={e => setAdditionalDates(prev => ({ ...prev, checkIn: e.target.value }))}
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-emerald-500 bg-white font-medium"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Check-Out habitación</label>
+                        <input
+                          type="date"
+                          value={checkOutToAdd}
+                          onChange={e => setAdditionalDates(prev => ({ ...prev, checkOut: e.target.value }))}
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-emerald-500 bg-white font-medium"
+                        />
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-4 gap-2">
                       {(['adults', 'children', 'babies', 'pets'] as const).map(key => (
                         <div key={key}>
@@ -1124,7 +1208,10 @@ export default function BookingDetailModal({
                     )}
                     {selectedAdditionalId && (
                       <div className="flex items-center justify-between rounded-xl border border-emerald-100 bg-white px-3 py-2.5 text-xs">
-                        <span className="font-semibold text-gray-600">Precio de esta habitación</span>
+                        <div className="flex flex-col">
+                          <span className="font-semibold text-gray-600">Precio de esta habitación</span>
+                          <span className="text-[10px] text-gray-400">{additionalNights} {additionalNights === 1 ? 'noche' : 'noches'}</span>
+                        </div>
                         <span className="font-bold text-emerald-700">{fmt(additionalTotal)}</span>
                       </div>
                     )}
@@ -1132,7 +1219,7 @@ export default function BookingDetailModal({
                     <div className="flex items-center gap-3">
                       <button
                         onClick={handleAddRoomsToBooking}
-                        disabled={savingAdditionalRooms || additionalAccommodationIds.length === 0 || guests > capacity}
+                        disabled={savingAdditionalRooms || additionalAccommodationIds.length === 0 || guests > capacity || additionalNights <= 0}
                         className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider hover:underline disabled:opacity-40"
                       >
                         {savingAdditionalRooms ? 'Agregando...' : 'Agregar a la reserva'}
@@ -1151,152 +1238,193 @@ export default function BookingDetailModal({
             </div>
 
             {/* 3. Dates and Guests */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Fechas de la Estadía</span>
-                {!editingDates && (
-                  <button
-                    onClick={() => {
-                      setEditDatesForm({ checkIn: selectedBooking.checkIn, checkOut: selectedBooking.checkOut })
-                      setEditingDates(true)
-                    }}
-                    className="text-[10px] font-bold text-[#C5A059] uppercase tracking-wider hover:underline"
-                  >
-                    Cambiar
-                  </button>
-                )}
-              </div>
-              {editingDates ? (
-                <div className="space-y-3 bg-amber-50/40 p-3.5 border border-amber-200/60 rounded-2xl">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Check-In</label>
-                      <input
-                        type="date"
-                        value={editDatesForm.checkIn}
-                        onChange={e => setEditDatesForm(f => ({ ...f, checkIn: e.target.value }))}
-                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
-                      />
+            {(() => {
+              const group = getBookingGroup(selectedBooking)
+              const allSameDates = group.every(r => r.checkIn === group[0].checkIn && r.checkOut === group[0].checkOut)
+
+              return (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Fechas de la Estadía</span>
+                      {!allSameDates && (
+                        <span className="text-[9px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                          Fechas diferenciadas
+                        </span>
+                      )}
                     </div>
-                    <div>
-                      <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Check-Out</label>
-                      <input
-                        type="date"
-                        value={editDatesForm.checkOut}
-                        onChange={e => setEditDatesForm(f => ({ ...f, checkOut: e.target.value }))}
-                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
-                      />
-                    </div>
+                    {!editingDates && (
+                      <button
+                        onClick={() => {
+                          setEditDatesForm({ checkIn: selectedBooking.checkIn, checkOut: selectedBooking.checkOut })
+                          setEditingDates(true)
+                        }}
+                        className="text-[10px] font-bold text-[#C5A059] uppercase tracking-wider hover:underline"
+                      >
+                        {allSameDates ? 'Cambiar' : 'Unificar fechas'}
+                      </button>
+                    )}
                   </div>
-
-                  {(() => {
-                    const isValidRange = Boolean(editDatesForm.checkIn && editDatesForm.checkOut && editDatesForm.checkOut > editDatesForm.checkIn)
-                    if (!isValidRange) {
-                      return (
-                        <p className="text-[11px] font-semibold text-rose-600 bg-rose-50 border border-rose-200 p-2.5 rounded-xl">
-                          La fecha de check-out debe ser posterior al check-in.
-                        </p>
-                      )
-                    }
-
-                    const currentGroup = getBookingGroup(selectedBooking)
-                    const oldNights = calculateNights(selectedBooking.checkIn, selectedBooking.checkOut)
-                    const newNights = calculateNights(editDatesForm.checkIn, editDatesForm.checkOut)
-                    const diffNights = newNights - oldNights
-
-                    const oldTotal = currentGroup.reduce((sum, r) => sum + r.totalAmount, 0)
-                    const totalPaid = currentGroup.reduce((sum, r) => sum + r.amountPaid, 0)
-
-                    const newTotal = currentGroup.reduce((sum, room) => {
-                      const isRoomBeingEdited = editingRoomId === room.id
-                      const accId = isRoomBeingEdited ? editRoomForm.accommodationId : room.accommodationId
-                      const adults = isRoomBeingEdited ? editRoomForm.adults : room.guestsCount.adults
-                      const children = isRoomBeingEdited ? editRoomForm.children : room.guestsCount.children
-                      const standard = getStandardRate(accId, editDatesForm.checkIn, editDatesForm.checkOut, adults, children)
-                      return sum + getAdjustedBookingTotal(standard, room.specialNotes)
-                    }, 0)
-
-                    const diffAmount = newTotal - oldTotal
-                    const pendingBalance = Math.max(0, newTotal - totalPaid)
-
-                    return (
-                      <div className="bg-white border border-[#C5A059]/30 rounded-xl p-3 space-y-2 shadow-xs">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-gray-500 font-medium">Estadía:</span>
-                          <div className="flex items-center gap-1.5 font-bold">
-                            <span className="text-gray-800">{newNights} {newNights === 1 ? 'noche' : 'noches'}</span>
-                            {diffNights !== 0 && (
-                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${diffNights > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                                {diffNights > 0 ? `+${diffNights} ${diffNights === 1 ? 'noche' : 'noches'}` : `${diffNights} noches`}
-                              </span>
-                            )}
-                          </div>
+                  {editingDates ? (
+                    <div className="space-y-3 bg-amber-50/40 p-3.5 border border-amber-200/60 rounded-2xl">
+                      {!allSameDates && (
+                        <div className="text-[11px] text-amber-800 bg-amber-100/70 border border-amber-200/80 p-2.5 rounded-xl font-medium">
+                          ⚠️ <strong>Atención:</strong> Las habitaciones actualmente tienen fechas distintas. Al pulsar &ldquo;Guardar en toda la reserva&rdquo;, todas adoptarán las mismas fechas. Si solo deseas modificar las fechas de una habitación específica, hazlo pulsando <strong>EDITAR</strong> directamente en su tarjeta arriba.
                         </div>
-
-                        <div className="flex items-center justify-between text-xs pt-1.5 border-t border-gray-100">
-                          <span className="text-gray-500 font-medium">Nueva tarifa recalculada:</span>
-                          <div className="flex items-center gap-2">
-                            {diffAmount !== 0 && (
-                              <span className="text-[11px] text-gray-400 line-through">{fmt(oldTotal)}</span>
-                            )}
-                            <span className="font-extrabold text-[#8A6D33] text-sm">{fmt(newTotal)}</span>
-                          </div>
+                      )}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Check-In</label>
+                          <input
+                            type="date"
+                            value={editDatesForm.checkIn}
+                            onChange={e => setEditDatesForm(f => ({ ...f, checkIn: e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
+                          />
                         </div>
-
-                        {diffAmount !== 0 && (
-                          <div className="flex items-center justify-between text-[11px] text-gray-600 bg-amber-500/10 px-2.5 py-1.5 rounded-lg font-medium">
-                            <span>{diffAmount > 0 ? 'Diferencia a cobrar:' : 'Diferencia a favor del huésped:'}</span>
-                            <span className={`font-bold ${diffAmount > 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                              {diffAmount > 0 ? `+${fmt(diffAmount)}` : fmt(diffAmount)}
-                            </span>
-                          </div>
-                        )}
-
-                        <div className="flex items-center justify-between text-xs pt-1.5 border-t border-gray-100 text-[11px]">
-                          <span className="text-gray-500">Ya pagado: <strong className="text-gray-700">{fmt(totalPaid)}</strong></span>
-                          <span className="text-gray-500">Saldo pendiente: <strong className={pendingBalance > 0 ? 'text-rose-600' : 'text-emerald-600'}>{fmt(pendingBalance)}</strong></span>
+                        <div>
+                          <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Check-Out</label>
+                          <input
+                            type="date"
+                            value={editDatesForm.checkOut}
+                            onChange={e => setEditDatesForm(f => ({ ...f, checkOut: e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
+                          />
                         </div>
                       </div>
-                    )
-                  })()}
 
-                  <div className="flex items-center gap-3 pt-1">
-                    <button
-                      onClick={handleSaveDates}
-                      disabled={savingDates}
-                      className="text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-2 rounded-xl uppercase tracking-wider transition-colors disabled:opacity-50 flex items-center gap-1.5"
-                    >
-                      {savingDates ? (
-                        <>
-                          <div className="w-3 h-3 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
-                          Guardando nuevas fechas...
-                        </>
-                      ) : (
-                        'Guardar en toda la reserva'
-                      )}
-                    </button>
-                    <button
-                      onClick={() => setEditingDates(false)}
-                      disabled={savingDates}
-                      className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:underline disabled:opacity-40"
-                    >
-                      Cancelar
-                    </button>
-                  </div>
+                      {(() => {
+                        const isValidRange = Boolean(editDatesForm.checkIn && editDatesForm.checkOut && editDatesForm.checkOut > editDatesForm.checkIn)
+                        if (!isValidRange) {
+                          return (
+                            <p className="text-[11px] font-semibold text-rose-600 bg-rose-50 border border-rose-200 p-2.5 rounded-xl">
+                              La fecha de check-out debe ser posterior al check-in.
+                            </p>
+                          )
+                        }
+
+                        const currentGroup = getBookingGroup(selectedBooking)
+                        const oldNights = calculateNights(selectedBooking.checkIn, selectedBooking.checkOut)
+                        const newNights = calculateNights(editDatesForm.checkIn, editDatesForm.checkOut)
+                        const diffNights = newNights - oldNights
+
+                        const oldTotal = currentGroup.reduce((sum, r) => sum + r.totalAmount, 0)
+                        const totalPaid = currentGroup.reduce((sum, r) => sum + r.amountPaid, 0)
+
+                        const newTotal = currentGroup.reduce((sum, room) => {
+                          const isRoomBeingEdited = editingRoomId === room.id
+                          const accId = isRoomBeingEdited ? editRoomForm.accommodationId : room.accommodationId
+                          const adults = isRoomBeingEdited ? editRoomForm.adults : room.guestsCount.adults
+                          const children = isRoomBeingEdited ? editRoomForm.children : room.guestsCount.children
+                          const standard = getStandardRate(accId, editDatesForm.checkIn, editDatesForm.checkOut, adults, children)
+                          return sum + getAdjustedBookingTotal(standard, room.specialNotes)
+                        }, 0)
+
+                        const diffAmount = newTotal - oldTotal
+                        const pendingBalance = Math.max(0, newTotal - totalPaid)
+
+                        return (
+                          <div className="bg-white border border-[#C5A059]/30 rounded-xl p-3 space-y-2 shadow-xs">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-gray-500 font-medium">Estadía global:</span>
+                              <div className="flex items-center gap-1.5 font-bold">
+                                <span className="text-gray-800">{newNights} {newNights === 1 ? 'noche' : 'noches'}</span>
+                                {diffNights !== 0 && (
+                                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${diffNights > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                                    {diffNights > 0 ? `+${diffNights} ${diffNights === 1 ? 'noche' : 'noches'}` : `${diffNights} noches`}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between text-xs pt-1.5 border-t border-gray-100">
+                              <span className="text-gray-500 font-medium">Nueva tarifa recalculada:</span>
+                              <div className="flex items-center gap-2">
+                                {diffAmount !== 0 && (
+                                  <span className="text-[11px] text-gray-400 line-through">{fmt(oldTotal)}</span>
+                                )}
+                                <span className="font-extrabold text-[#8A6D33] text-sm">{fmt(newTotal)}</span>
+                              </div>
+                            </div>
+
+                            {diffAmount !== 0 && (
+                              <div className="flex items-center justify-between text-[11px] text-gray-600 bg-amber-500/10 px-2.5 py-1.5 rounded-lg font-medium">
+                                <span>{diffAmount > 0 ? 'Diferencia a cobrar:' : 'Diferencia a favor del huésped:'}</span>
+                                <span className={`font-bold ${diffAmount > 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                  {diffAmount > 0 ? `+${fmt(diffAmount)}` : fmt(diffAmount)}
+                                </span>
+                              </div>
+                            )}
+
+                            <div className="flex items-center justify-between text-xs pt-1.5 border-t border-gray-100 text-[11px]">
+                              <span className="text-gray-500">Ya pagado: <strong className="text-gray-700">{fmt(totalPaid)}</strong></span>
+                              <span className="text-gray-500">Saldo pendiente: <strong className={pendingBalance > 0 ? 'text-rose-600' : 'text-emerald-600'}>{fmt(pendingBalance)}</strong></span>
+                            </div>
+                          </div>
+                        )
+                      })()}
+
+                      <div className="flex items-center gap-3 pt-1">
+                        <button
+                          onClick={handleSaveDates}
+                          disabled={savingDates}
+                          className="text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-2 rounded-xl uppercase tracking-wider transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                        >
+                          {savingDates ? (
+                            <>
+                              <div className="w-3 h-3 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
+                              Guardando nuevas fechas...
+                            </>
+                          ) : (
+                            'Guardar en toda la reserva'
+                          )}
+                        </button>
+                        <button
+                          onClick={() => setEditingDates(false)}
+                          disabled={savingDates}
+                          className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:underline disabled:opacity-40"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  ) : !allSameDates ? (
+                    <div className="bg-amber-50/60 p-3.5 border border-amber-200/70 rounded-2xl space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-amber-900">Fechas individuales de cada habitación:</span>
+                        <span className="text-[10px] font-bold text-amber-700 bg-white/80 px-2 py-0.5 rounded-full border border-amber-200">
+                          {group.length} cabañas
+                        </span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {group.map(r => (
+                          <div key={r.id} className="flex items-center justify-between text-xs bg-white/90 px-3 py-2 rounded-xl border border-amber-200/60 shadow-xs">
+                            <span className="font-bold text-gray-700">{getAccommodation(r.accommodationId)?.title || 'Habitación'}</span>
+                            <span className="font-bold text-[#8A6D33] text-[11px]">
+                              {parseLocalDate(r.checkIn).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} — {parseLocalDate(r.checkOut).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} ({calculateNights(r.checkIn, r.checkOut)} {calculateNights(r.checkIn, r.checkOut) === 1 ? 'noche' : 'noches'})
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-amber-700/80">
+                        💡 Para modificar las fechas de una habitación en particular, haz clic en <strong>EDITAR</strong> en su tarjeta arriba.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-gray-50/50 p-4 border border-gray-100 rounded-2xl">
+                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Check-In</span>
+                        <span className="text-sm font-bold text-gray-700">{parseLocalDate(selectedBooking.checkIn).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+                      </div>
+                      <div className="bg-gray-50/50 p-4 border border-gray-100 rounded-2xl">
+                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Check-Out</span>
+                        <span className="text-sm font-bold text-gray-700">{parseLocalDate(selectedBooking.checkOut).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-gray-50/50 p-4 border border-gray-100 rounded-2xl">
-                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Check-In</span>
-                    <span className="text-sm font-bold text-gray-700">{parseLocalDate(selectedBooking.checkIn).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
-                  </div>
-                  <div className="bg-gray-50/50 p-4 border border-gray-100 rounded-2xl">
-                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Check-Out</span>
-                    <span className="text-sm font-bold text-gray-700">{parseLocalDate(selectedBooking.checkOut).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
-                  </div>
-                </div>
-              )}
-            </div>
+              )
+            })()}
 
             {/* 4. Guests count list */}
             <div className="bg-gray-50/30 p-4 border border-gray-100 rounded-2xl space-y-3">
