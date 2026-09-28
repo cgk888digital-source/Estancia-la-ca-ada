@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { Plus, Maximize2, Minimize2 } from 'lucide-react'
-import { formatLocalDate, parseLocalDate } from '../../utils/dateUtils'
+import { fechaLocalISO as formatLocalDate, parseLocalDate } from '../../utils/dateUtils'
 import { useIsMobile } from '../../utils/useMediaQuery'
 import { activeAccommodationOptions } from '../../data/accommodations'
 import type { Booking } from '../types'
