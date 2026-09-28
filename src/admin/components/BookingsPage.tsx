@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import {
   Calendar, Users, Check, LogIn, LogOut, Search, Plus, X,
-  RefreshCw, Printer
+  RefreshCw, Printer, ArchiveX
 } from 'lucide-react'
 import { accommodationOptions, activeAccommodationOptions, getMaxCapacity } from '../../data/accommodations'
 import LoadErrorBanner from './LoadErrorBanner'
@@ -94,6 +95,9 @@ interface DbBooking {
   confirmed?: boolean | null
   special_notes?: string | null
   locator?: string | null
+  created_at?: string | null
+  cancelled_at?: string | null
+  cancellation_reason?: string | null
 }
 
 interface DbAccommodation {
@@ -129,10 +133,13 @@ const mapDbBookingToReact = (db: DbBooking): Booking => ({
   paymentStatus: (db.payment_status || 'pendiente') as 'completo' | 'parcial' | 'pendiente',
   paymentMethod: (db.payment_method || 'transferencia') as 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque' | 'zelle' | 'pago_movil',
   paymentReference: db.payment_reference || '',
-  status: (db.status || 'confirmado') as 'checkout_hoy' | 'checkin_hoy' | 'ocupado' | 'confirmado' | 'limpieza',
+  status: (db.status || 'confirmado') as any,
   confirmed: db.confirmed ?? true,
   specialNotes: db.special_notes || '',
-  locator: db.locator || ''
+  locator: db.locator || '',
+  createdAt: db.created_at || undefined,
+  cancelledAt: db.cancelled_at || null,
+  cancellationReason: db.cancellation_reason || null
 })
 
 const getBookingDiscountPercent = (notes?: string) => {
@@ -307,8 +314,9 @@ export default function BookingsPage() {
         setLoadError(error.message)
       } else {
         setLoadError(null)
-        setBookings((data || []).map(mapDbBookingToReact))
+        setBookings((data || []).filter(b => b.status !== 'anulada').map(mapDbBookingToReact))
       }
+      setLoading(false)
     }
 
     fetchBookings()
@@ -507,7 +515,7 @@ export default function BookingsPage() {
     ))
   }
 
-  const handleDeleteBooking = async (bookingId: string) => {
+  const handleDeleteBooking = async (bookingId: string, reason?: string) => {
     const booking = bookings.find(b => b.id === bookingId)
     if (!booking) return
 
@@ -515,12 +523,7 @@ export default function BookingsPage() {
       ? bookings.filter(b => b.locator === booking.locator)
       : [booking]
     const isGroupBooking = groupBookings.length > 1
-    const accommodationTitle = getAccommodation(booking.accommodationId)?.title || 'la habitación seleccionada'
-    const confirmationMessage = isGroupBooking
-      ? `¿Anular solamente ${accommodationTitle}?\n\nSe restará ${fmt(booking.totalAmount)} del costo total. Las otras ${groupBookings.length - 1} ${groupBookings.length - 1 === 1 ? 'habitación permanecerá' : 'habitaciones permanecerán'} activas y todos los abonos del cliente se conservarán.`
-      : '¿Estás segura de que deseas eliminar esta reserva? Se borrarán también sus abonos y los ingresos que generaron.'
-
-    if (!confirm(confirmationMessage)) return
+    const finalReason = reason?.trim() || 'Anulada por el hotel'
 
     if (isGroupBooking) {
       const remainingBookings = groupBookings.filter(room => room.id !== bookingId)
@@ -550,9 +553,17 @@ export default function BookingsPage() {
         .eq('id', room.id)
       ))
 
-      const { error: deleteRoomError } = await supabase.from('bookings').delete().eq('id', bookingId)
-      if (deleteRoomError) {
-        console.error('Error deleting room from group booking:', deleteRoomError)
+      const { error: cancelRoomError } = await supabase
+        .from('bookings')
+        .update({
+          status: 'anulada',
+          cancelled_at: new Date().toISOString(),
+          cancellation_reason: finalReason
+        })
+        .eq('id', bookingId)
+
+      if (cancelRoomError) {
+        console.error('Error cancelling room from group booking:', cancelRoomError)
         alert('No se pudo anular la habitación.')
         return
       }
@@ -567,18 +578,28 @@ export default function BookingsPage() {
         return room
       }))
       setSelectedBooking(null)
+      alert(`Habitación anulada con éxito. Se guardó en "Res. Anuladas" con motivo: "${finalReason}".`)
       return
     }
 
-    const { error } = await supabase.from('bookings').delete().eq('id', bookingId)
+    const { error } = await supabase
+      .from('bookings')
+      .update({
+        status: 'anulada',
+        cancelled_at: new Date().toISOString(),
+        cancellation_reason: finalReason
+      })
+      .eq('id', bookingId)
+
     if (error) {
-      console.error('Error deleting booking:', error)
-      alert('No se pudo borrar la reserva. Vuelva a intentarlo.')
+      console.error('Error cancelling booking:', error)
+      alert('No se pudo anular la reserva. Vuelva a intentarlo.')
       return
     }
 
     setBookings(prev => prev.filter(b => b.id !== bookingId))
     setSelectedBooking(null)
+    alert(`Reserva anulada con éxito. Se guardó en "Res. Anuladas" con motivo: "${finalReason}". Puedes reactivarla cuando lo necesites.`)
   }
 
   const reassignBooking = async (
@@ -686,6 +707,14 @@ export default function BookingsPage() {
 
         {/* Action Button: Open Create Booking Modal */}
         <div className="flex items-center gap-3">
+          <Link
+            to="/admin/reservas-anuladas"
+            className="flex items-center gap-2 bg-rose-50 hover:bg-rose-100/80 text-rose-700 px-4 py-3 rounded-2xl border border-rose-200/80 text-xs font-bold uppercase tracking-wider transition-all active:scale-95 shadow-sm"
+            title="Ver reservas canceladas o anuladas (papelera)"
+          >
+            <ArchiveX size={15} />
+            <span className="hidden sm:inline">Res. Anuladas</span>
+          </Link>
           <button
             onClick={() => window.print()}
             className="flex items-center gap-2 bg-white hover:bg-gray-50 text-gray-700 px-4 py-3 rounded-2xl border border-gray-200 text-xs font-bold uppercase tracking-wider transition-all active:scale-95 shadow-sm"

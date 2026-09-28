@@ -1,7 +1,7 @@
 import { useState, useEffect, type Dispatch, type SetStateAction } from 'react'
 import {
   X, Check, LogIn, LogOut, Trash2, Plus, Phone, Mail,
-  Info, Baby, Users, Percent
+  Info, Baby, Users, Percent, AlertTriangle
 } from 'lucide-react'
 import { accommodationOptions, activeAccommodationOptions, getMaxCapacity } from '../../data/accommodations'
 import { supabase } from '../../lib/supabase'
@@ -148,12 +148,12 @@ interface BookingDetailModalProps {
   setBookings: Dispatch<SetStateAction<Booking[]>>
   setSelectedBooking: Dispatch<SetStateAction<Booking | null>>
   dbAccommodations: DbAccommodation[]
-  bcvEuro: number | null
+  bcvEuro={bcvEuro}
   mealRates: { perAdult: number; perAdultNavidad: number; perChild: number }
   todayStr: string
   onCheckIn: (bookingId: string) => void
   onCheckOut: (bookingId: string) => void
-  onDeleteBooking: (bookingId: string) => void
+  onDeleteBooking: (bookingId: string, reason?: string) => void
 }
 
 export default function BookingDetailModal({
@@ -170,6 +170,10 @@ export default function BookingDetailModal({
   onCheckOut,
   onDeleteBooking
 }: BookingDetailModalProps) {
+  const [showCancelModal, setShowCancelModal] = useState(false)
+  const [cancelReason, setCancelReason] = useState('Anulada por el hotel')
+  const [customCancelReason, setCustomCancelReason] = useState('')
+
   const [editingGuest, setEditingGuest] = useState(false)
   const [savingGuest, setSavingGuest] = useState(false)
   const [editGuestForm, setEditGuestForm] = useState({
@@ -1885,17 +1889,96 @@ export default function BookingDetailModal({
 
           <div className="flex gap-2">
             <button
-              onClick={() => onDeleteBooking(selectedBooking.id)}
+              onClick={() => {
+                setCancelReason('Anulada por el hotel')
+                setCustomCancelReason('')
+                setShowCancelModal(true)
+              }}
               className="flex-1 py-3 border border-rose-100 hover:bg-rose-50 text-rose-500 font-bold rounded-2xl text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5"
             >
               <Trash2 size={14} />
               {selectedBooking.locator && bookings.filter(b => b.locator === selectedBooking.locator).length > 1
                 ? 'Anular esta habitación'
-                : 'Eliminar reserva'}
+                : 'Anular reserva'}
             </button>
           </div>
         </div>
       </div>
+
+      {/* Modal de confirmación y selección de motivo de anulación */}
+      {showCancelModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-gray-100 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle size={22} />
+              </div>
+              <div>
+                <h3 className="font-bold text-gray-800 text-base">¿Deseas anular esta reserva?</h3>
+                <p className="text-xs text-gray-500">
+                  {selectedBooking.locator && bookings.filter(b => b.locator === selectedBooking.locator).length > 1
+                    ? 'Esta habitación se retirará del calendario grupal.'
+                    : 'La habitación quedará liberada en el calendario.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-amber-50 rounded-2xl border border-amber-200/60 text-[11px] text-amber-800 leading-relaxed">
+              💡 <strong>Respaldo seguro:</strong> la reserva se moverá a <strong>Res. Anuladas</strong> (papelera). Si fue una equivocación o el huésped retoma el viaje, podrás <strong>reactivarla en cualquier momento</strong> con un solo clic.
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-gray-700 block">
+                Motivo de la anulación:
+              </label>
+              <select
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs text-gray-800 font-medium focus:ring-2 focus:ring-[#C5A059] outline-none"
+              >
+                <option value="Anulada por el hotel">Anulada por el hotel</option>
+                <option value="Anulada por el huésped">Anulada por el huésped</option>
+                <option value="Error al registrar reserva">Error al registrar / duplicada</option>
+                <option value="Vencida / Sin pago">Vencida / Sin pago (No-show)</option>
+                <option value="Cambio de fechas / planes">Cambio de fechas / planes</option>
+                <option value="Otro">Otro motivo personalizado...</option>
+              </select>
+
+              {cancelReason === 'Otro' && (
+                <input
+                  type="text"
+                  placeholder="Escribe el motivo..."
+                  value={customCancelReason}
+                  onChange={(e) => setCustomCancelReason(e.target.value)}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-800 outline-none focus:ring-2 focus:ring-[#C5A059]"
+                  autoFocus
+                />
+              )}
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowCancelModal(false)}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 text-xs font-bold text-gray-600 hover:bg-gray-50"
+              >
+                Volver
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const final = cancelReason === 'Otro' ? (customCancelReason.trim() || 'Otro motivo') : cancelReason
+                  setShowCancelModal(false)
+                  onDeleteBooking(selectedBooking.id, final)
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-lg shadow-rose-600/20 active:scale-95 transition-all"
+              >
+                Confirmar Anulación
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
