@@ -28,8 +28,8 @@ interface GuestSuggestion {
   companions: string
 }
 
-const cleanGuestSuggestionName = (name: string) =>
-  name.replace(/\s+\((?:Habitaci[oó]n\s+)?\d+\/\d+\)$/i, '').trim()
+const cleanGuestSuggestionName = (name?: string | null) =>
+  (name || '').replace(/\s+\((?:Habitaci[oó]n\s+)?\d+\/\d+\)$/i, '').trim()
 
 const cleanSavedGuestPhone = (phone?: string | null) =>
   phone === '+58 412-000-0000' ? '' : phone || ''
@@ -146,7 +146,22 @@ export default function AddBookingModal({
   // Autocomplete state
   const [guestSuggestions, setGuestSuggestions] = useState<GuestSuggestion[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
-  const shouldShowGuestSuggestions = (form.guestFirstName.length >= 3 || form.guestLastName.length >= 3) && showSuggestions
+  const shouldShowGuestSuggestions =
+    (form.guestFirstName.trim().length >= 1 || form.guestLastName.trim().length >= 1) && showSuggestions
+
+  const handleSelectGuest = (g: GuestSuggestion) => {
+    const { firstName, lastName } = splitPersonName(cleanGuestSuggestionName(g.name))
+    setForm(f => ({
+      ...f,
+      guestFirstName: firstName,
+      guestLastName: lastName,
+      guestPhone: g.phone || f.guestPhone,
+      guestEmail: g.email || f.guestEmail,
+      guestCi: g.ci || f.guestCi,
+      companions: g.companions || f.companions
+    }))
+    setShowSuggestions(false)
+  }
 
   const getAccommodation = (id: number) => accommodationOptions.find(o => o.id === id)
 
@@ -200,8 +215,11 @@ export default function AddBookingModal({
     const timer = setTimeout(async () => {
       const terms = [form.guestFirstName, form.guestLastName]
         .map(term => term.trim().replace(/[%,()]/g, ''))
-        .filter(term => term.length >= 2)
-      if (terms.length === 0) return
+        .filter(term => term.length >= 1)
+      if (terms.length === 0) {
+        if (active) setGuestSuggestions([])
+        return
+      }
       const bookingFilter = terms.map(term => `guest_name.ilike.%${term}%`).join(',')
       const customerFilter = terms.map(term => `full_name.ilike.%${term}%`).join(',')
 
@@ -645,7 +663,7 @@ export default function AddBookingModal({
                     placeholder="Ej. Ana"
                     value={form.guestFirstName}
                     onFocus={() => setShowSuggestions(true)}
-                    onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                    onBlur={() => setTimeout(() => setShowSuggestions(false), 300)}
                     onChange={e => {
                       setForm(f => ({ ...f, guestFirstName: e.target.value }))
                       setShowSuggestions(true)
@@ -661,7 +679,7 @@ export default function AddBookingModal({
                     placeholder="Ej. Peralta"
                     value={form.guestLastName}
                     onFocus={() => setShowSuggestions(true)}
-                    onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                    onBlur={() => setTimeout(() => setShowSuggestions(false), 300)}
                     onChange={e => {
                       setForm(f => ({ ...f, guestLastName: e.target.value }))
                       setShowSuggestions(true)
@@ -672,24 +690,19 @@ export default function AddBookingModal({
               </div>
               {/* Autocomplete Dropdown */}
               {shouldShowGuestSuggestions && guestSuggestions.length > 0 && (
-                <div className="absolute z-10 w-full mt-1 bg-white border border-gray-100 rounded-xl shadow-xl overflow-hidden max-h-48 custom-scrollbar">
+                <div
+                  onMouseDown={e => e.preventDefault()}
+                  className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-2xl overflow-hidden max-h-56 custom-scrollbar"
+                >
                   {guestSuggestions.map((g, i) => (
                     <div
                       key={i}
-                      onClick={() => {
-                        const { firstName, lastName } = splitPersonName(cleanGuestSuggestionName(g.name))
-                        setForm(f => ({
-                          ...f,
-                          guestFirstName: firstName,
-                          guestLastName: lastName,
-                          guestPhone: g.phone || f.guestPhone,
-                          guestEmail: g.email || f.guestEmail,
-                          guestCi: g.ci || f.guestCi,
-                          companions: g.companions || f.companions
-                        }))
-                        setShowSuggestions(false)
+                      onMouseDown={e => {
+                        e.preventDefault()
+                        handleSelectGuest(g)
                       }}
-                      className="px-4 py-2 hover:bg-[#C5A059]/10 cursor-pointer flex flex-col gap-0.5 border-b border-gray-50 last:border-0"
+                      onClick={() => handleSelectGuest(g)}
+                      className="px-4 py-2.5 hover:bg-[#C5A059]/10 active:bg-[#C5A059]/20 cursor-pointer flex flex-col gap-0.5 border-b border-gray-50 last:border-0 transition-colors"
                     >
                       <span className="text-xs font-bold text-gray-800">{g.name}</span>
                       {(g.ci || g.phone || g.email) && (
