@@ -1573,7 +1573,7 @@ export default function BookingDetailModal({
                           value={editFixedDiscountAmount}
                           onChange={e => setEditFixedDiscountAmount(Math.min(
                             totalAfterPercent,
-                            Math.max(0, Number(editFixedDiscountAmount) || 0)
+                            Math.max(0, Number(e.target.value))
                           ))}
                           className="w-full border border-gray-200 rounded-xl pl-7 pr-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white"
                           placeholder="Ejemplo: 5"
