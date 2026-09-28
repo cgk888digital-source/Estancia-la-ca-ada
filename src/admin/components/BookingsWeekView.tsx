@@ -1,9 +1,7 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { Plus, Maximize2, Minimize2 } from 'lucide-react'
 import { activeAccommodationOptions } from '../../data/accommodations'
 import type { Booking } from '../types'
-import { parseLocalDate, fechaLocalISO as formatLocalDate } from '../../utils/dateUtils'
-import { useIsMobile } from '../../utils/useMediaQuery'
 
 const DRAG_THRESHOLD_PX = 6
 
@@ -119,6 +117,7 @@ export default function BookingsWeekView({
     return `${startD.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} - ${endD.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}`
   }, [weekDays])
 
+  // Drag and drop handler
   const handleDropOnCell = async (accId: number, dropDateStr: string) => {
     if (!dragInfo) return
     const info = dragInfo
@@ -158,6 +157,7 @@ export default function BookingsWeekView({
     await reassignBooking(booking.id, newAccId, newCheckIn, newCheckOut)
   }
 
+  // Pointer move / up for dragging existing bookings
   useEffect(() => {
     if (!dragInfo) return
     hasDraggedRef.current = false
@@ -210,6 +210,7 @@ export default function BookingsWeekView({
     }
   }, [dragInfo, bookings])
 
+  // Pointer move / up for range selection (free days drag / two taps)
   useEffect(() => {
     if (!rangeSelect) return
 
@@ -253,6 +254,7 @@ export default function BookingsWeekView({
         return
       }
 
+      // Toque con el dedo: primer toque marca la entrada, segundo marca la salida
       if (pendingCheckIn && pendingCheckIn.accId === accId) {
         if (startDateStr === pendingCheckIn.dateStr) {
           setPendingCheckIn(null)
@@ -300,8 +302,7 @@ export default function BookingsWeekView({
         <div className="flex rounded-xl overflow-hidden border border-gray-200 text-[10px] font-bold uppercase tracking-wider">
           <button
             onClick={() => setWeekViewMode('semana')}
-            className={`px-3 py-1.5 transition-colors ${weekViewMode === 'semana' ? 'bg-[#3D2B1F] text-white' : 'text-gray-400 hover:bg-white'}`}
-          >
+            className={`px-3 py-1.5 transition-colors ${weekViewMode === 'semana' ? 'bg-[#3D2B1F] text-white' : 'text-gray-400 hover:bg-white'}`}\n          >
             Semana
           </button>
           <button

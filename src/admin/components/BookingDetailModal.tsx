@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect, type Dispatch, type SetStateAction } from 'react'
 import {
   X, Check, LogIn, LogOut, Trash2, Plus, Phone, Mail,
   Info, Baby, Users, Percent
@@ -7,7 +7,7 @@ import { accommodationOptions, activeAccommodationOptions, getMaxCapacity } from
 import { supabase } from '../../lib/supabase'
 import type { Booking, BookingPayment } from '../types'
 import { repartirNoches, precioEstancia } from '../../utils/seasonNights'
-import { parseLocalDate, fechaLocalISO as formatLocalDate } from '../../utils/dateUtils'
+import { parseLocalDate } from '../../utils/dateUtils'
 import CobroEnBolivares from './CobroEnBolivares'
 import { dolaresDeBolivares, textoEnBolivares } from '../../utils/bolivares'
 import { useEnvioUnico } from '../../utils/useEnvioUnico'
@@ -145,8 +145,8 @@ interface BookingDetailModalProps {
   selectedBooking: Booking | null
   onClose: () => void
   bookings: Booking[]
-  setBookings: React.Dispatch<React.SetStateAction<Booking[]>>
-  setSelectedBooking: React.Dispatch<React.SetStateAction<Booking | null>>
+  setBookings: Dispatch<SetStateAction<Booking[]>>
+  setSelectedBooking: Dispatch<SetStateAction<Booking | null>>
   dbAccommodations: DbAccommodation[]
   bcvEuro: number | null
   mealRates: { perAdult: number; perAdultNavidad: number; perChild: number }
@@ -638,59 +638,61 @@ export default function BookingDetailModal({
       return
     }
 
-    envioAbono.bloquear()
-    const group = getBookingGroup(selectedBooking)
-    const targetBooking = group[0]
+    if (!envioAbono.empezar()) return
+    try {
+      const group = getBookingGroup(selectedBooking)
+      const targetBooking = group[0]
 
-    const paymentRow = {
-      booking_id: targetBooking.id,
-      payment_date: paymentForm.date || todayStr,
-      amount: amountVal,
-      currency: 'USD',
-      method: paymentForm.method,
-      reference: paymentForm.reference.trim() || null,
-      status: 'verificado',
-      exchange_rate: nuevoAbonoBs.activo ? Number(String(nuevoAbonoBs.tasa).replace(',', '.')) : null,
-      amount_bs: nuevoAbonoBs.activo ? Number(String(nuevoAbonoBs.bolivares).replace(',', '.')) : null
+      const paymentRow = {
+        booking_id: targetBooking.id,
+        payment_date: paymentForm.date || todayStr,
+        amount: amountVal,
+        currency: 'USD',
+        method: paymentForm.method,
+        reference: paymentForm.reference.trim() || null,
+        status: 'verificado',
+        exchange_rate: nuevoAbonoBs.activo ? Number(String(nuevoAbonoBs.tasa).replace(',', '.')) : null,
+        amount_bs: nuevoAbonoBs.activo ? Number(String(nuevoAbonoBs.bolivares).replace(',', '.')) : null
+      }
+
+      const { data, error } = await supabase.from('booking_payments').insert(paymentRow).select('*').single()
+      if (error || !data) {
+        console.error('Error adding payment:', error)
+        alert('No se pudo registrar el abono.')
+        return
+      }
+
+      const reactPayment = mapDbPaymentToReact(data)
+      setBookingPayments(prev => [...prev, reactPayment])
+
+      // Update amount_paid on target booking
+      const newPaid = Number(targetBooking.amountPaid) + amountVal
+      const newStatus = newPaid >= targetBooking.totalAmount ? 'completo' : 'parcial'
+      await supabase.from('bookings').update({ amount_paid: newPaid, payment_status: newStatus }).eq('id', targetBooking.id)
+      setBookings(prev => prev.map(b => b.id === targetBooking.id ? { ...b, amountPaid: newPaid, paymentStatus: newStatus } : b))
+      setSelectedBooking(prev => prev && prev.id === targetBooking.id ? { ...prev, amountPaid: newPaid, paymentStatus: newStatus } : prev)
+
+      // Register income
+      await registrarIngresoDeAbono(supabase, {
+        paymentId: data.id,
+        bookingId: targetBooking.id,
+        guestName: selectedBooking.guestName,
+        locator: selectedBooking.locator || '',
+        accommodationTitle: group.length > 1 ? `${group.length} habitaciones` : getAccommodation(targetBooking.accommodationId)?.title,
+        amount: amountVal,
+        date: paymentForm.date || todayStr,
+        method: paymentForm.method,
+        reference: paymentForm.reference.trim() || null,
+        exchangeRate: data.exchange_rate,
+        amountBs: data.amount_bs
+      })
+
+      setAddingPayment(false)
+      setPaymentForm({ amount: '', date: todayStr, method: 'transferencia', reference: '' })
+      setNuevoAbonoBs({ activo: false, bolivares: '', tasa: '' })
+    } finally {
+      envioAbono.terminar()
     }
-
-    const { data, error } = await supabase.from('booking_payments').insert(paymentRow).select('*').single()
-    if (error || !data) {
-      console.error('Error adding payment:', error)
-      alert('No se pudo registrar el abono.')
-      envioAbono.desbloquear()
-      return
-    }
-
-    const reactPayment = mapDbPaymentToReact(data)
-    setBookingPayments(prev => [...prev, reactPayment])
-
-    // Update amount_paid on target booking
-    const newPaid = Number(targetBooking.amountPaid) + amountVal
-    const newStatus = newPaid >= targetBooking.totalAmount ? 'completo' : 'parcial'
-    await supabase.from('bookings').update({ amount_paid: newPaid, payment_status: newStatus }).eq('id', targetBooking.id)
-    setBookings(prev => prev.map(b => b.id === targetBooking.id ? { ...b, amountPaid: newPaid, paymentStatus: newStatus } : b))
-    setSelectedBooking(prev => prev && prev.id === targetBooking.id ? { ...prev, amountPaid: newPaid, paymentStatus: newStatus } : prev)
-
-    // Register income
-    await registrarIngresoDeAbono(supabase, {
-      paymentId: data.id,
-      bookingId: targetBooking.id,
-      guestName: selectedBooking.guestName,
-      locator: selectedBooking.locator || '',
-      accommodationTitle: group.length > 1 ? `${group.length} habitaciones` : getAccommodation(targetBooking.accommodationId)?.title,
-      amount: amountVal,
-      date: paymentForm.date || todayStr,
-      method: paymentForm.method,
-      reference: paymentForm.reference.trim() || null,
-      exchangeRate: data.exchange_rate,
-      amountBs: data.amount_bs
-    })
-
-    setAddingPayment(false)
-    setPaymentForm({ amount: '', date: todayStr, method: 'transferencia', reference: '' })
-    setNuevoAbonoBs({ activo: false, bolivares: '', tasa: '' })
-    envioAbono.desbloquear()
   }
 
   const handleDeletePayment = async (payment: BookingPayment) => {

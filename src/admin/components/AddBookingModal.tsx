@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { X, Check } from 'lucide-react'
 import { accommodationOptions, activeAccommodationOptions, getMaxCapacity } from '../../data/accommodations'
 import { repartirNoches, precioEstancia } from '../../utils/seasonNights'
 import { supabase } from '../../lib/supabase'
 import type { Booking } from '../types'
-import { parseLocalDate, fechaLocalISO as formatLocalDate } from '../../utils/dateUtils'
+import { fechaLocalISO as formatLocalDate } from '../../utils/dateUtils'
 import { syncMarketingCustomer } from '../../utils/syncMarketingCustomer'
 import CobroEnBolivares from './CobroEnBolivares'
+import { dolaresDeBolivares } from '../../utils/bolivares'
 import { sendBookingConfirmationEmail } from '../../utils/sendBookingConfirmationEmail'
 import { sendBookingVoucherEmail } from '../../utils/sendBookingVoucherEmail'
 import { splitPersonName } from '../../utils/personName'
@@ -1326,11 +1327,25 @@ export default function AddBookingModal({
 
             {/* Cobro en bolivares para el abono inicial */}
             <CobroEnBolivares
-              value={abonoInicialBs}
-              onChange={setAbonoInicialBs}
-              onUsdCalculated={usd => setForm(f => ({ ...f, amountPaid: usd }))}
-              bcvRate={bcvEuro}
-              usdTarget={Number(form.amountPaid) || 0}
+              compacto
+              activo={abonoInicialBs.activo}
+              onActivo={v => {
+                setAbonoInicialBs(prev => ({ ...prev, activo: v }))
+                if (v) setForm(prev => ({ ...prev, amountPaid: 0 }))
+              }}
+              bolivares={abonoInicialBs.bolivares}
+              onBolivares={v => {
+                setAbonoInicialBs(prev => ({ ...prev, bolivares: v }))
+                const usd = dolaresDeBolivares(v, abonoInicialBs.tasa)
+                if (usd) setForm(prev => ({ ...prev, amountPaid: Number(usd) }))
+              }}
+              tasa={abonoInicialBs.tasa}
+              onTasa={v => {
+                setAbonoInicialBs(prev => ({ ...prev, tasa: v }))
+                const usd = dolaresDeBolivares(abonoInicialBs.bolivares, v)
+                if (usd) setForm(prev => ({ ...prev, amountPaid: Number(usd) }))
+              }}
+              referencia={bcvEuro}
             />
           </div>
 

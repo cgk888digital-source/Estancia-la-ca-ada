@@ -185,7 +185,6 @@ const getPaymentColorClasses = (booking: Pick<Booking, 'confirmed' | 'paymentSta
 
 export default function BookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([])
-  const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [monthPage, setMonthPage] = useState(1)
   const PAGE_SIZE = 20
@@ -310,7 +309,6 @@ export default function BookingsPage() {
         setLoadError(null)
         setBookings((data || []).map(mapDbBookingToReact))
       }
-      setLoading(false)
     }
 
     fetchBookings()
@@ -706,7 +704,7 @@ export default function BookingsPage() {
         </div>
       </div>
 
-      <LoadErrorBanner error={loadError} onRetry={() => window.location.reload()} />
+      <LoadErrorBanner message={loadError} />
 
       {/* 2. Key Metrics Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
