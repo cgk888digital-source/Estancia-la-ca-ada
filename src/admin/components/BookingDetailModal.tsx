@@ -148,7 +148,7 @@ interface BookingDetailModalProps {
   setBookings: Dispatch<SetStateAction<Booking[]>>
   setSelectedBooking: Dispatch<SetStateAction<Booking | null>>
   dbAccommodations: DbAccommodation[]
-  bcvEuro={bcvEuro}
+  bcvEuro: number | null
   mealRates: { perAdult: number; perAdultNavidad: number; perChild: number }
   todayStr: string
   onCheckIn: (bookingId: string) => void
