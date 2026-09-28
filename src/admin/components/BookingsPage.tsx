@@ -69,6 +69,13 @@ const statusConfig = {
     badge: 'bg-emerald-100 text-emerald-800 border-emerald-300',
     bullet: 'bg-emerald-500',
     icon: <Check size={15} />
+  },
+  anulada: {
+    label: 'Anulada',
+    bg: 'bg-gray-100 border-gray-200 text-gray-500',
+    badge: 'bg-gray-100 text-gray-600 border-gray-200',
+    bullet: 'bg-gray-400',
+    icon: <ArchiveX size={15} />
   }
 }
 
@@ -316,7 +323,6 @@ export default function BookingsPage() {
         setLoadError(null)
         setBookings((data || []).filter(b => b.status !== 'anulada').map(mapDbBookingToReact))
       }
-      setLoading(false)
     }
 
     fetchBookings()
