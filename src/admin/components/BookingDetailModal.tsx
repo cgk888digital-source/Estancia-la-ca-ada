@@ -707,7 +707,8 @@ export default function BookingDetailModal({
       })
 
       setAddingPayment(false)
-      setPaymentForm({ amount: '', date: todayStr, method: 'transferencia', reference: '' })\n      setNuevoAbonoBs({ activo: false, bolivares: '', tasa: '' })
+      setPaymentForm({ amount: '', date: todayStr, method: 'transferencia', reference: '' })
+      setNuevoAbonoBs({ activo: false, bolivares: '', tasa: '' })
     } finally {
       envioAbono.terminar()
     }
@@ -1572,7 +1573,7 @@ export default function BookingDetailModal({
                           value={editFixedDiscountAmount}
                           onChange={e => setEditFixedDiscountAmount(Math.min(
                             totalAfterPercent,
-                            Math.max(0, Number(e.target.value))
+                            Math.max(0, Number(editFixedDiscountAmount) || 0)
                           ))}
                           className="w-full border border-gray-200 rounded-xl pl-7 pr-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white"
                           placeholder="Ejemplo: 5"
