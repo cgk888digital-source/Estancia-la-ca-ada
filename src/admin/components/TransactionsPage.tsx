@@ -213,6 +213,25 @@ const textoDeLaTasa = (amountBs?: number | null, rate?: number | null) => {
   return `Bs. ${bs} a ${tasa} Bs/$`
 }
 
+/** Convierte texto con formato de moneda venezolano o decimal internacional a número */
+const parseLocalNumber = (val: string | number | null | undefined): number => {
+  if (typeof val === 'number') return isNaN(val) ? 0 : val
+  if (!val) return 0
+  const clean = String(val).trim()
+  if (!clean) return 0
+  if (clean.includes('.') && clean.includes(',')) {
+    if (clean.lastIndexOf(',') > clean.lastIndexOf('.')) {
+      return parseFloat(clean.replace(/\./g, '').replace(',', '.')) || 0
+    } else {
+      return parseFloat(clean.replace(/,/g, '')) || 0
+    }
+  }
+  if (clean.includes(',')) {
+    return parseFloat(clean.replace(',', '.')) || 0
+  }
+  return parseFloat(clean) || 0
+}
+
 const PAGE_SIZE = 25
 
 const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
