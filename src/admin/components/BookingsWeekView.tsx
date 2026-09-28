@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { Plus, Maximize2, Minimize2 } from 'lucide-react'
+import { formatLocalDate, parseLocalDate } from '../../utils/dateUtils'
+import { useIsMobile } from '../../utils/useMediaQuery'
 import { activeAccommodationOptions } from '../../data/accommodations'
 import type { Booking } from '../types'
 
@@ -302,7 +304,8 @@ export default function BookingsWeekView({
         <div className="flex rounded-xl overflow-hidden border border-gray-200 text-[10px] font-bold uppercase tracking-wider">
           <button
             onClick={() => setWeekViewMode('semana')}
-            className={`px-3 py-1.5 transition-colors ${weekViewMode === 'semana' ? 'bg-[#3D2B1F] text-white' : 'text-gray-400 hover:bg-white'}`}\n          >
+            className={`px-3 py-1.5 transition-colors ${weekViewMode === 'semana' ? 'bg-[#3D2B1F] text-white' : 'text-gray-400 hover:bg-white'}`}
+          >
             Semana
           </button>
           <button
@@ -407,8 +410,7 @@ export default function BookingsWeekView({
                 return (
                   <div
                     key={day.dateStr}
-                    className={`py-1.5 text-center flex flex-col items-center justify-center ${isToday ? 'bg-amber-500/10 text-amber-800' : 'text-gray-500'}`}
-                  >
+                    className={`py-1.5 text-center flex flex-col items-center justify-center ${isToday ? 'bg-amber-500/10 text-amber-800' : 'text-gray-500'}`}\n                  >
                     <span className="text-[8px] font-bold uppercase tracking-wider opacity-60 leading-none">{day.label}</span>
                     <span className="text-xs font-extrabold leading-none mt-0.5">{day.dayNum}</span>
                     <span className="text-[7px] font-medium uppercase tracking-widest opacity-60 leading-none mt-0.5">{day.monthLabel}</span>
