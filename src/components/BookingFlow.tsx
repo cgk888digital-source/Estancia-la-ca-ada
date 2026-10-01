@@ -1269,7 +1269,6 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
 
                   const roomPriceDetails = calculateStayPrice(id, allocatedAdults, allocatedChildren, totalNights, reparto);
                   const roomTotal = roomPriceDetails.totalStayPrice;
-                  const roomDeposit = roomTotal * (depositPercent / 100);
 
                   return {
                     guest_name: `${formData.nombre} ${formData.apellido}${N > 1 ? ` (Habitación ${idx + 1}/${N})` : ''}`,
@@ -1283,8 +1282,11 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
                     babies: allocatedBabies,
                     pets: allocatedPets,
                     total_amount: roomTotal,
-                    amount_paid: roomDeposit,
-                    payment_status: 'parcial',
+                    // El huésped todavía no ha pagado nada: solo ha elegido cómo pagará. Antes
+                    // se apuntaba el adelanto como cobrado, y la reserva nacía diciendo que ya
+                    // había entrado la mitad del dinero sin que hubiera entrado nada.
+                    amount_paid: 0,
+                    payment_status: 'pendiente',
                     payment_method: selectedPayment || 'transferencia',
                     status: initialStatus,
                     confirmed: false, // reserva enviada por el huésped, pendiente de revisión del staff

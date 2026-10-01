@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   Calendar, Users, Check, LogIn, LogOut, Search, Plus, X,
   RefreshCw, Printer, ArchiveX
-} from 'lucide-react'
+, BellRing } from 'lucide-react'
 import { accommodationOptions, activeAccommodationOptions, getMaxCapacity } from '../../data/accommodations'
 import LoadErrorBanner from './LoadErrorBanner'
 import { repartirNoches, precioEstancia } from '../../utils/seasonNights'
@@ -232,6 +232,19 @@ export default function BookingsPage() {
 
   // Accommodation lookup helper
   const getAccommodation = (id: number) => accommodationOptions.find(o => o.id === id)
+
+  // Reservas que entraron por la web y nadie ha revisado todavía. De las agrupadas se
+  // enseña una sola fila, que es como las ve el huésped: una reserva, no tres.
+  const reservasSinRevisar = useMemo(() => {
+    const vistas = new Set<string>()
+    return bookings.filter(b => {
+      if (b.confirmed || b.status === 'anulada') return false
+      const clave = b.locator || b.id
+      if (vistas.has(clave)) return false
+      vistas.add(clave)
+      return true
+    })
+  }, [bookings])
 
   const getBookingGroup = (booking: Booking) => booking.locator
     ? bookings.filter(item => item.locator === booking.locator)
@@ -740,6 +753,45 @@ export default function BookingsPage() {
       </div>
 
       <LoadErrorBanner message={loadError} />
+
+      {/* El planner abre en la vista de HOY, así que una reserva para dentro de dos semanas
+          no se ve hasta que alguien entra en «Este mes», y el buscador solo filtra lo que la
+          vista tiene delante. Ya pasó dos veces: la reserva entró bien, nadie la vio, y se
+          volvió a cargar a mano — la misma habitación dos veces y el dinero en la copia. Por
+          eso este aviso va arriba del todo y no depende de la vista. */}
+      {reservasSinRevisar.length > 0 && (
+        <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5">
+          <div className="flex items-start gap-3">
+            <BellRing size={18} className="text-amber-600 shrink-0 mt-0.5" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-amber-900">
+                {reservasSinRevisar.length === 1
+                  ? 'Hay 1 reserva nueva desde la web sin revisar'
+                  : 'Hay ' + reservasSinRevisar.length + ' reservas nuevas desde la web sin revisar'}
+              </p>
+              <p className="text-xs text-amber-800 mt-0.5">
+                Ábrala para comprobar el pago y confirmarla. Mientras no se confirme, seguirá aquí.
+              </p>
+              <div className="flex flex-wrap gap-2 mt-3">
+                {reservasSinRevisar.map(reserva => (
+                  <button
+                    key={reserva.id}
+                    onClick={() => setSelectedBooking(reserva)}
+                    className="text-left bg-white hover:bg-amber-100/60 border border-amber-200 rounded-2xl px-3 py-2 transition-colors"
+                  >
+                    <span className="block text-xs font-bold text-gray-900">{reserva.guestName}</span>
+                    <span className="block text-[11px] text-gray-500">
+                      {parseLocalDate(reserva.checkIn).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
+                      {' · '}
+                      {getAccommodation(reserva.accommodationId)?.title || 'Sin habitación'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 2. Key Metrics Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
