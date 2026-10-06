@@ -1823,7 +1823,11 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                       <option value="">Del banco o de otra parte</option>
                       <option value="usd">Caja chica en dólares</option>
                       <option value="bs">Caja chica en bolívares</option>
-                      <option value="binance">Cuenta Binance</option>
+                      {/* La cuenta de Binance es solo de la propiedad: quien no la ve tampoco
+                          puede cargarle un gasto. */}
+                      {role === 'propiedad' && (
+                        <option value="binance">Cuenta Binance</option>
+                      )}
                     </select>
                   </div>
 

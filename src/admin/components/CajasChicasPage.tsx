@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { Wallet, Plus, Loader2, Trash2, X, ArrowDownCircle, ArrowUpCircle, Scale } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import LoadErrorBanner from './LoadErrorBanner'
+import { useAuth } from '../context/AuthContext'
 import { parseLocalDate, fechaLocalISO } from '../../utils/dateUtils'
 import {
   cargarMovimientosDeCaja, crearMovimientoDeCaja, borrarMovimientoDeCaja,
@@ -41,8 +42,11 @@ interface LineaDeCaja {
 }
 
 const CajasChicasPage: React.FC = () => {
-  // Las dos cajas las ven los dos accesos: la administradora es la que esta en el hotel
-  // y la que las mueve a diario; la propiedad va una vez al mes.
+  // El efectivo en dolares y el fondo en bolivares los ven los dos accesos: la
+  // administradora es la que esta en el hotel y la que los mueve a diario, y la propiedad
+  // va una vez al mes. La cuenta de Binance es solo de la propiedad.
+  const { role } = useAuth()
+  const cajas = TODAS_LAS_CAJAS.filter(c => c !== 'binance' || role === 'propiedad')
 
   const [apuntes, setApuntes] = useState<ApunteCompleto[]>([])
   const [movimientos, setMovimientos] = useState<MovimientoDeCaja[]>([])
@@ -203,7 +207,9 @@ const CajasChicasPage: React.FC = () => {
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Cajas Chicas</h1>
         <p className="text-sm text-gray-500 mt-1">
-          El efectivo que hay en el hotel, el saldo en bolívares para el día a día y la cuenta de Binance.
+          {role === 'propiedad'
+            ? 'El efectivo que hay en el hotel, el saldo en bolívares para el día a día y la cuenta de Binance.'
+            : 'El efectivo que hay en el hotel y el saldo en bolívares para los pagos del día a día.'}
         </p>
       </div>
 
@@ -221,7 +227,7 @@ const CajasChicasPage: React.FC = () => {
 
       {/* Saldos */}
       <div className="grid gap-3 sm:grid-cols-2">
-        {TODAS_LAS_CAJAS.map(caja => {
+        {cajas.map(caja => {
           const saldo = saldos[caja]
           return (
             <button
