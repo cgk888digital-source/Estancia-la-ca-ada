@@ -7,7 +7,8 @@ import { supabase } from '../lib/supabase';
 import { getBcvEuroRate } from '../utils/exchangeRate';
 import { useHotelSettings, getMealRates } from '../utils/useHotelSettings';
 import { syncMarketingCustomer } from '../utils/syncMarketingCustomer';
-import { sendBookingConfirmationEmail } from '../utils/sendBookingConfirmationEmail';
+import { sendBookingConfirmationEmail } from '../utils/sendBookingConfirmationEmail'
+import { DATOS_BINANCE, etiquetaDeFormaWeb, type FormaDePagoWeb } from '../utils/formasDePago';
 
 export interface BookingFlowData {
   unitName: string;
@@ -38,7 +39,7 @@ export interface BookingFlowData {
   remainingAmount: number;
   depositPercent: number;
   remainingPolicyText: string;
-  selectedPayment: 'zelle' | 'pago_movil' | 'transferencia' | null;
+  selectedPayment: FormaDePagoWeb | null;
   totalNights: number;
   bcvEuroRate?: number | null;
 }
@@ -115,7 +116,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
     referido: '',
     sigueCircuito: false
   });
-  const [selectedPayment, setSelectedPayment] = useState<'zelle' | 'pago_movil' | 'transferencia' | null>(null);
+  const [selectedPayment, setSelectedPayment] = useState<FormaDePagoWeb | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   const getSeason = (date: Date): 'low' | 'high' | 'dec' => {
@@ -1047,6 +1048,71 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                     </motion.div>
                   )}
                 </div>
+
+                <div
+                  onClick={() => setSelectedPayment('binance')}
+                  className={`p-6 rounded-[2rem] border-2 cursor-pointer transition-all bg-white flex flex-col gap-2
+                    ${selectedPayment === 'binance' ? 'border-brand-terracotta shadow-lg' : 'border-transparent shadow-md'}
+                  `}
+                >
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-yellow-100 rounded-xl flex items-center justify-center font-bold text-yellow-700">B</div>
+                      <span className="font-serif font-semibold text-brand-wood text-xs">Binance Pay</span>
+                    </div>
+                    <input
+                      type="radio"
+                      checked={selectedPayment === 'binance'}
+                      onChange={() => setSelectedPayment('binance')}
+                      className="text-brand-terracotta focus:ring-brand-terracotta"
+                    />
+                  </div>
+                  {selectedPayment === 'binance' && (
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="pt-4 border-t border-brand-primary/5 space-y-3 text-xs">
+                      <div className="flex justify-between items-center p-2.5 bg-brand-neutral/40 rounded-xl">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-brand-primary/40">Correo Binance</p>
+                          <p className="font-medium font-mono text-brand-primary">{DATOS_BINANCE.correo}</p>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyToClipboard(DATOS_BINANCE.correo, 'bn_email'); }}
+                          className="px-3 py-1.5 bg-brand-terracotta text-white rounded-lg font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all shrink-0"
+                        >
+                          {copiedField === 'bn_email' ? 'Copiado!' : 'Copiar'}
+                        </button>
+                      </div>
+                      <div className="flex justify-between items-center p-2.5 bg-brand-neutral/40 rounded-xl">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-brand-primary/40">Usuario</p>
+                          <p className="font-medium text-brand-primary">{DATOS_BINANCE.usuario}</p>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyToClipboard(DATOS_BINANCE.usuario, 'bn_user'); }}
+                          className="px-3 py-1.5 bg-brand-terracotta text-white rounded-lg font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all shrink-0"
+                        >
+                          {copiedField === 'bn_user' ? 'Copiado!' : 'Copiar'}
+                        </button>
+                      </div>
+                      <div className="flex justify-between items-center p-2.5 bg-brand-neutral/40 rounded-xl">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-brand-primary/40">Binance Pay ID</p>
+                          <p className="font-medium font-mono text-brand-primary">{DATOS_BINANCE.payId}</p>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyToClipboard(DATOS_BINANCE.payId, 'bn_payid'); }}
+                          className="px-3 py-1.5 bg-brand-terracotta text-white rounded-lg font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all shrink-0"
+                        >
+                          {copiedField === 'bn_payid' ? 'Copiado!' : 'Copiar'}
+                        </button>
+                      </div>
+                      <div className="p-3.5 bg-brand-terracotta/5 rounded-xl border border-brand-terracotta/10 space-y-1">
+                        <p className="text-[9px] uppercase tracking-widest text-brand-terracotta font-bold">Monto a pagar</p>
+                        <p className="text-base font-bold text-brand-wood font-mono">${depositAmount} USD</p>
+                        <p className="text-[9px] text-brand-primary/50 leading-normal">Binance se paga en dólares, no hace falta convertir a bolívares.</p>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
               </div>
             </motion.div>
           )}
@@ -1224,7 +1290,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
 *Monto de Adelanto Requerido (${depositPercent}%):* $${depositAmount}
 ${remainingAmount > 0 ? `*Monto restante (50%):* $${remainingAmount}\n*Política de saldo restante:* ${remainingPolicyText}` : '*Monto restante:* $0 (Reserva liquidada al 100%)'}
 
-*Método de Pago Seleccionado:* ${selectedPayment === 'zelle' ? 'Zelle' : selectedPayment === 'pago_movil' ? 'Pago Móvil (Bancamiga)' : 'Transferencia Bancaria'}
+*Método de Pago Seleccionado:* ${selectedPayment ? etiquetaDeFormaWeb[selectedPayment] : 'Por confirmar'}
 ${selectedPayment === 'pago_movil' && bcvEuroRate ? `*Monto en Bolívares a transferir:* Bs. ${(depositAmount * bcvEuroRate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 *Tasa Oficial del Euro (BCV):* Bs. ${bcvEuroRate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 _(Nota: Los pagos en bolívares se calculan exclusivamente con la tasa oficial del euro publicada por el BCV.)_` : ''}

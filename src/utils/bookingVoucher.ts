@@ -86,6 +86,8 @@ const methodLabels: Record<string, string> = {
   tarjeta: 'Tarjeta',
   cheque: 'Cheque',
   zelle: 'Zelle',
+  pago_movil: 'Pago móvil',
+  binance: 'Binance',
 }
 
 /** Mismo criterio que usa el hotel en Paxer para la línea de "Estatus". */

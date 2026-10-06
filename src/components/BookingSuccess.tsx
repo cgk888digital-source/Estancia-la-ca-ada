@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Check, ArrowRight, Home, MessageSquare } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useHotelSettings } from '../utils/useHotelSettings';
+import { DATOS_BINANCE, etiquetaDeFormaWeb, seCobraEnBolivares, type FormaDePagoWeb } from '../utils/formasDePago';
 
 interface BookingData {
   unitName: string;
@@ -33,7 +34,7 @@ interface BookingData {
   remainingAmount?: number;
   depositPercent?: number;
   remainingPolicyText?: string;
-  selectedPayment?: 'zelle' | 'pago_movil' | 'transferencia' | null;
+  selectedPayment?: FormaDePagoWeb | null;
   totalNights?: number;
   bcvEuroRate?: number | null;
 }
@@ -102,8 +103,8 @@ const BookingSuccess: React.FC<BookingSuccessProps> = ({ data, onGoToClub, onBac
 *Monto de Adelanto Requerido (${data.depositPercent || 50}%):* $${data.depositAmount || 0}
 ${data.remainingAmount !== undefined && data.remainingAmount > 0 ? `*Monto restante:* $${data.remainingAmount}\n*Política de saldo restante:* ${data.remainingPolicyText}` : '*Monto restante:* $0 (Reserva liquidada al 100%)'}
 
-*Método de Pago Seleccionado:* ${data.selectedPayment === 'zelle' ? 'Zelle' : data.selectedPayment === 'pago_movil' ? 'Pago Móvil (Bancamiga)' : 'Transferencia Bancaria'}
-${(data.selectedPayment === 'pago_movil' || data.selectedPayment === 'transferencia') && data.bcvEuroRate && data.depositAmount ? `*Monto en Bolívares a transferir:* Bs. ${(data.depositAmount * data.bcvEuroRate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+*Método de Pago Seleccionado:* ${data.selectedPayment ? etiquetaDeFormaWeb[data.selectedPayment] : 'Por confirmar'}
+${seCobraEnBolivares(data.selectedPayment) && data.bcvEuroRate && data.depositAmount ? `*Monto en Bolívares a transferir:* Bs. ${(data.depositAmount * data.bcvEuroRate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 *Tasa Oficial del Euro (BCV):* Bs. ${data.bcvEuroRate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 _(Nota: Los pagos en bolívares se calculan exclusivamente con la tasa oficial del euro publicada por el BCV.)_` : ''}
 *Código de Reserva:* ${data.bookingCode}
@@ -113,11 +114,14 @@ Si desean formalizar la reservación deben transferir 50% por adelantado y el 50
 *Pago a través de Zelle:* mariasusana01@hotmail.com 
 Maria Araujo 
 
+Si pagan en Bolívares, a tasa de €BCV del día.
 *Pago móvil / Transferencia:* Bancamiga 
 04141294308 CI 10345954
 01720110701108762467
 Escagueyelc@gmail.com 
 María Araujo
+
+*Binance:* ${DATOS_BINANCE.correo} ${DATOS_BINANCE.usuario} ${DATOS_BINANCE.payId}
 
 Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
 
@@ -256,7 +260,7 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
             </p>
 
             {/* Desglose Pago Móvil / Transferencia en Bolívares */}
-            {(data.selectedPayment === 'pago_movil' || data.selectedPayment === 'transferencia') && data.bcvEuroRate && data.depositAmount && (
+            {seCobraEnBolivares(data.selectedPayment) && data.bcvEuroRate && data.depositAmount && (
               <div className="space-y-2 mt-2 pt-2 border-t border-brand-primary/5">
                 <div className="p-2.5 bg-brand-terracotta/5 rounded-xl border border-brand-terracotta/10 space-y-0.5 animate-fade-in">
                   <p className="text-[8px] uppercase tracking-widest text-brand-terracotta font-bold text-center">Monto a transferir en {data.selectedPayment === 'pago_movil' ? 'Pago Móvil' : 'Transferencia'}</p>
@@ -271,7 +275,7 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
             )}
 
             <p className="text-[9px] text-brand-primary/50 text-center italic leading-tight pt-1">
-              Método seleccionado: <span className="font-bold uppercase text-brand-wood">{data.selectedPayment === 'zelle' ? 'Zelle' : data.selectedPayment === 'pago_movil' ? 'Pago Móvil' : 'Transferencia Bancaria'}</span>
+              Método seleccionado: <span className="font-bold uppercase text-brand-wood">{data.selectedPayment ? etiquetaDeFormaWeb[data.selectedPayment] : 'Por confirmar'}</span>
             </p>
           </div>
         )}
@@ -309,6 +313,12 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
             <p>04141294308 | CI 10345954</p>
             <p>01720110701108762467</p>
             <p>Escagueyelc@gmail.com | María Araujo</p>
+            <p className="font-sans text-[10px] text-brand-primary/60 pt-1">En bolívares, a tasa de €BCV del día.</p>
+          </div>
+          <div className="pt-2 border-t border-brand-primary/5">
+            <p className="font-bold text-brand-wood font-sans text-[10px] uppercase tracking-widest mb-1">Binance:</p>
+            <p>{DATOS_BINANCE.correo}</p>
+            <p>{DATOS_BINANCE.usuario} | Pay ID {DATOS_BINANCE.payId}</p>
           </div>
         </div>
       </motion.div>
