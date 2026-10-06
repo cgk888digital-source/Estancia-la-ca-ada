@@ -20,7 +20,7 @@ export interface Transaction {
   /** Importe original en bolivares. `amount` es siempre el equivalente en dolares. */
   amountBs?: number | null
   /** Caja chica de la que salio el dinero, si salio de una. */
-  cashBox?: 'usd' | 'bs' | null
+  cashBox?: 'usd' | 'bs' | 'binance' | null
 }
 
 export interface Employee {

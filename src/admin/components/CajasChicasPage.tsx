@@ -6,6 +6,7 @@ import { parseLocalDate, fechaLocalISO } from '../../utils/dateUtils'
 import {
   cargarMovimientosDeCaja, crearMovimientoDeCaja, borrarMovimientoDeCaja,
   calcularSaldos, cajaQueAlimenta, etiquetaDeMovimiento,
+  TODAS_LAS_CAJAS, etiquetaDeCaja, tituloDeCaja, pieDeCaja, monedaDeCaja,
   type Caja, type TipoMovimiento, type MovimientoDeCaja, type ApunteParaCaja,
 } from '../../utils/cajaChica'
 
@@ -104,13 +105,13 @@ const CajasChicasPage: React.FC = () => {
           id: 'in-' + a.id,
           fecha: a.date,
           concepto: a.description,
-          detalle: 'Cobro en efectivo',
+          detalle: caja === 'binance' ? 'Cobro por Binance' : 'Cobro en efectivo',
           importe: a.amount,
           manual: null,
         })
       }
       if (a.type === 'egreso' && a.cashBox === caja) {
-        const importe = caja === 'bs' ? (a.amountBs || 0) : a.amount
+        const importe = monedaDeCaja[caja] === 'bs' ? (a.amountBs || 0) : a.amount
         lineas.push({
           id: 'out-' + a.id,
           fecha: a.date,
@@ -178,14 +179,14 @@ const CajasChicasPage: React.FC = () => {
   }
 
   const borrar = async (m: MovimientoDeCaja) => {
-    const importe = m.box === 'bs' ? fmtBs(Math.abs(m.amount)) : fmtUsd(Math.abs(m.amount))
+    const importe = monedaDeCaja[m.box] === 'bs' ? fmtBs(Math.abs(m.amount)) : fmtUsd(Math.abs(m.amount))
     if (!window.confirm(`¿Eliminar ${etiquetaDeMovimiento[m.kind].toLowerCase()} de ${importe}?`)) return
     const error = await borrarMovimientoDeCaja(m.id)
     if (error) { alert('No se pudo eliminar: ' + error); return }
     setMovimientos(prev => prev.filter(x => x.id !== m.id))
   }
 
-  const dinero = (caja: Caja, n: number) => (caja === 'bs' ? fmtBs(n) : fmtUsd(n))
+  const dinero = (caja: Caja, n: number) => (monedaDeCaja[caja] === 'bs' ? fmtBs(n) : fmtUsd(n))
 
   if (loading) {
     return (
@@ -202,7 +203,7 @@ const CajasChicasPage: React.FC = () => {
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Cajas Chicas</h1>
         <p className="text-sm text-gray-500 mt-1">
-          El efectivo que hay en el hotel y el saldo en bolívares para los pagos del día a día.
+          El efectivo que hay en el hotel, el saldo en bolívares para el día a día y la cuenta de Binance.
         </p>
       </div>
 
@@ -220,8 +221,8 @@ const CajasChicasPage: React.FC = () => {
 
       {/* Saldos */}
       <div className="grid gap-3 sm:grid-cols-2">
-        {(['usd', 'bs'] as Caja[]).map(caja => {
-          const saldo = caja === 'bs' ? saldos.bs : saldos.usd
+        {TODAS_LAS_CAJAS.map(caja => {
+          const saldo = saldos[caja]
           return (
             <button
               key={caja}
@@ -235,26 +236,25 @@ const CajasChicasPage: React.FC = () => {
               <div className="flex items-center gap-2 mb-2">
                 <Wallet size={16} className="text-[#C5A059]" />
                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                  {caja === 'usd' ? 'Efectivo en dólares' : 'Fondo en bolívares'}
+                  {tituloDeCaja[caja]}
                 </span>
               </div>
               <p className={`text-2xl font-bold ${saldo < 0 ? 'text-red-600' : 'text-gray-900'}`}>
                 {dinero(caja, saldo)}
               </p>
               <p className="text-[11px] text-gray-400 mt-1">
-                {caja === 'usd'
-                  ? 'Billetes. Se llena con los cobros en efectivo en dólares.'
-                  : 'Saldo que la propiedad transfiere desde las cuentas del hotel.'}
+                {pieDeCaja[caja]}
               </p>
             </button>
           )
         })}
       </div>
 
-      {saldos.usd < 0 && cajaVisible === 'usd' && (
+      {saldos[cajaVisible] < 0 && (
         <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
-          El saldo está en negativo: se ha pagado desde la caja más de lo que entró. Revise si
-          falta registrar algún cobro en efectivo o alguna reposición.
+          <strong className="font-bold">{etiquetaDeCaja[cajaVisible]}: el saldo está en negativo.</strong>{' '}
+          Se ha pagado desde aquí más de lo que entró. Lo normal es que falte registrar una
+          reposición —el dinero que la propiedad transfiere— o algún cobro.
         </p>
       )}
 
@@ -284,7 +284,7 @@ const CajasChicasPage: React.FC = () => {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/60">
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
-            Movimientos · {cajaVisible === 'usd' ? 'dólares' : 'bolívares'}
+            Movimientos · {etiquetaDeCaja[cajaVisible]}
           </p>
         </div>
 
@@ -295,7 +295,9 @@ const CajasChicasPage: React.FC = () => {
             <p className="text-xs text-gray-300 mt-1">
               {cajaVisible === 'bs'
                 ? 'Use «Reponer» cuando la propiedad transfiera el dinero'
-                : 'Entrará solo con el primer cobro en efectivo'}
+                : cajaVisible === 'binance'
+                  ? 'Entrará solo con el primer cobro por Binance'
+                  : 'Entrará solo con el primer cobro en efectivo'}
             </p>
           </div>
         ) : (
@@ -337,7 +339,7 @@ const CajasChicasPage: React.FC = () => {
               <div>
                 <h2 className="text-lg font-bold text-gray-900">{etiquetaDeMovimiento[modal.tipo]}</h2>
                 <p className="text-sm text-gray-500 mt-0.5">
-                  {modal.caja === 'usd' ? 'Caja chica en dólares' : 'Fondo en bolívares'}
+                  {etiquetaDeCaja[modal.caja]}
                 </p>
               </div>
               <button onClick={() => setModal(null)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
@@ -356,7 +358,7 @@ const CajasChicasPage: React.FC = () => {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">
-                  Importe ({modal.caja === 'usd' ? 'USD' : 'Bs'})
+                  Importe ({monedaDeCaja[modal.caja] === 'usd' ? 'USD' : 'Bs'})
                 </label>
                 <input
                   type="number"

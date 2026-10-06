@@ -178,7 +178,7 @@ const mapDbTransactionToReact = (db: DbTransaction): Transaction => ({
   relatedTo: db.related_to || '',
   exchangeRate: db.exchange_rate == null ? null : Number(db.exchange_rate),
   amountBs: db.amount_bs == null ? null : Number(db.amount_bs),
-  cashBox: (db.cash_box as 'usd' | 'bs' | null) ?? null,
+  cashBox: (db.cash_box as 'usd' | 'bs' | 'binance' | null) ?? null,
 })
 
 function getDateRange(period: DatePeriod, customFrom: string, customTo: string): { from: Date | null; to: Date | null } {
@@ -1294,7 +1294,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                       )}
                       {tx.cashBox && (
                         <p className="text-[11px] text-[#C5A059] font-semibold mt-0.5">
-                          Caja chica en {tx.cashBox === 'usd' ? 'dólares' : 'bolívares'}
+                          {tx.cashBox === 'binance' ? 'Pagado desde Binance' : 'Caja chica en ' + (tx.cashBox === 'usd' ? 'dólares' : 'bolívares')}
                         </p>
                       )}
                       {/* En móvil se muestra el distribuidor debajo con botón para filtrar */}
@@ -1808,7 +1808,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                     <select
                       value={form.cashBox ?? ''}
                       onChange={e => {
-                        const val = (e.target.value || null) as 'usd' | 'bs' | null
+                        const val = (e.target.value || null) as 'usd' | 'bs' | 'binance' | null
                         setCashBoxError(false)
                         setForm(f => ({ ...f, cashBox: val }))
                         if (val === 'bs' && form.amount > 0 && exchangeRate > 0 && !amountBs) {
@@ -1823,6 +1823,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                       <option value="">Del banco o de otra parte</option>
                       <option value="usd">Caja chica en dólares</option>
                       <option value="bs">Caja chica en bolívares</option>
+                      <option value="binance">Cuenta Binance</option>
                     </select>
                   </div>
 

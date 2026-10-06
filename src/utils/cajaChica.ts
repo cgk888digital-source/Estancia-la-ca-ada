@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabase'
 
 /**
- * Las dos cajas chicas de la posada.
+ * Las tres cajas de la posada.
  *
  * La de DOLARES es un cajon con billetes: se llena sola con el efectivo en dolares que
  * pagan los huespedes en el hotel, y de ella salen los gastos que hay que pagar en mano.
@@ -11,13 +11,16 @@ import { supabase } from '../lib/supabase'
  * quincena, y del que se paga por pago movil o transferencia. Por eso no la alimenta
  * ningun cobro: solo entra lo que la propiedad repone.
  *
+ * La de BINANCE es una cuenta en dolares: sube sola con cada cobro por Binance y baja
+ * con cada gasto que se pague desde ahi.
+ *
  * Una caja NO es una categoria de gasto. Reponerla no es gastar —el dinero solo cambia de
  * sitio— y la compra que se paga desde ella sigue siendo alimentos, o mantenimiento, o lo
  * que sea. La caja es DE DONDE SALIO el dinero. Por eso el saldo no se guarda en ningun
  * lado: se calcula, y asi no puede quedarse desfasado.
  */
 
-export type Caja = 'usd' | 'bs'
+export type Caja = 'usd' | 'bs' | 'binance'
 export type TipoMovimiento = 'reposicion' | 'retiro' | 'ajuste'
 
 export interface MovimientoDeCaja {
@@ -104,15 +107,18 @@ export async function borrarMovimientoDeCaja(id: string): Promise<string | null>
 }
 
 /**
- * Solo el efectivo en dolares entra en una caja, y entra en la de dolares.
+ * Que caja engorda un cobro: el efectivo en dolares la de billetes, y lo cobrado por
+ * Binance la cuenta de Binance.
  *
- * Un cobro en efectivo hecho en bolivares NO alimenta la caja de bolivares: esa no es un
+ * Un cobro en efectivo hecho en bolivares NO alimenta el fondo en bolivares: ese no es un
  * cajon, es un saldo bancario que solo mueve la propiedad. Esos billetes se quedan fuera
- * de las dos cajas, que es donde estan de verdad.
+ * de las tres cajas, que es donde estan de verdad.
  */
 export const cajaQueAlimenta = (apunte: ApunteParaCaja): Caja | null => {
   if (apunte.type !== 'ingreso') return null
-  if ((apunte.paymentMethod ?? '') !== 'efectivo') return null
+  const metodo = apunte.paymentMethod ?? ''
+  if (metodo === 'binance') return 'binance'
+  if (metodo !== 'efectivo') return null
   if (apunte.amountBs && apunte.amountBs > 0) return null
   return 'usd'
 }
@@ -120,6 +126,7 @@ export const cajaQueAlimenta = (apunte: ApunteParaCaja): Caja | null => {
 export interface SaldosDeCaja {
   usd: number
   bs: number
+  binance: number
   /** Egresos marcados como pagados desde la caja en bolivares pero sin los bolivares
    *  apuntados: no se pueden restar y hay que avisarlo en vez de callarlo. */
   egresosBsSinImporte: number
@@ -135,12 +142,16 @@ export function calcularSaldos(
 ): SaldosDeCaja {
   let usd = 0
   let bs = 0
+  let binance = 0
   let egresosBsSinImporte = 0
 
   for (const a of apuntes) {
-    if (cajaQueAlimenta(a) === 'usd') usd += a.amount
+    const entra = cajaQueAlimenta(a)
+    if (entra === 'usd') usd += a.amount
+    if (entra === 'binance') binance += a.amount
 
     if (a.type === 'egreso' && a.cashBox === 'usd') usd -= a.amount
+    if (a.type === 'egreso' && a.cashBox === 'binance') binance -= a.amount
     if (a.type === 'egreso' && a.cashBox === 'bs') {
       if (a.amountBs && a.amountBs > 0) bs -= a.amountBs
       else egresosBsSinImporte++
@@ -149,19 +160,45 @@ export function calcularSaldos(
 
   for (const m of movimientos) {
     if (m.box === 'usd') usd += m.amount
+    else if (m.box === 'binance') binance += m.amount
     else bs += m.amount
   }
 
   return {
     usd: Math.round(usd * 100) / 100,
     bs: Math.round(bs * 100) / 100,
+    binance: Math.round(binance * 100) / 100,
     egresosBsSinImporte,
   }
 }
 
+export const TODAS_LAS_CAJAS: Caja[] = ['usd', 'bs', 'binance']
+
 export const etiquetaDeCaja: Record<Caja, string> = {
   usd: 'Caja chica en dólares',
   bs: 'Fondo en bolívares',
+  binance: 'Cuenta Binance',
+}
+
+/** El rótulo corto de la tarjeta. */
+export const tituloDeCaja: Record<Caja, string> = {
+  usd: 'Efectivo en dólares',
+  bs: 'Fondo en bolívares',
+  binance: 'Cuenta Binance',
+}
+
+/** Una línea que explica de dónde sale el dinero de cada caja. */
+export const pieDeCaja: Record<Caja, string> = {
+  usd: 'Billetes. Se llena con los cobros en efectivo en dólares.',
+  bs: 'Saldo que la propiedad transfiere desde las cuentas del hotel.',
+  binance: 'Sube con cada cobro por Binance y baja con lo que se pague desde ahí.',
+}
+
+/** En qué moneda se cuenta cada caja. Binance se lleva en dólares. */
+export const monedaDeCaja: Record<Caja, 'usd' | 'bs'> = {
+  usd: 'usd',
+  bs: 'bs',
+  binance: 'usd',
 }
 
 export const etiquetaDeMovimiento: Record<TipoMovimiento, string> = {
