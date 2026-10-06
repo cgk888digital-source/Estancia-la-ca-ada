@@ -138,7 +138,7 @@ const mapDbBookingToReact = (db: DbBooking): Booking => ({
   totalAmount: Number(db.total_amount) || 0,
   amountPaid: Number(db.amount_paid) || 0,
   paymentStatus: (db.payment_status || 'pendiente') as 'completo' | 'parcial' | 'pendiente',
-  paymentMethod: (db.payment_method || 'transferencia') as 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque' | 'zelle' | 'pago_movil',
+  paymentMethod: (db.payment_method || 'transferencia') as 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque' | 'zelle' | 'binance' | 'pago_movil',
   paymentReference: db.payment_reference || '',
   status: (db.status || 'confirmado') as any,
   confirmed: db.confirmed ?? true,

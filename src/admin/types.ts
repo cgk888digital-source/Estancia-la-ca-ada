@@ -4,7 +4,7 @@ export type IncomeCategory = 'alojamiento' | 'restaurante' | 'bebidas' | 'almuer
 export type ExpenseCategory = 'empleados' | 'alimentos' | 'mantenimiento' | 'servicios' | 'comisiones' | 'otros_egresos'
 export type TransactionCategory = IncomeCategory | ExpenseCategory
 
-export type PaymentMethod = 'efectivo' | 'transferencia' | 'pago_movil' | 'tarjeta' | 'cheque' | 'débito automático'
+export type PaymentMethod = 'efectivo' | 'transferencia' | 'pago_movil' | 'zelle' | 'binance' | 'tarjeta' | 'cheque' | 'débito automático'
 
 export interface Transaction {
   id: string
@@ -79,7 +79,7 @@ export interface Booking {
   totalAmount: number
   amountPaid: number
   paymentStatus: 'completo' | 'parcial' | 'pendiente'
-  paymentMethod: 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque' | 'zelle' | 'pago_movil'
+  paymentMethod: 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque' | 'zelle' | 'binance' | 'pago_movil'
   paymentReference?: string
   status: 'checkout_hoy' | 'checkin_hoy' | 'ocupado' | 'confirmado' | 'limpieza' | 'anulada'
   /** false = reserva recién creada por el huésped (BookingFlow), aún no revisada por el staff. */
@@ -97,7 +97,7 @@ export interface BookingPayment {
   paymentDate: string
   amount: number
   currency: string
-  method: 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque' | 'zelle' | 'pago_movil'
+  method: 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque' | 'zelle' | 'binance' | 'pago_movil'
   reference?: string
   status: 'verificado' | 'pendiente'
   /** Tasa aplicada si el abono se cobro en bolivares. Null si se cobro en dolares. */

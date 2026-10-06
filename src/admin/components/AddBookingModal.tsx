@@ -71,7 +71,7 @@ const mapDbBookingToReact = (db: any): Booking => ({
   totalAmount: Number(db.total_amount) || 0,
   amountPaid: Number(db.amount_paid) || 0,
   paymentStatus: (db.payment_status || 'pendiente') as 'completo' | 'parcial' | 'pendiente',
-  paymentMethod: (db.payment_method || 'transferencia') as 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque' | 'zelle' | 'pago_movil',
+  paymentMethod: (db.payment_method || 'transferencia') as 'efectivo' | 'transferencia' | 'tarjeta' | 'cheque' | 'zelle' | 'binance' | 'pago_movil',
   paymentReference: db.payment_reference || '',
   status: (db.status || 'confirmado') as 'checkout_hoy' | 'checkin_hoy' | 'ocupado' | 'confirmado' | 'limpieza',
   confirmed: db.confirmed ?? true,
@@ -138,7 +138,7 @@ export default function AddBookingModal({
     totalAmount: 180,
     amountPaid: 0,
     paymentDate: todayStr,
-    paymentMethod: 'transferencia' as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' | 'zelle' | 'pago_movil',
+    paymentMethod: 'transferencia' as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' | 'zelle' | 'binance' | 'pago_movil',
     paymentReference: '',
     specialNotes: DEFAULT_SPECIAL_NOTES
   })
@@ -1332,6 +1332,7 @@ export default function AddBookingModal({
                   <option value="transferencia">Transferencia Bancaria</option>
                   <option value="pago_movil">Pago Móvil</option>
                   <option value="zelle">Zelle</option>
+                  <option value="binance">Binance</option>
                   <option value="efectivo">Efectivo (USD)</option>
                   <option value="tarjeta">Punto de Venta / Tarjeta</option>
                 </select>
@@ -1363,10 +1364,10 @@ export default function AddBookingModal({
           </div>
 
           {/* Referencia de pago */}
-          {(form.paymentMethod === 'transferencia' || form.paymentMethod === 'zelle' || form.paymentMethod === 'pago_movil') && (
+          {(form.paymentMethod === 'transferencia' || form.paymentMethod === 'zelle' || form.paymentMethod === 'binance' || form.paymentMethod === 'pago_movil') && (
             <div>
               <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">
-                Código de Pago / Referencia {form.paymentMethod === 'zelle' ? '(Zelle)' : form.paymentMethod === 'pago_movil' ? '(Pago Móvil)' : '(Transferencia)'}
+                Código de Pago / Referencia {form.paymentMethod === 'zelle' ? '(Zelle)' : form.paymentMethod === 'binance' ? '(Binance)' : form.paymentMethod === 'pago_movil' ? '(Pago Móvil)' : '(Transferencia)'}
               </label>
               <input
                 type="text"

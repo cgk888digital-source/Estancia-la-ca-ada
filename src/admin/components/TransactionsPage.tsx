@@ -135,11 +135,13 @@ const fmt = (n: number) =>
 
 const incomeCategories: TransactionCategory[] = ['alojamiento', 'restaurante', 'bebidas', 'almuerzos', 'pasapalos', 'excursiones', 'bar_cava', 'otros_ingresos', 'propinas']
 const expenseCategories: TransactionCategory[] = ['empleados', 'alimentos', 'mantenimiento', 'servicios', 'comisiones', 'otros_egresos']
-const paymentMethods: PaymentMethod[] = ['efectivo', 'transferencia', 'pago_movil', 'tarjeta', 'cheque']
+const paymentMethods: PaymentMethod[] = ['efectivo', 'transferencia', 'pago_movil', 'zelle', 'binance', 'tarjeta', 'cheque']
 
 // `pago_movil` se guarda con guion bajo; en pantalla no puede salir asi.
 const etiquetaDeMetodo: Partial<Record<PaymentMethod, string>> = {
   pago_movil: 'Pago Móvil',
+  zelle: 'Zelle',
+  binance: 'Binance',
 }
 
 const periodLabels: Record<DatePeriod, string> = {

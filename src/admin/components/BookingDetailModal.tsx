@@ -217,7 +217,7 @@ export default function BookingDetailModal({
   const [paymentForm, setPaymentForm] = useState({
     amount: '',
     date: todayStr,
-    method: 'transferencia' as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' | 'zelle' | 'pago_movil',
+    method: 'transferencia' as 'transferencia' | 'efectivo' | 'tarjeta' | 'cheque' | 'zelle' | 'binance' | 'pago_movil',
     reference: ''
   })
   const [nuevoAbonoBs, setNuevoAbonoBs] = useState({ activo: false, bolivares: '', tasa: '' })
@@ -1791,6 +1791,7 @@ export default function BookingDetailModal({
                         <option value="transferencia">Transferencia</option>
                         <option value="pago_movil">Pago Móvil</option>
                         <option value="zelle">Zelle</option>
+                        <option value="binance">Binance</option>
                         <option value="efectivo">Efectivo</option>
                         <option value="tarjeta">Tarjeta</option>
                         <option value="cheque">Cheque</option>
