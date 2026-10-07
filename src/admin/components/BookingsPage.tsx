@@ -116,7 +116,6 @@ interface DbAccommodation {
 
 const todayDate = new Date()
 const todayStr = formatLocalDate(todayDate)
-const todayLongLabel = todayDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })
 
 // Mappers between DB format (snake_case) and React format (camelCase)
 const mapDbBookingToReact = (db: DbBooking): Booking => ({
@@ -211,6 +210,13 @@ export default function BookingsPage() {
   const [mesMode, setMesMode] = useState<'mes' | 'personalizado'>('mes')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
+
+  // El PDF lleva su propio rango de fechas, aparte de la pestaña que se esté mirando: se
+  // baja mucho para dárselo a las camareras, y casi nunca es el mismo tramo que hay en
+  // pantalla. Arranca en el día de hoy.
+  const [pdfAbierto, setPdfAbierto] = useState(false)
+  const [pdfDesde, setPdfDesde] = useState(todayStr)
+  const [pdfHasta, setPdfHasta] = useState(todayStr)
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false)
@@ -441,13 +447,30 @@ export default function BookingsPage() {
     return filteredBookings.filter(b => b.checkIn <= rangeEnd! && b.checkOut >= rangeStart!)
   }, [filteredBookings, mesMode, monthAnchor, customFrom, customTo])
 
-  const reportDateText = activeTab === 'dia'
-    ? `Hoy, ${todayLongLabel}`
-    : activeTab === 'semana'
-      ? 'Vista Semanal'
-      : mesMode === 'personalizado'
-        ? `Del ${customFrom || '—'} al ${customTo || '—'}`
-        : `Mes de ${monthAnchorLabel}`
+  const ponerRangoPdf = (desde: string, hasta: string) => {
+    setPdfDesde(desde)
+    setPdfHasta(hasta)
+  }
+
+  const rangoDeLaSemana = () => {
+    const lunes = new Date(todayDate)
+    lunes.setDate(lunes.getDate() - ((lunes.getDay() + 6) % 7))
+    const domingo = new Date(lunes)
+    domingo.setDate(domingo.getDate() + 6)
+    return [formatLocalDate(lunes), formatLocalDate(domingo)] as const
+  }
+
+  const rangoDelMes = () => {
+    const y = todayDate.getFullYear()
+    const m = todayDate.getMonth()
+    return [formatLocalDate(new Date(y, m, 1)), formatLocalDate(new Date(y, m + 1, 0))] as const
+  }
+
+  const descargarPdf = () => {
+    setPdfAbierto(false)
+    // El reporte se vuelve a pintar con las fechas elegidas antes de abrir la impresión.
+    setTimeout(() => window.print(), 150)
+  }
 
   const totalMonthlyRevenue = useMemo(() => {
     return monthListBookings.reduce((s, b) => s + b.totalAmount, 0)
@@ -734,14 +757,82 @@ export default function BookingsPage() {
             <ArchiveX size={15} />
             <span className="hidden sm:inline">Res. Anuladas</span>
           </Link>
-          <button
-            onClick={() => window.print()}
-            className="flex items-center gap-2 bg-white hover:bg-gray-50 text-gray-700 px-4 py-3 rounded-2xl border border-gray-200 text-xs font-bold uppercase tracking-wider transition-all active:scale-95 shadow-sm"
-            title="Descargar o imprimir reporte de ocupación"
-          >
-            <Printer size={15} />
-            <span className="hidden sm:inline">Descargar PDF</span>
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setPdfAbierto(v => !v)}
+              className="flex items-center gap-2 bg-white hover:bg-gray-50 text-gray-700 px-4 py-3 rounded-2xl border border-gray-200 text-xs font-bold uppercase tracking-wider transition-all active:scale-95 shadow-sm"
+              title="Descargar o imprimir el movimiento de habitaciones"
+            >
+              <Printer size={15} />
+              <span className="hidden sm:inline">Descargar PDF</span>
+            </button>
+
+            {pdfAbierto && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setPdfAbierto(false)} />
+                <div className="absolute right-0 mt-2 z-40 w-[19rem] bg-white rounded-2xl border border-gray-200 shadow-xl p-4 space-y-3">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Fechas del reporte</p>
+
+                  <div className="flex gap-2">
+                    {([
+                      ['Hoy', [todayStr, todayStr] as const],
+                      ['Esta semana', rangoDeLaSemana()],
+                      ['Este mes', rangoDelMes()],
+                    ] as const).map(([etiqueta, [d, h]]) => {
+                      const activo = pdfDesde === d && pdfHasta === h
+                      return (
+                        <button
+                          key={etiqueta}
+                          onClick={() => ponerRangoPdf(d, h)}
+                          className={`flex-1 px-2 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider border transition-colors ${activo ? 'bg-[#3D2B1F] text-white border-[#3D2B1F]' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}
+                        >
+                          {etiqueta}
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="block">
+                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Desde</span>
+                      <input
+                        type="date"
+                        value={pdfDesde}
+                        onChange={e => setPdfDesde(e.target.value)}
+                        className="w-full mt-1 border border-gray-200 rounded-xl px-2 py-2 text-xs outline-none focus:border-[#C5A059]"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Hasta</span>
+                      <input
+                        type="date"
+                        value={pdfHasta}
+                        min={pdfDesde}
+                        onChange={e => setPdfHasta(e.target.value)}
+                        className="w-full mt-1 border border-gray-200 rounded-xl px-2 py-2 text-xs outline-none focus:border-[#C5A059]"
+                      />
+                    </label>
+                  </div>
+
+                  {pdfHasta < pdfDesde && (
+                    <p className="text-[11px] text-red-600">La fecha final no puede ser anterior a la inicial.</p>
+                  )}
+
+                  <button
+                    onClick={descargarPdf}
+                    disabled={!pdfDesde || !pdfHasta || pdfHasta < pdfDesde}
+                    className="w-full bg-[#C5A059] hover:bg-[#b08d48] disabled:bg-gray-200 disabled:text-gray-400 text-white px-4 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all active:scale-95"
+                  >
+                    Generar PDF
+                  </button>
+
+                  <p className="text-[10px] text-gray-400 leading-snug">
+                    Sale el movimiento día a día —quién sale, quién entra y quién se queda— y detrás la lista completa del periodo.
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
           <button
             onClick={() => openAddModal()}
             className="flex items-center gap-2 bg-[#C5A059] hover:bg-[#b08d48] text-white px-5 py-3 rounded-2xl text-xs font-bold uppercase tracking-wider transition-all active:scale-95 shadow-lg shadow-[#C5A059]/20"
@@ -1302,9 +1393,10 @@ export default function BookingsPage() {
       />
     </div>
 
-    <PrintableReservationsReport 
-      bookings={filteredBookings} 
-      dateText={reportDateText}
+    <PrintableReservationsReport
+      bookings={bookings}
+      desde={pdfDesde}
+      hasta={pdfHasta}
     />
     </>
   )
