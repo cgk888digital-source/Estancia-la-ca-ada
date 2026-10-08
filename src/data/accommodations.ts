@@ -371,7 +371,7 @@ export const accommodationOptions: AccommodationOption[] = [
     id: 2,
     title: "Cabaña La Lomita",
     type: "Cabaña Privada",
-    price: 297,
+    price: 300,
     capacity: "Hasta 10 Personas (Tarifa base de cabaña)",
     maxCapacity: 10,
     pets: "Pet Friendly",

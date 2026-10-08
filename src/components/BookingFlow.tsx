@@ -159,7 +159,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
       case 52:
         return isDecember ? 190 : 140;
       case 2:
-        return isDecember ? 344 : 297; // Cabaña La Lomita
+        return isDecember ? 344 : 300; // Cabaña La Lomita
       case 4:
         return isDecember ? 344 : 300; // Cabaña Mitibibó
       case 30: case 31: case 32: case 33: case 34: case 35:

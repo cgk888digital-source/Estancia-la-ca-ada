@@ -62,7 +62,7 @@ habitación aparte y suma la pensión por persona. Dan lo mismo.
 | Galería Llano Grande (2 pax, hab. 7) | 66 | **86** |
 | Galería Llano Grande (4 pax, hab. 8–12) | 64 | **86** |
 | Galería Suite La Vega | 140 | **190** |
-| Cabaña La Lomita | 297 | **344** |
+| Cabaña La Lomita | 300 | **344** |
 | Cabaña Mitibibó | 300 | **344** |
 
 En temporada normal las habitaciones 7 y 8–12 de Llano Grande cuestan distinto (66 y 64);
