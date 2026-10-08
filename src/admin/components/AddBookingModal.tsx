@@ -113,10 +113,8 @@ export default function AddBookingModal({
   const [useCustomRate, setUseCustomRate] = useState(false)
   const [discountPercent, setDiscountPercent] = useState(0)
   const [locatorCode, setLocatorCode] = useState('')
-  const [selectedAccommodationIds, setSelectedAccommodationIds] = useState<number[]>([2])
-  const [roomGuestsMap, setRoomGuestsMap] = useState<Record<number, { adults: number; children: number; babies: number }>>({
-    2: { adults: 2, children: 0, babies: 0 }
-  })
+  const [selectedAccommodationIds, setSelectedAccommodationIds] = useState<number[]>([])
+  const [roomGuestsMap, setRoomGuestsMap] = useState<Record<number, { adults: number; children: number; babies: number }>>({})
 
   const [abonoInicialBs, setAbonoInicialBs] = useState({ activo: false, bolivares: '', tasa: '' })
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -128,7 +126,7 @@ export default function AddBookingModal({
     guestEmail: '',
     guestCi: '',
     companions: '',
-    accommodationId: 2,
+    accommodationId: 0,
     checkIn: todayStr,
     checkOut: defaultCheckOutStr,
     adults: 2,
@@ -170,13 +168,13 @@ export default function AddBookingModal({
     if (isOpen) {
       setUseCustomRate(false)
       setDiscountPercent(0)
-      const accId = initialAccId || 2
+      const accId = initialAccId || 0
       const checkInVal = initialCheckIn || todayStr
       const checkOutVal = initialCheckOut || defaultCheckOutStr
-      setSelectedAccommodationIds([accId])
-      const cap = getMaxCapacity(accId) || 2
+      setSelectedAccommodationIds(accId ? [accId] : [])
+      const cap = accId ? getMaxCapacity(accId) || 2 : 2
       const defaultPax = Math.min(2, cap) || 1
-      setRoomGuestsMap({ [accId]: { adults: defaultPax, children: 0, babies: 0 } })
+      setRoomGuestsMap(accId ? { [accId]: { adults: defaultPax, children: 0, babies: 0 } } : {})
 
       const newLocator = 'LC-' + Math.random().toString(36).substring(2, 7).toUpperCase()
       setLocatorCode(newLocator)
@@ -766,7 +764,11 @@ export default function AddBookingModal({
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Habitaciones o cabañas</label>
-                <span className="text-[10px] font-bold text-[#C5A059]">{selectedAccommodationIds.length}/4 seleccionadas</span>
+                {selectedAccommodationIds.length === 0 ? (
+                  <span className="text-[10px] font-bold text-amber-600">Elige la habitación o cabaña</span>
+                ) : (
+                  <span className="text-[10px] font-bold text-[#C5A059]">{selectedAccommodationIds.length}/4 seleccionadas</span>
+                )}
               </div>
               <div className="max-h-56 overflow-y-auto custom-scrollbar border border-gray-200 rounded-2xl bg-white p-2 space-y-1.5">
                 {activeAccommodationOptions.map(acc => {
@@ -792,7 +794,6 @@ export default function AddBookingModal({
                         disabled={!!collision && !selected}
                         onChange={() => {
                           if (selected) {
-                            if (selectedAccommodationIds.length === 1) return
                             const next = selectedAccommodationIds.filter(id => id !== acc.id)
                             setSelectedAccommodationIds(next)
                             setForm(f => {
@@ -807,7 +808,7 @@ export default function AddBookingModal({
                               })
                               return {
                                 ...f,
-                                accommodationId: next[0],
+                                accommodationId: next[0] ?? 0,
                                 adults: totalAdults,
                                 children: totalChildren,
                                 babies: totalBabies
