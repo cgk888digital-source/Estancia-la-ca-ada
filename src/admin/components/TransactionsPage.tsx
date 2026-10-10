@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react'
 import { Plus, Search, X, Check, CalendarDays, ChevronDown, Loader2, Receipt, Building2, ArrowUpDown, ArrowUp, ArrowDown, Filter, RotateCcw, Calculator, Tag, Pencil, Trash2, Coins, AlertCircle } from 'lucide-react'
 import { categoryLabels, categoryColors } from '../data/mockData'
 import LoadErrorBanner from './LoadErrorBanner'
+import DecimalInput, { parseLocalNumber } from './DecimalInput'
 import { getBcvUsdRate, getParallelUsdRate } from '../../utils/exchangeRate'
 
 /** Cuantos movimientos se traen de una vez. Al superarlo se avisa en pantalla en vez
@@ -213,25 +214,6 @@ const textoDeLaTasa = (amountBs?: number | null, rate?: number | null) => {
   const bs = amountBs.toLocaleString('es-VE', { maximumFractionDigits: 2 })
   const tasa = rate.toLocaleString('es-VE', { maximumFractionDigits: 2 })
   return `Bs. ${bs} a ${tasa} Bs/$`
-}
-
-/** Convierte texto con formato de moneda venezolano o decimal internacional a número */
-const parseLocalNumber = (val: string | number | null | undefined): number => {
-  if (typeof val === 'number') return isNaN(val) ? 0 : val
-  if (!val) return 0
-  const clean = String(val).trim()
-  if (!clean) return 0
-  if (clean.includes('.') && clean.includes(',')) {
-    if (clean.lastIndexOf(',') > clean.lastIndexOf('.')) {
-      return parseFloat(clean.replace(/\./g, '').replace(',', '.')) || 0
-    } else {
-      return parseFloat(clean.replace(/,/g, '')) || 0
-    }
-  }
-  if (clean.includes(',')) {
-    return parseFloat(clean.replace(',', '.')) || 0
-  }
-  return parseFloat(clean) || 0
 }
 
 const PAGE_SIZE = 25
@@ -1486,12 +1468,10 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                     </button>
                   </div>
                   <div className="relative">
-                    <input
-                      type="number"
-                      step="any"
+                    <DecimalInput
                       placeholder="0.00"
-                      value={form.amount || ''}
-                      onChange={e => handleAmountChange(Number(e.target.value))}
+                      value={Number(form.amount) || 0}
+                      onChange={handleAmountChange}
                       className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-semibold outline-none focus:border-[#C5A059] transition-colors"
                     />
                   </div>
@@ -1580,14 +1560,10 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                           <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1">
                             Tasa a la que cambió (Bs por $)
                           </label>
-                          <input
-                            type="number"
-                            step="any"
-                            min="0"
-                            inputMode="decimal"
+                          <DecimalInput
                             placeholder="Ej. 942,53"
-                            value={exchangeRate || ''}
-                            onChange={e => handleRateChange(Number(e.target.value))}
+                            value={exchangeRate}
+                            onChange={handleRateChange}
                             className="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-sm font-semibold outline-none focus:border-amber-500"
                           />
                         </div>
@@ -1886,14 +1862,10 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                           <label className="text-[10px] font-bold text-gray-600 uppercase tracking-widest block mb-1">
                             Tasa de cambio (Bs./$)
                           </label>
-                          <input
-                            type="number"
-                            step="any"
-                            min="0"
-                            inputMode="decimal"
+                          <DecimalInput
                             placeholder="Ej. 942.53"
-                            value={exchangeRate || ''}
-                            onChange={e => handleRateChange(Number(e.target.value))}
+                            value={exchangeRate}
+                            onChange={handleRateChange}
                             className="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:border-amber-500"
                           />
                         </div>
