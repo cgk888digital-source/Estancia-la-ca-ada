@@ -1,3 +1,4 @@
+import DecimalInput, { textoDecimal } from './DecimalInput'
 import { useState, useEffect, type Dispatch, type SetStateAction } from 'react'
 import {
   X, Check, LogIn, LogOut, Trash2, Plus, Phone, Mail,
@@ -1544,13 +1545,9 @@ export default function BookingDetailModal({
                     <div>
                       <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Descuento individual (%)</label>
                       <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          step="0.01"
+                        <DecimalInput
                           value={editDiscountPercent}
-                          onChange={e => setEditDiscountPercent(Math.min(100, Math.max(0, Number(e.target.value))))}
+                          onChange={v => setEditDiscountPercent(Math.min(100, v))}
                           className="w-24 border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white"
                         />
                         {[0, 10, 15, 20].map(value => (
@@ -1569,16 +1566,9 @@ export default function BookingDetailModal({
                       <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Descuento fijo (USD)</label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400">$</span>
-                        <input
-                          type="number"
-                          min={0}
-                          max={totalAfterPercent}
-                          step="0.01"
+                        <DecimalInput
                           value={editFixedDiscountAmount}
-                          onChange={e => setEditFixedDiscountAmount(Math.min(
-                            totalAfterPercent,
-                            Math.max(0, Number(e.target.value))
-                          ))}
+                          onChange={v => setEditFixedDiscountAmount(Math.min(totalAfterPercent, v))}
                           className="w-full border border-gray-200 rounded-xl pl-7 pr-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white"
                           placeholder="Ejemplo: 5"
                         />
@@ -1759,12 +1749,12 @@ export default function BookingDetailModal({
                     <div>
                       <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Monto ($)</label>
                       <input
-                        type="number"
-                        min={0}
+                        type="text"
+                        inputMode="decimal"
                         value={nuevoAbonoBs.activo
                           ? (dolaresDeBolivares(nuevoAbonoBs.bolivares, nuevoAbonoBs.tasa) || '')
                           : paymentForm.amount}
-                        onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))}
+                        onChange={e => setPaymentForm(f => ({ ...f, amount: textoDecimal(e.target.value) }))}
                         disabled={nuevoAbonoBs.activo}
                         placeholder="0"
                         className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] disabled:bg-gray-50 disabled:text-gray-500"

@@ -1,3 +1,4 @@
+import DecimalInput from './DecimalInput'
 import { useState, useEffect } from 'react'
 import { X, Check } from 'lucide-react'
 import { accommodationOptions, activeAccommodationOptions, getMaxCapacity } from '../../data/accommodations'
@@ -1262,12 +1263,9 @@ export default function AddBookingModal({
                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">
                       Descuento (%)
                     </label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
+                    <DecimalInput
                       value={discountPercent}
-                      onChange={e => setDiscountPercent(Number(e.target.value))}
+                      onChange={v => setDiscountPercent(Math.min(100, v))}
                       placeholder="Ej. 10"
                       className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
                     />
@@ -1276,12 +1274,11 @@ export default function AddBookingModal({
                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">
                       Total Cobrado (USD)
                     </label>
-                    <input
-                      type="number"
+                    <DecimalInput
                       value={calculatedTotal}
-                      onChange={e => {
+                      onChange={v => {
                         setDiscountPercent(0)
-                        setForm(f => ({ ...f, totalAmount: Number(e.target.value) }))
+                        setForm(f => ({ ...f, totalAmount: v }))
                       }}
                       className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white font-bold text-gray-800"
                     />
@@ -1304,13 +1301,10 @@ export default function AddBookingModal({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Monto Abonado (USD)</label>
-                <input
-                  type="number"
-                  step="any"
-                  min="0"
+                <DecimalInput
                   placeholder="0.00"
-                  value={form.amountPaid || ''}
-                  onChange={e => setForm(f => ({ ...f, amountPaid: Number(e.target.value) }))}
+                  value={form.amountPaid}
+                  onChange={v => setForm(f => ({ ...f, amountPaid: v }))}
                   className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059] bg-white font-medium"
                 />
               </div>

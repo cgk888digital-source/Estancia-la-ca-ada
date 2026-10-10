@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { textoDecimal } from './DecimalInput'
 import { X, Plus, Trash2, Loader2, DollarSign, Check, Wallet } from 'lucide-react'
 import type { Employee, EmployeeBonus } from '../types'
 import {
@@ -224,13 +225,11 @@ const PagoNominaModal: React.FC<Props> = ({ emp, bonos, tasaReferencia, paying, 
                     <div>
                       <label className={etiqueta}>Monto (USD)</label>
                       <input
-                        type="number"
-                        min="0"
-                        step="any"
+                        type="text"
                         inputMode="decimal"
                         placeholder="0.00"
                         value={r.dolares}
-                        onChange={e => actualizar(r.id, { dolares: e.target.value })}
+                        onChange={e => actualizar(r.id, { dolares: textoDecimal(e.target.value) })}
                         className={campo}
                       />
                     </div>
@@ -254,26 +253,22 @@ const PagoNominaModal: React.FC<Props> = ({ emp, bonos, tasaReferencia, paying, 
                     <div>
                       <label className={etiqueta}>Bolívares</label>
                       <input
-                        type="number"
-                        min="0"
-                        step="any"
+                        type="text"
                         inputMode="decimal"
                         placeholder="0.00"
                         value={r.bolivares}
-                        onChange={e => actualizar(r.id, { bolivares: e.target.value })}
+                        onChange={e => actualizar(r.id, { bolivares: textoDecimal(e.target.value) })}
                         className={campo}
                       />
                     </div>
                     <div>
                       <label className={etiqueta}>Tasa aplicada</label>
                       <input
-                        type="number"
-                        min="0"
-                        step="any"
+                        type="text"
                         inputMode="decimal"
                         placeholder="Bs por $"
                         value={r.tasa}
-                        onChange={e => actualizar(r.id, { tasa: e.target.value })}
+                        onChange={e => actualizar(r.id, { tasa: textoDecimal(e.target.value) })}
                         className={campo}
                       />
                     </div>

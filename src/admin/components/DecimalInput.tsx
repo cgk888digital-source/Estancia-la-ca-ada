@@ -58,3 +58,14 @@ const DecimalInput: React.FC<Props> = ({ value, onChange, ...rest }) => {
 }
 
 export default DecimalInput
+
+/**
+ * Para los campos que guardan el monto como texto: deja solo cifras y un punto
+ * decimal, pasando la coma del teclado en español a punto, para que Number()
+ * lo siga leyendo bien.
+ */
+export const textoDecimal = (val: string): string => {
+  const limpio = val.replace(/,/g, '.').replace(/[^\d.]/g, '')
+  const punto = limpio.indexOf('.')
+  return punto === -1 ? limpio : limpio.slice(0, punto + 1) + limpio.slice(punto + 1).replace(/\./g, '')
+}

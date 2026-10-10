@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
+import { textoDecimal } from './DecimalInput'
 import { Plus, Check, X, UserCheck, UserX, DollarSign, Loader2, Users, Clock, Calendar, Receipt, Pencil, CheckSquare, Square, Coins, Gift, Trash2 } from 'lucide-react'
 import LoadErrorBanner from './LoadErrorBanner'
 import type { Employee, EmployeeBonus } from '../types'
@@ -1169,12 +1170,10 @@ const EmployeesPage: React.FC = () => {
                   <div className="flex-1">
                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Monto (USD)</label>
                     <input
-                      type="number"
-                      min="0"
-                      step="0.01"
+                      type="text"
                       inputMode="decimal"
                       value={bonusForm.amount}
-                      onChange={e => setBonusForm(prev => ({ ...prev, amount: e.target.value }))}
+                      onChange={e => setBonusForm(prev => ({ ...prev, amount: textoDecimal(e.target.value) }))}
                       placeholder="0.00"
                       className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#C5A059] transition-colors"
                     />
@@ -1363,10 +1362,11 @@ const EmployeesPage: React.FC = () => {
                           : 'Sueldo Quincenal ($)'}
                       </label>
                       <input
-                        type="number"
+                        type="text"
+                        inputMode="decimal"
                         placeholder="0"
                         value={form.salary}
-                        onChange={e => setForm(f => ({ ...f, salary: e.target.value }))}
+                        onChange={e => setForm(f => ({ ...f, salary: textoDecimal(e.target.value) }))}
                         className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]"
                       />
                     </div>
@@ -1410,10 +1410,11 @@ const EmployeesPage: React.FC = () => {
                     <div>
                       <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Tarifa por Día ($)</label>
                       <input
-                        type="number"
+                        type="text"
+                        inputMode="decimal"
                         placeholder="0"
                         value={form.dailyRate}
-                        onChange={e => setForm(f => ({ ...f, dailyRate: e.target.value }))}
+                        onChange={e => setForm(f => ({ ...f, dailyRate: textoDecimal(e.target.value) }))}
                         className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]"
                       />
                     </div>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
+import { textoDecimal } from './DecimalInput'
 import { X, CheckSquare, Square, Loader2, DollarSign, Sparkles, Coins } from 'lucide-react'
 import type { Employee } from '../types'
 import { supabase } from '../../lib/supabase'
@@ -175,12 +176,11 @@ export const WeeklyTipsModal: React.FC<WeeklyTipsModalProps> = ({
               <div className="relative mt-1">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-base">$</span>
                 <input
-                  type="number"
-                  step="0.01"
-                  min="0"
+                  type="text"
+                  inputMode="decimal"
                   placeholder="0.00"
                   value={amount}
-                  onChange={e => setAmount(e.target.value)}
+                  onChange={e => setAmount(textoDecimal(e.target.value))}
                   className="w-full bg-white border border-emerald-300 rounded-xl pl-8 pr-3 py-2 text-lg font-bold text-gray-900 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
                 />
               </div>

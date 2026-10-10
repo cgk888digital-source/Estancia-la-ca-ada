@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
+import { textoDecimal } from './DecimalInput'
 import { Wallet, Plus, Loader2, Trash2, X, ArrowDownCircle, ArrowUpCircle, Scale } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import LoadErrorBanner from './LoadErrorBanner'
@@ -367,12 +368,11 @@ const CajasChicasPage: React.FC = () => {
                   Importe ({monedaDeCaja[modal.caja] === 'usd' ? 'USD' : 'Bs'})
                 </label>
                 <input
-                  type="number"
-                  step="any"
+                  type="text"
                   inputMode="decimal"
                   placeholder="0.00"
                   value={form.importe}
-                  onChange={e => setForm(f => ({ ...f, importe: e.target.value }))}
+                  onChange={e => setForm(f => ({ ...f, importe: textoDecimal(e.target.value) }))}
                   className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#C5A059]"
                 />
               </div>

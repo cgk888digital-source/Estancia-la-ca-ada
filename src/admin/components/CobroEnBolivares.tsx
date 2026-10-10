@@ -1,4 +1,5 @@
 import React from 'react'
+import { textoDecimal } from './DecimalInput'
 import { dolaresDeBolivares, formatoBolivares } from '../../utils/bolivares'
 
 /**
@@ -49,13 +50,11 @@ const CobroEnBolivares: React.FC<Props> = ({
                 Bolívares recibidos
               </label>
               <input
-                type="number"
-                min="0"
-                step="any"
+                type="text"
                 inputMode="decimal"
                 placeholder="Ej. 48884"
                 value={bolivares}
-                onChange={e => onBolivares(e.target.value)}
+                onChange={e => onBolivares(textoDecimal(e.target.value))}
                 className={`w-full border border-gray-200 rounded-xl ${campo} outline-none focus:border-[#C5A059]`}
               />
             </div>
@@ -64,13 +63,11 @@ const CobroEnBolivares: React.FC<Props> = ({
                 Tasa aplicada
               </label>
               <input
-                type="number"
-                min="0"
-                step="any"
+                type="text"
                 inputMode="decimal"
                 placeholder="Ej. 977,68"
                 value={tasa}
-                onChange={e => onTasa(e.target.value)}
+                onChange={e => onTasa(textoDecimal(e.target.value))}
                 className={`w-full border border-gray-200 rounded-xl ${campo} outline-none focus:border-[#C5A059]`}
               />
             </div>

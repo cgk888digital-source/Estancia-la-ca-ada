@@ -1,3 +1,4 @@
+import DecimalInput, { textoDecimal } from './DecimalInput'
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Sliders, Check, Sparkles, DollarSign, Percent, AlertCircle, Clock, UtensilsCrossed } from 'lucide-react'
@@ -413,20 +414,20 @@ export default function RatesPage() {
                 <div>
                   <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1 block">Desayuno ($)</label>
                   <input
-                    type="number"
-                    min={0}
+                    type="text"
+                    inputMode="decimal"
                     value={meals.meal_breakfast_adult}
-                    onChange={e => setMeals(prev => ({ ...prev, meal_breakfast_adult: e.target.value }))}
+                    onChange={e => setMeals(prev => ({ ...prev, meal_breakfast_adult: textoDecimal(e.target.value) }))}
                     className="w-full border border-gray-200 bg-white rounded-xl px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:border-[#C5A059] focus:ring-1 focus:ring-[#C5A059]/30 transition-all"
                   />
                 </div>
                 <div>
                   <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1 block">Cena ($)</label>
                   <input
-                    type="number"
-                    min={0}
+                    type="text"
+                    inputMode="decimal"
                     value={meals.meal_dinner_adult}
-                    onChange={e => setMeals(prev => ({ ...prev, meal_dinner_adult: e.target.value }))}
+                    onChange={e => setMeals(prev => ({ ...prev, meal_dinner_adult: textoDecimal(e.target.value) }))}
                     className="w-full border border-gray-200 bg-white rounded-xl px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:border-[#C5A059] focus:ring-1 focus:ring-[#C5A059]/30 transition-all"
                   />
                 </div>
@@ -439,10 +440,10 @@ export default function RatesPage() {
                   Alimentación en Navidad ($ / noche) <span className="text-[#C5A059]">— 21 dic al 7 ene</span>
                 </label>
                 <input
-                  type="number"
-                  min={0}
+                  type="text"
+                  inputMode="decimal"
                   value={meals.meal_adult_navidad}
-                  onChange={e => setMeals(prev => ({ ...prev, meal_adult_navidad: e.target.value }))}
+                  onChange={e => setMeals(prev => ({ ...prev, meal_adult_navidad: textoDecimal(e.target.value) }))}
                   className="w-full border border-gray-200 bg-white rounded-xl px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:border-[#C5A059] focus:ring-1 focus:ring-[#C5A059]/30 transition-all"
                 />
                 <p className="text-[10px] text-gray-400 mt-1">
@@ -463,20 +464,20 @@ export default function RatesPage() {
                 <div>
                   <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1 block">Desayuno ($)</label>
                   <input
-                    type="number"
-                    min={0}
+                    type="text"
+                    inputMode="decimal"
                     value={meals.meal_breakfast_child}
-                    onChange={e => setMeals(prev => ({ ...prev, meal_breakfast_child: e.target.value }))}
+                    onChange={e => setMeals(prev => ({ ...prev, meal_breakfast_child: textoDecimal(e.target.value) }))}
                     className="w-full border border-sky-200 bg-white rounded-xl px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-300/40 transition-all"
                   />
                 </div>
                 <div>
                   <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1 block">Cena ($)</label>
                   <input
-                    type="number"
-                    min={0}
+                    type="text"
+                    inputMode="decimal"
                     value={meals.meal_dinner_child}
-                    onChange={e => setMeals(prev => ({ ...prev, meal_dinner_child: e.target.value }))}
+                    onChange={e => setMeals(prev => ({ ...prev, meal_dinner_child: textoDecimal(e.target.value) }))}
                     className="w-full border border-sky-200 bg-white rounded-xl px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-300/40 transition-all"
                   />
                 </div>
@@ -638,11 +639,9 @@ export default function RatesPage() {
                         </label>
                         <span className="text-[9px] font-mono font-bold text-gray-500">Normal</span>
                       </div>
-                      <input
-                        type="number"
-                        min={1}
+                      <DecimalInput
                         value={rate.price}
-                        onChange={e => handleInputChange(rate.id, 'price', Number(e.target.value))}
+                        onChange={v => handleInputChange(rate.id, 'price', v)}
                         className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059]"
                       />
                     </div>
@@ -655,11 +654,9 @@ export default function RatesPage() {
                         </label>
                         <span className="text-[9px] font-mono font-bold text-[#C5A059]">Alta Season</span>
                       </div>
-                      <input
-                        type="number"
-                        min={1}
+                      <DecimalInput
                         value={rate.december_price}
-                        onChange={e => handleInputChange(rate.id, 'december_price', Number(e.target.value))}
+                        onChange={v => handleInputChange(rate.id, 'december_price', v)}
                         className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059]"
                       />
                     </div>
@@ -676,12 +673,9 @@ export default function RatesPage() {
                           </span>
                         )}
                       </div>
-                      <input
-                        type="number"
-                        min={0}
-                        max={100}
+                      <DecimalInput
                         value={rate.discount_percent}
-                        onChange={e => handleInputChange(rate.id, 'discount_percent', Number(e.target.value))}
+                        onChange={v => handleInputChange(rate.id, 'discount_percent', Math.min(100, v))}
                         className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C5A059]"
                       />
                     </div>
