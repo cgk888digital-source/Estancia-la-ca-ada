@@ -424,14 +424,25 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
         .select('id, date, type, category, description, amount, payment_method, related_to, exchange_rate, amount_bs, cash_box')
         .order('date', { ascending: false })
       
-      // Aplicar filtros de fecha server-side (solo si hay rango definido)
-      if (dateFrom) {
-        query = query.gte('date', fechaLocalISO(dateFrom))
-      }
-      if (dateTo) {
-        const toDate = new Date(dateTo)
-        toDate.setDate(toDate.getDate() + 1)
-        query = query.lt('date', fechaLocalISO(toDate))
+      if (soloElDia) {
+        // Lo que lleva fecha de hoy y, además, todo lo que se registró hoy aunque lleve
+        // otra fecha. Antes solo salía lo fechado hoy: un consumo del día 11 cargado el 13
+        // se guardaba bien pero desaparecía de la lista al volver a entrar, y la
+        // administradora lo cargaba otra vez creyendo que no se había guardado. Así se
+        // duplicaron una propina y dos consumos el 13 de octubre.
+        const inicioDeHoy = new Date()
+        inicioDeHoy.setHours(0, 0, 0, 0)
+        query = query.or(`date.eq.${fechaLocalISO()},created_at.gte.${inicioDeHoy.toISOString()}`)
+      } else {
+        // Aplicar filtros de fecha server-side (solo si hay rango definido)
+        if (dateFrom) {
+          query = query.gte('date', fechaLocalISO(dateFrom))
+        }
+        if (dateTo) {
+          const toDate = new Date(dateTo)
+          toDate.setDate(toDate.getDate() + 1)
+          query = query.lt('date', fechaLocalISO(toDate))
+        }
       }
       
       // Se pide una fila mas que el tope: si vuelve, es que el periodo tiene mas
@@ -461,7 +472,7 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
     return () => {
       active = false
     }
-  }, [periodoEfectivo, customFrom, customTo])
+  }, [periodoEfectivo, customFrom, customTo, soloElDia])
 
   // Filtrado y ordenamiento multi-criterio: fecha, descripción, categoría y distribuidor
   const filtered = useMemo(() => {
@@ -883,8 +894,9 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
         <div className="rounded-2xl border border-gray-100 bg-white p-4">
           <p className="text-xs leading-relaxed text-gray-500">
             Se muestran los ingresos <strong className="font-bold text-gray-700">registrados hoy</strong>,
-            para que pueda comprobar lo que acaba de anotar. El histórico y los totales del
-            hotel los consulta la propiedad.
+            aunque lleven la fecha de otro día, para que pueda comprobar lo que acaba de anotar.
+            Si un ingreso sale aquí, ya está guardado: no hace falta volver a cargarlo. El
+            histórico y los totales del hotel los consulta la propiedad.
           </p>
         </div>
       ) : (
