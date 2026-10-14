@@ -768,7 +768,7 @@ export default function AddBookingModal({
                 {selectedAccommodationIds.length === 0 ? (
                   <span className="text-[10px] font-bold text-amber-600">Elige la habitación o cabaña</span>
                 ) : (
-                  <span className="text-[10px] font-bold text-[#C5A059]">{selectedAccommodationIds.length}/4 seleccionadas</span>
+                  <span className="text-[10px] font-bold text-[#C5A059]">{selectedAccommodationIds.length} {selectedAccommodationIds.length === 1 ? 'seleccionada' : 'seleccionadas'}</span>
                 )}
               </div>
               <div className="max-h-56 overflow-y-auto custom-scrollbar border border-gray-200 rounded-2xl bg-white p-2 space-y-1.5">
@@ -816,10 +816,6 @@ export default function AddBookingModal({
                               }
                             })
                           } else {
-                            if (selectedAccommodationIds.length >= 4) {
-                              alert('Puedes seleccionar hasta 4 habitaciones o cabañas por reserva.')
-                              return
-                            }
                             const next = [...selectedAccommodationIds, acc.id]
                             const roomCap = getMaxCapacity(acc.id) || 2
                             const defaultPax = Math.min(2, roomCap) || 1
