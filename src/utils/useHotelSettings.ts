@@ -16,6 +16,9 @@ interface HotelSettings {
   /** Alimentación total por adulto y noche en temporada navideña (21 dic - 7 ene).
    *  En navidad sube; el niño se mantiene igual todo el año. */
   meal_adult_navidad: string
+  /** Tarifa anunciada por mascota y noche (perro pequeño). En cada reserva se puede
+   *  cambiar si el perro es más grande. */
+  pet_fee_night: string
 }
 
 // Valores verificados contra el grid de Paxer: 56 por adulto y 48 por niño y noche el
@@ -29,6 +32,7 @@ const DEFAULTS: HotelSettings = {
   meal_breakfast_child: '20',
   meal_dinner_child: '28',
   meal_adult_navidad: '62',
+  pet_fee_night: '10',
 }
 
 const SETTING_KEYS = Object.keys(DEFAULTS) as (keyof HotelSettings)[]
@@ -48,6 +52,12 @@ export function getMealRates(settings: HotelSettings) {
     perAdultNavidad: Number.isFinite(navideno) && navideno > 0 ? navideno : perAdult,
     perChild: Number(settings.meal_breakfast_child) + Number(settings.meal_dinner_child),
   }
+}
+
+/** Tarifa por mascota y noche que se ofrece por defecto. */
+export function getPetFee(settings: HotelSettings) {
+  const n = Number(settings.pet_fee_night)
+  return Number.isFinite(n) && n >= 0 ? n : 10
 }
 
 export function useHotelSettings() {

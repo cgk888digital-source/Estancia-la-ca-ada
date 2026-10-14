@@ -7,12 +7,13 @@ import {
 import { accommodationOptions, activeAccommodationOptions, getMaxCapacity } from '../../data/accommodations'
 import LoadErrorBanner from './LoadErrorBanner'
 import { repartirNoches, precioEstancia } from '../../utils/seasonNights'
+import { cargoMascotas } from '../../utils/tarifaMascota'
 import { supabase } from '../../lib/supabase'
 import type { Booking } from '../types'
 import PrintableReservationsReport from './PrintableReservationsReport'
 import { parseLocalDate, fechaLocalISO as formatLocalDate } from '../../utils/dateUtils'
 import { getBcvEuroRate } from '../../utils/exchangeRate'
-import { useHotelSettings, getMealRates } from '../../utils/useHotelSettings'
+import { useHotelSettings, getMealRates, getPetFee } from '../../utils/useHotelSettings'
 import AddBookingModal from './AddBookingModal'
 import BookingDetailModal from './BookingDetailModal'
 import BookingsWeekView from './BookingsWeekView'
@@ -93,6 +94,7 @@ interface DbBooking {
   children?: number | null
   babies?: number | null
   pets?: number | null
+  pet_fee_night?: number | string | null
   total_amount?: number | string | null
   amount_paid?: number | string | null
   payment_status?: string | null
@@ -134,6 +136,7 @@ const mapDbBookingToReact = (db: DbBooking): Booking => ({
     babies: db.babies || 0,
     pets: db.pets || 0
   },
+  petFeeNight: db.pet_fee_night == null ? null : Number(db.pet_fee_night),
   totalAmount: Number(db.total_amount) || 0,
   amountPaid: Number(db.amount_paid) || 0,
   paymentStatus: (db.payment_status || 'pendiente') as 'completo' | 'parcial' | 'pendiente',
@@ -275,9 +278,14 @@ export default function BookingsPage() {
 
   const { settings: hotelSettings } = useHotelSettings()
   const mealRates = getMealRates(hotelSettings)
+  const tarifaMascota = getPetFee(hotelSettings)
 
-  const getStandardRate = (accId: number, checkIn: string, checkOut: string, adults: number, children: number) => {
+  const getStandardRate = (
+    accId: number, checkIn: string, checkOut: string, adults: number, children: number,
+    pets = 0, tarifaPorMascota = 0
+  ) => {
     const noches = repartirNoches(checkIn, checkOut)
+    const perros = cargoMascotas(pets, tarifaPorMascota, noches.total)
     const dbAcc = dbAccommodations.find(o => Number(o.id) === accId)
     let precioNormal: number
     let precioNavideno: number
@@ -304,7 +312,7 @@ export default function BookingsPage() {
       { adulto: mealRates.perAdult, adultoNavideno: mealRates.perAdultNavidad, nino: mealRates.perChild },
       adults,
       children
-    ).total
+    ).total + perros
   }
 
   useEffect(() => {
@@ -678,12 +686,15 @@ export default function BookingsPage() {
       return false
     }
 
+    const tarifaPerro = booking.petFeeNight ?? tarifaMascota
     const newStandardTotal = getStandardRate(
       newAccId,
       newCheckIn,
       newCheckOut,
       adults,
-      children
+      children,
+      pets,
+      tarifaPerro
     )
     const newTotalAmount = getAdjustedBookingTotal(newStandardTotal, booking.specialNotes)
     const newPaymentStatus: Booking['paymentStatus'] = booking.amountPaid >= newTotalAmount
@@ -705,6 +716,7 @@ export default function BookingsPage() {
       updatePayload.babies = babies
       updatePayload.pets = pets
     }
+    if (pets > 0) updatePayload.pet_fee_night = tarifaPerro
 
     const { error } = await supabase
       .from('bookings')
@@ -1370,6 +1382,7 @@ export default function BookingsPage() {
         dbAccommodations={dbAccommodations}
         bcvEuro={bcvEuro}
         mealRates={mealRates}
+        tarifaMascota={tarifaMascota}
         todayStr={todayStr}
         onCheckIn={handleCheckIn}
         onCheckOut={handleCheckOut}
@@ -1384,6 +1397,7 @@ export default function BookingsPage() {
         dbAccommodations={dbAccommodations}
         bcvEuro={bcvEuro}
         mealRates={mealRates}
+        tarifaMascota={tarifaMascota}
         initialAccId={addModalInitialAccId}
         initialCheckIn={addModalInitialCheckIn}
         initialCheckOut={addModalInitialCheckOut}

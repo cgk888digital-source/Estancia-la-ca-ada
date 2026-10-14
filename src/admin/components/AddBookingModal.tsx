@@ -13,6 +13,7 @@ import { sendBookingConfirmationEmail } from '../../utils/sendBookingConfirmatio
 import { sendBookingVoucherEmail } from '../../utils/sendBookingVoucherEmail'
 import { splitPersonName } from '../../utils/personName'
 import { registrarIngresoDeAbono } from '../../utils/bookingIncome'
+import { cargoMascotas, notaDeMascotas } from '../../utils/tarifaMascota'
 
 interface DbAccommodation {
   id: number | string
@@ -69,6 +70,7 @@ const mapDbBookingToReact = (db: any): Booking => ({
     babies: db.babies || 0,
     pets: db.pets || 0
   },
+  petFeeNight: db.pet_fee_night == null ? null : Number(db.pet_fee_night),
   totalAmount: Number(db.total_amount) || 0,
   amountPaid: Number(db.amount_paid) || 0,
   paymentStatus: (db.payment_status || 'pendiente') as 'completo' | 'parcial' | 'pendiente',
@@ -89,6 +91,8 @@ interface AddBookingModalProps {
   dbAccommodations: DbAccommodation[]
   bcvEuro: number | null
   mealRates: { perAdult: number; perAdultNavidad: number; perChild: number }
+  /** Tarifa anunciada por mascota y noche (perro pequeño). */
+  tarifaMascota: number
   initialAccId?: number
   initialCheckIn?: string
   initialCheckOut?: string
@@ -102,6 +106,7 @@ export default function AddBookingModal({
   dbAccommodations,
   bcvEuro,
   mealRates,
+  tarifaMascota,
   initialAccId,
   initialCheckIn,
   initialCheckOut,
@@ -118,6 +123,8 @@ export default function AddBookingModal({
   const [roomGuestsMap, setRoomGuestsMap] = useState<Record<number, { adults: number; children: number; babies: number }>>({})
 
   const [abonoInicialBs, setAbonoInicialBs] = useState({ activo: false, bolivares: '', tasa: '' })
+  // Arranca con la tarifa anunciada; si el perro es grande se cambia aquí, solo para esta reserva.
+  const [tarifaMascotaReserva, setTarifaMascotaReserva] = useState(tarifaMascota)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const [form, setForm] = useState({
@@ -203,8 +210,9 @@ export default function AddBookingModal({
       })
       setShowSuggestions(false)
       setIsSubmitting(false)
+      setTarifaMascotaReserva(tarifaMascota)
     }
-  }, [isOpen, initialAccId, initialCheckIn, initialCheckOut])
+  }, [isOpen, initialAccId, initialCheckIn, initialCheckOut, tarifaMascota])
 
   // Autocomplete effect
   useEffect(() => {
@@ -387,7 +395,11 @@ export default function AddBookingModal({
       0
     )
 
-  const standardRate = isOpen ? getGroupStandardRate(selectedAccommodationIds) : 0
+  const nochesReserva = calculateNights(form.checkIn, form.checkOut)
+  const cargoPerros = cargoMascotas(Number(form.pets) || 0, tarifaMascotaReserva, nochesReserva)
+  const standardRate = isOpen && selectedAccommodationIds.length > 0
+    ? getGroupStandardRate(selectedAccommodationIds) + cargoPerros
+    : 0
 
   const calculatedTotal = useCustomRate
     ? (discountPercent > 0 ? Math.round(standardRate * (1 - discountPercent / 100)) : form.totalAmount)
@@ -470,10 +482,12 @@ export default function AddBookingModal({
     const groupNote = selectedAccommodationIds.length > 1
       ? `Reserva grupal: ${selectedAccommodationIds.length} alojamientos bajo el localizador ${locatorCode}.`
       : ''
-    const specialNotes = [form.specialNotes.trim(), groupNote, discountNote].filter(Boolean).join(' ')
+    const petNote = notaDeMascotas(Number(form.pets) || 0, tarifaMascotaReserva, nochesReserva)
+    const specialNotes = [form.specialNotes.trim(), groupNote, discountNote, petNote].filter(Boolean).join(' ')
     const roomAllocations = allocateGuestsAcrossAccommodations(selectedAccommodationIds)
-    const roomStandardTotals = roomAllocations.map(room =>
+    const roomStandardTotals = roomAllocations.map((room, index) =>
       getStandardRate(room.id, form.checkIn, form.checkOut, room.adults, room.children)
+        + (index === 0 ? cargoPerros : 0)
     )
     const roomFinalTotals = allocateMoney(finalTotal, roomStandardTotals)
     const initialPaidTotal = Math.round(Number(form.amountPaid) * 100) / 100
@@ -502,7 +516,8 @@ export default function AddBookingModal({
       status: initialStatus,
       confirmed: true,
       special_notes: specialNotes || null,
-      locator: locatorCode
+      locator: locatorCode,
+      pet_fee_night: room.pets > 0 ? tarifaMascotaReserva : null
     }))
 
     const { data, error } = await supabase
@@ -1224,6 +1239,39 @@ export default function AddBookingModal({
                   className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs outline-none focus:border-[#C5A059]"
                 />
               </div>
+            </div>
+          )}
+
+          {/* Tarifa de las mascotas: viene la del perro pequeño; si es más grande se cambia aquí */}
+          {form.pets > 0 && (
+            <div className="bg-amber-50/60 p-4 rounded-2xl border border-amber-100 space-y-2">
+              <div className="flex items-end gap-3">
+                <div className="flex-1">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1.5">
+                    🐾 Tarifa por mascota y noche (USD)
+                  </label>
+                  <DecimalInput
+                    value={tarifaMascotaReserva}
+                    onChange={n => setTarifaMascotaReserva(Math.max(0, n))}
+                    placeholder={String(tarifaMascota)}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-semibold bg-white outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+                {tarifaMascotaReserva !== tarifaMascota && (
+                  <button
+                    type="button"
+                    onClick={() => setTarifaMascotaReserva(tarifaMascota)}
+                    className="text-[10px] font-bold text-amber-700 hover:text-amber-900 pb-3 shrink-0"
+                  >
+                    Volver a {tarifaMascota} $
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-gray-600">
+                {form.pets} {form.pets === 1 ? 'mascota' : 'mascotas'} × {tarifaMascotaReserva} $ × {nochesReserva} {nochesReserva === 1 ? 'noche' : 'noches'} ={' '}
+                <strong className="text-gray-800">{cargoPerros} $</strong>, ya incluidos en la tarifa.
+                <span className="text-gray-400"> La anunciada es {tarifaMascota} $ (perro pequeño); cámbiela si el perro es más grande.</span>
+              </p>
             </div>
           )}
 

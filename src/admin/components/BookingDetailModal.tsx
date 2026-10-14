@@ -8,6 +8,7 @@ import { accommodationOptions, activeAccommodationOptions, getMaxCapacity } from
 import { supabase } from '../../lib/supabase'
 import type { Booking, BookingPayment } from '../types'
 import { repartirNoches, precioEstancia } from '../../utils/seasonNights'
+import { cargoMascotas } from '../../utils/tarifaMascota'
 import { parseLocalDate } from '../../utils/dateUtils'
 import CobroEnBolivares from './CobroEnBolivares'
 import { dolaresDeBolivares, textoEnBolivares } from '../../utils/bolivares'
@@ -124,6 +125,7 @@ const mapDbBookingToReact = (db: any): Booking => ({
     babies: db.babies || 0,
     pets: db.pets || 0
   },
+  petFeeNight: db.pet_fee_night == null ? null : Number(db.pet_fee_night),
   totalAmount: Number(db.total_amount) || 0,
   amountPaid: Number(db.amount_paid) || 0,
   paymentStatus: (db.payment_status || 'pendiente') as 'completo' | 'parcial' | 'pendiente',
@@ -151,6 +153,8 @@ interface BookingDetailModalProps {
   dbAccommodations: DbAccommodation[]
   bcvEuro: number | null
   mealRates: { perAdult: number; perAdultNavidad: number; perChild: number }
+  /** Tarifa anunciada por mascota y noche, para las reservas que aún no tienen una propia. */
+  tarifaMascota: number
   todayStr: string
   onCheckIn: (bookingId: string) => void
   onCheckOut: (bookingId: string) => void
@@ -166,6 +170,7 @@ export default function BookingDetailModal({
   dbAccommodations,
   bcvEuro,
   mealRates,
+  tarifaMascota,
   todayStr,
   onCheckIn,
   onCheckOut,
@@ -199,7 +204,8 @@ export default function BookingDetailModal({
     adults: 0,
     children: 0,
     babies: 0,
-    pets: 0
+    pets: 0,
+    petFeeNight: 0
   })
   const [editingDates, setEditingDates] = useState(false)
   const [savingDates, setSavingDates] = useState(false)
@@ -249,8 +255,15 @@ export default function BookingDetailModal({
   const getBookingPaymentColors = (booking: Booking) => getPaymentColorClasses(getGroupPaymentView(booking))
   const getBookingPaymentState = (booking: Booking) => getEffectivePaymentState(getGroupPaymentView(booking))
 
-  const getStandardRate = (accId: number, checkIn: string, checkOut: string, adults: number, children: number) => {
+  /** La tarifa de mascota pactada en la reserva; si no tiene, la anunciada. */
+  const tarifaDe = (b: Booking) => b.petFeeNight ?? tarifaMascota
+
+  const getStandardRate = (
+    accId: number, checkIn: string, checkOut: string, adults: number, children: number,
+    pets = 0, tarifaPorMascota = 0
+  ) => {
     const noches = repartirNoches(checkIn, checkOut)
+    const perros = cargoMascotas(pets, tarifaPorMascota, noches.total)
     const dbAcc = dbAccommodations.find(o => Number(o.id) === accId)
     let precioNormal: number
     let precioNavideno: number
@@ -277,7 +290,7 @@ export default function BookingDetailModal({
       { adulto: mealRates.perAdult, adultoNavideno: mealRates.perAdultNavidad, nino: mealRates.perChild },
       adults,
       children
-    ).total
+    ).total + perros
   }
 
   // Load payments for group
@@ -415,7 +428,9 @@ export default function BookingDetailModal({
       effectiveCheckIn,
       effectiveCheckOut,
       editRoomForm.adults,
-      editRoomForm.children
+      editRoomForm.children,
+      editRoomForm.pets,
+      editRoomForm.petFeeNight
     )
     const totalAmount = getAdjustedBookingTotal(standardTotal, roomBooking.specialNotes)
     const paymentStatus: Booking['paymentStatus'] = roomBooking.amountPaid >= totalAmount
@@ -433,6 +448,7 @@ export default function BookingDetailModal({
         children: editRoomForm.children,
         babies: editRoomForm.babies,
         pets: editRoomForm.pets,
+        pet_fee_night: editRoomForm.pets > 0 ? editRoomForm.petFeeNight : null,
         total_amount: totalAmount,
         payment_status: paymentStatus
       })
@@ -455,6 +471,7 @@ export default function BookingDetailModal({
         babies: editRoomForm.babies,
         pets: editRoomForm.pets
       },
+      petFeeNight: editRoomForm.pets > 0 ? editRoomForm.petFeeNight : null,
       totalAmount,
       paymentStatus
     }
@@ -490,7 +507,8 @@ export default function BookingDetailModal({
           return
         }
 
-        const newStandardTotal = getStandardRate(accId, editDatesForm.checkIn, editDatesForm.checkOut, adults, children)
+        const tarifaPerro = isRoomBeingEdited ? editRoomForm.petFeeNight : tarifaDe(room)
+        const newStandardTotal = getStandardRate(accId, editDatesForm.checkIn, editDatesForm.checkOut, adults, children, pets, tarifaPerro)
         const newTotalAmount = getAdjustedBookingTotal(newStandardTotal, room.specialNotes)
         const newPaymentStatus: Booking['paymentStatus'] = room.amountPaid >= newTotalAmount
           ? 'completo'
@@ -507,7 +525,8 @@ export default function BookingDetailModal({
             adults,
             children,
             babies,
-            pets
+            pets,
+            pet_fee_night: pets > 0 ? tarifaPerro : null
           })
           .eq('id', room.id)
 
@@ -523,7 +542,8 @@ export default function BookingDetailModal({
           checkOut: editDatesForm.checkOut,
           totalAmount: newTotalAmount,
           paymentStatus: newPaymentStatus,
-          guestsCount: { adults, children, babies, pets }
+          guestsCount: { adults, children, babies, pets },
+          petFeeNight: pets > 0 ? tarifaPerro : null
         }
         setBookings(prev => prev.map(b => b.id === room.id ? { ...b, ...updatedFields } : b))
         setSelectedBooking(prev => prev && prev.id === room.id ? { ...prev, ...updatedFields } : prev)
@@ -574,7 +594,7 @@ export default function BookingDetailModal({
     const discountPercent = getBookingDiscountPercent(selectedBooking.specialNotes)
 
     const rows = additionalAccommodationIds.map((accId) => {
-      const standardTotal = getStandardRate(accId, checkInToAdd, checkOutToAdd, additionalGuests.adults, additionalGuests.children)
+      const standardTotal = getStandardRate(accId, checkInToAdd, checkOutToAdd, additionalGuests.adults, additionalGuests.children, additionalGuests.pets, tarifaMascota)
       const totalAmount = discountPercent > 0 ? Math.round(standardTotal * (1 - discountPercent / 100)) : standardTotal
       const specialNotes = withBookingDiscountNote(selectedBooking.specialNotes, discountPercent)
 
@@ -591,6 +611,7 @@ export default function BookingDetailModal({
         children: additionalGuests.children,
         babies: additionalGuests.babies,
         pets: additionalGuests.pets,
+        pet_fee_night: additionalGuests.pets > 0 ? tarifaMascota : null,
         total_amount: totalAmount,
         amount_paid: 0,
         payment_status: 'pendiente',
@@ -632,7 +653,7 @@ export default function BookingDetailModal({
     setSavingFinancials(true)
     try {
       for (const room of groupBookings) {
-        const standard = getStandardRate(room.accommodationId, room.checkIn, room.checkOut, room.guestsCount.adults, room.guestsCount.children)
+        const standard = getStandardRate(room.accommodationId, room.checkIn, room.checkOut, room.guestsCount.adults, room.guestsCount.children, room.guestsCount.pets, tarifaDe(room))
         let note = withBookingDiscountNote(room.specialNotes, editDiscountPercent)
         note = withBookingFixedDiscountNote(note, editFixedDiscountAmount)
         const newTotal = getAdjustedBookingTotal(standard, note)
@@ -979,8 +1000,8 @@ export default function BookingDetailModal({
                   const effectiveNights = calculateNights(effectiveCheckIn, effectiveCheckOut)
 
                   const previewStandard = isEditing
-                    ? getStandardRate(editRoomForm.accommodationId, effectiveCheckIn, effectiveCheckOut, editRoomForm.adults, editRoomForm.children)
-                    : getStandardRate(roomBooking.accommodationId, effectiveCheckIn, effectiveCheckOut, roomBooking.guestsCount.adults, roomBooking.guestsCount.children)
+                    ? getStandardRate(editRoomForm.accommodationId, effectiveCheckIn, effectiveCheckOut, editRoomForm.adults, editRoomForm.children, editRoomForm.pets, editRoomForm.petFeeNight)
+                    : getStandardRate(roomBooking.accommodationId, effectiveCheckIn, effectiveCheckOut, roomBooking.guestsCount.adults, roomBooking.guestsCount.children, roomBooking.guestsCount.pets, tarifaDe(roomBooking))
                   const previewTotal = getAdjustedBookingTotal(previewStandard, roomBooking.specialNotes)
                   const datesDiffer = hasValidEditDates && (editDatesForm.checkIn !== roomBooking.checkIn || editDatesForm.checkOut !== roomBooking.checkOut)
 
@@ -1038,6 +1059,20 @@ export default function BookingDetailModal({
                               </div>
                             ))}
                           </div>
+                          {editRoomForm.pets > 0 && (
+                            <div className="flex items-center gap-2">
+                              <label className="text-[8px] font-bold text-gray-400 uppercase shrink-0">🐾 $ por mascota y noche</label>
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={editRoomForm.petFeeNight}
+                                onChange={e => setEditRoomForm(f => ({ ...f, petFeeNight: Math.max(0, Number(e.target.value)) }))}
+                                className="w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#C5A059] bg-white"
+                              />
+                              <span className="text-[10px] text-gray-400">Anunciada: {tarifaMascota} $ (perro pequeño)</span>
+                            </div>
+                          )}
                           <div className="flex justify-between items-center rounded-xl bg-white border border-amber-200/80 px-3 py-2 text-xs">
                             <div className="flex flex-col">
                               <span className="font-semibold text-gray-700">Precio de esta cabaña</span>
@@ -1089,7 +1124,8 @@ export default function BookingDetailModal({
                                   adults: roomBooking.guestsCount.adults,
                                   children: roomBooking.guestsCount.children,
                                   babies: roomBooking.guestsCount.babies,
-                                  pets: roomBooking.guestsCount.pets
+                                  pets: roomBooking.guestsCount.pets,
+                                  petFeeNight: tarifaDe(roomBooking)
                                 })
                                 setEditingRoomId(roomBooking.id)
                               }}
@@ -1125,7 +1161,7 @@ export default function BookingDetailModal({
                   ? calculateNights(checkInToAdd, checkOutToAdd)
                   : 0
                 const additionalStandardTotal = (selectedAdditionalId && additionalNights > 0)
-                  ? getStandardRate(selectedAdditionalId, checkInToAdd, checkOutToAdd, additionalGuests.adults, additionalGuests.children)
+                  ? getStandardRate(selectedAdditionalId, checkInToAdd, checkOutToAdd, additionalGuests.adults, additionalGuests.children, additionalGuests.pets, tarifaMascota)
                   : 0
                 const additionalDiscount = getBookingDiscountPercent(selectedBooking.specialNotes)
                 const additionalTotal = Math.round(additionalStandardTotal * (1 - additionalDiscount / 100) * 100) / 100
@@ -1322,7 +1358,9 @@ export default function BookingDetailModal({
                           const accId = isRoomBeingEdited ? editRoomForm.accommodationId : room.accommodationId
                           const adults = isRoomBeingEdited ? editRoomForm.adults : room.guestsCount.adults
                           const children = isRoomBeingEdited ? editRoomForm.children : room.guestsCount.children
-                          const standard = getStandardRate(accId, editDatesForm.checkIn, editDatesForm.checkOut, adults, children)
+                          const pets = isRoomBeingEdited ? editRoomForm.pets : room.guestsCount.pets
+                          const tarifaPerro = isRoomBeingEdited ? editRoomForm.petFeeNight : tarifaDe(room)
+                          const standard = getStandardRate(accId, editDatesForm.checkIn, editDatesForm.checkOut, adults, children, pets, tarifaPerro)
                           return sum + getAdjustedBookingTotal(standard, room.specialNotes)
                         }, 0)
 
@@ -1528,7 +1566,9 @@ export default function BookingDetailModal({
                   room.checkIn,
                   room.checkOut,
                   room.guestsCount.adults,
-                  room.guestsCount.children
+                  room.guestsCount.children,
+                  room.guestsCount.pets,
+                  tarifaDe(room)
                 ), 0)
                 const totalAfterPercent = standardTotal * (1 - editDiscountPercent / 100)
                 const normalizedFixedDiscount = Math.min(

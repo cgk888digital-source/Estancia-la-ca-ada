@@ -31,6 +31,7 @@ interface DbBookingRaw {
   children?: number | null
   babies?: number | null
   pets?: number | null
+  pet_fee_night?: number | string | null
   total_amount?: number | string | null
   amount_paid?: number | string | null
   payment_status?: string | null
@@ -61,6 +62,7 @@ const mapDbToBooking = (db: DbBookingRaw): Booking => ({
     babies: db.babies || 0,
     pets: db.pets || 0
   },
+  petFeeNight: db.pet_fee_night == null ? null : Number(db.pet_fee_night),
   totalAmount: Number(db.total_amount) || 0,
   amountPaid: Number(db.amount_paid) || 0,
   paymentStatus: (db.payment_status || 'pendiente') as any,

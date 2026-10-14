@@ -1,6 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Utensils, Compass, Award, ChevronRight, Menu as MenuIcon, X, Home, Calendar, HelpCircle, ChevronDown, MapPin, Phone, Mail, Leaf } from 'lucide-react';
+import { useHotelSettings, getPetFee } from '../utils/useHotelSettings';
 
 const EstanciaHome: React.FC<{
   onOpenMenu: () => void,
@@ -10,6 +11,8 @@ const EstanciaHome: React.FC<{
 }> = ({ onOpenExcursions, onOpenBooking, onNavigate }) => {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
   const [openFaq, setOpenFaq] = React.useState<number | null>(null);
+  const { settings: hotelSettings } = useHotelSettings();
+  const tarifaMascota = getPetFee(hotelSettings);
 
   const faqs = [
     {
@@ -38,7 +41,7 @@ const EstanciaHome: React.FC<{
     },
     {
       question: "¿Se aceptan mascotas?",
-      answer: "Solo aceptamos perros pequeños, bien portados, con sus propias camitas y con dueños responsables. Se cobra un fee adicional de $15 por día y un depósito de $50 reembolsable si la mascota no causó daños. 😃"
+      answer: `Sí, aceptamos perros bien portados, con sus propias camitas y con dueños responsables. El perro pequeño (hasta 5 kg) tiene un cargo de $${tarifaMascota} por noche; para perros medianos o grandes, escríbenos y te damos la tarifa. Además se pide un depósito de $50, que se devuelve si la mascota no causó daños. 😃`
     },
     {
       question: "¿Aceptan hospedaje sin comidas?",

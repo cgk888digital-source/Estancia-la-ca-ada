@@ -28,6 +28,7 @@ interface BookingData {
   pricing?: {
     roomTotal: number;
     mealsTotal: number;
+    petsTotal?: number;
   };
   totalStayPrice?: number;
   depositAmount?: number;
@@ -99,7 +100,7 @@ const BookingSuccess: React.FC<BookingSuccessProps> = ({ data, onGoToClub, onBac
 *Resumen de Pago:*
 *Hospedaje (${data.totalNights || 1} ${data.totalNights === 1 ? 'noche' : 'noches'}):* $${data.pricing?.roomTotal || 0}
 *Alimentación (${data.totalNights || 1} ${data.totalNights === 1 ? 'noche' : 'noches'}):* $${data.pricing?.mealsTotal || 0}
-*Total Estadía:* $${data.totalStayPrice || 0}
+${data.pricing?.petsTotal ? `*Mascotas:* $${data.pricing.petsTotal}\n` : ''}*Total Estadía:* $${data.totalStayPrice || 0}
 *Monto de Adelanto Requerido (${data.depositPercent || 50}%):* $${data.depositAmount || 0}
 ${data.remainingAmount !== undefined && data.remainingAmount > 0 ? `*Monto restante:* $${data.remainingAmount}\n*Política de saldo restante:* ${data.remainingPolicyText}` : '*Monto restante:* $0 (Reserva liquidada al 100%)'}
 

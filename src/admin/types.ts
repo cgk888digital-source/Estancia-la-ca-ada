@@ -86,6 +86,8 @@ export interface Booking {
   confirmed: boolean
   specialNotes?: string
   locator?: string
+  /** Lo que se cobra por mascota y noche en esta reserva. Null si no lleva mascotas. */
+  petFeeNight?: number | null
   createdAt?: string
   cancelledAt?: string | null
   cancellationReason?: string | null

@@ -1,7 +1,7 @@
 import DecimalInput, { textoDecimal } from './DecimalInput'
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Sliders, Check, Sparkles, DollarSign, Percent, AlertCircle, Clock, UtensilsCrossed } from 'lucide-react'
+import { Sliders, Check, Sparkles, DollarSign, Percent, AlertCircle, Clock, UtensilsCrossed, Dog } from 'lucide-react'
 import { accommodationOptions, activeAccommodationOptions } from '../../data/accommodations'
 import { supabase } from '../../lib/supabase'
 
@@ -63,6 +63,13 @@ export default function RatesPage() {
   const [successTableCount, setSuccessTableCount] = useState(false)
   const [errorTableCount, setErrorTableCount] = useState('')
 
+  // Tarifa anunciada por mascota y noche (perro pequeño). En cada reserva se puede cambiar
+  // si el perro es más grande; esta es la que sale por defecto en el panel y en la web.
+  const [petFee, setPetFee] = useState(10)
+  const [savingPetFee, setSavingPetFee] = useState(false)
+  const [successPetFee, setSuccessPetFee] = useState(false)
+  const [errorPetFee, setErrorPetFee] = useState('')
+
   // Desayuno y cena incluidos: se suman a la tarifa de la habitación por cada huésped/noche.
   const [meals, setMeals] = useState<MealPrices>({
     meal_breakfast_adult: '22',
@@ -109,6 +116,9 @@ export default function RatesPage() {
         }
         if (row.key === 'table_count') {
           setTableCount(row.value)
+        }
+        if (row.key === 'pet_fee_night') {
+          setPetFee(Number(row.value) || 0)
         }
         if ((MEAL_KEYS as string[]).includes(row.key)) {
           mealMap[row.key as keyof MealPrices] = row.value
@@ -251,6 +261,27 @@ export default function RatesPage() {
       setErrorTableCount('Error al guardar el número de mesas.')
     } finally {
       setSavingTableCount(false)
+    }
+  }
+
+  const handleSavePetFee = async () => {
+    if (!Number.isFinite(petFee) || petFee < 0) {
+      setErrorPetFee('La tarifa tiene que ser un número igual o mayor que 0.')
+      return
+    }
+    setSavingPetFee(true)
+    setErrorPetFee('')
+    try {
+      const { error } = await supabase
+        .from('hotel_settings')
+        .upsert([{ key: 'pet_fee_night', value: String(petFee), label: 'Mascota (perro pequeño) por noche', updated_at: new Date().toISOString() }], { onConflict: 'key' })
+      if (error) throw error
+      setSuccessPetFee(true)
+      setTimeout(() => setSuccessPetFee(false), 3000)
+    } catch {
+      setErrorPetFee('Error al guardar la tarifa de mascotas.')
+    } finally {
+      setSavingPetFee(false)
     }
   }
 
@@ -549,6 +580,58 @@ export default function RatesPage() {
               min={1}
               value={tableCount}
               onChange={e => setTableCount(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold text-gray-700 outline-none focus:border-[#C5A059] focus:ring-1 focus:ring-[#C5A059]/30 transition-all"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* ── SECCIÓN 1.6: Mascotas ── */}
+      <div className="bg-white border border-gray-200/60 rounded-[2rem] overflow-hidden shadow-sm">
+        <div className="px-6 pt-6 pb-4 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <h2 className="text-lg font-bold font-serif text-gray-800 flex items-center gap-2">
+              <Dog size={18} className="text-[#C5A059]" />
+              Mascotas
+            </h2>
+            <p className="text-xs text-gray-400 mt-1">
+              Tarifa por mascota y noche que se anuncia (perro pequeño). Se suma sola al total de la reserva, en el panel y en la web.
+              Si el perro es más grande, se cambia en la propia reserva.
+            </p>
+          </div>
+          <button
+            onClick={handleSavePetFee}
+            disabled={savingPetFee}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-[#3D2B1F] hover:bg-[#2e1f14] text-white rounded-2xl text-xs uppercase tracking-wider font-extrabold transition-all active:scale-95 disabled:opacity-50 shrink-0"
+          >
+            {savingPetFee ? (
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <Check size={14} />
+            )}
+            Guardar
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          {successPetFee && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-2xl text-xs font-semibold flex items-center gap-2">
+              <Sparkles size={15} className="text-emerald-600" />
+              ¡Tarifa de mascotas actualizada!
+            </div>
+          )}
+          {errorPetFee && (
+            <div className="bg-rose-50 border border-rose-200 text-rose-800 px-4 py-3 rounded-2xl text-xs font-semibold flex items-center gap-2">
+              <AlertCircle size={15} className="text-rose-600" />
+              {errorPetFee}
+            </div>
+          )}
+          <div className="max-w-xs">
+            <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Perro pequeño · por noche (USD)</label>
+            <DecimalInput
+              value={petFee}
+              onChange={n => setPetFee(Math.max(0, n))}
+              placeholder="10"
               className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold text-gray-700 outline-none focus:border-[#C5A059] focus:ring-1 focus:ring-[#C5A059]/30 transition-all"
             />
           </div>

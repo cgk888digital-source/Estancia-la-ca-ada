@@ -5,7 +5,8 @@ import { ChevronLeft, ChevronRight, X, Users, Dog, Calendar as CalendarIcon, Awa
 import { activeAccommodationOptions, getMaxCapacity } from '../data/accommodations';
 import { supabase } from '../lib/supabase';
 import { getBcvEuroRate } from '../utils/exchangeRate';
-import { useHotelSettings, getMealRates } from '../utils/useHotelSettings';
+import { useHotelSettings, getMealRates, getPetFee } from '../utils/useHotelSettings';
+import { cargoMascotas } from '../utils/tarifaMascota';
 import { syncMarketingCustomer } from '../utils/syncMarketingCustomer';
 import { sendBookingConfirmationEmail } from '../utils/sendBookingConfirmationEmail'
 import { DATOS_BINANCE, etiquetaDeFormaWeb, type FormaDePagoWeb } from '../utils/formasDePago';
@@ -33,6 +34,7 @@ export interface BookingFlowData {
   pricing: {
     roomTotal: number;
     mealsTotal: number;
+    petsTotal?: number;
   };
   totalStayPrice: number;
   depositAmount: number;
@@ -65,6 +67,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
   const { settings: hotelSettings } = useHotelSettings();
   // Desayuno + cena por noche, configurables desde Tarifas y Descuentos.
   const mealRates = getMealRates(hotelSettings);
+  // Por mascota y noche: la del perro pequeño, que es la que se anuncia.
+  const tarifaMascota = getPetFee(hotelSettings);
 
   React.useEffect(() => {
     let active = true;
@@ -306,7 +310,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
 
   const getMultiRoomPricing = () => {
     if (selectedUnits.length === 0) {
-      return { roomNightly: 0, mealsNightly: 0, roomTotal: 0, mealsTotal: 0, nightlyRate: 0, totalStayPrice: 0 };
+      return { roomNightly: 0, mealsNightly: 0, roomTotal: 0, mealsTotal: 0, petsTotal: 0, nightlyRate: 0, totalStayPrice: 0 };
     }
     // La pension se cuenta una sola vez para todo el grupo; las habitaciones, cada una
     // con su tarifa. Por eso la primera lleva los ocupantes y las demas van a cero.
@@ -325,13 +329,15 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
       occupants.adults,
       occupants.children
     ).pension;
+    const petsTotal = cargoMascotas(occupants.pets, tarifaMascota, totalNights);
     return {
       roomNightly: totalNights > 0 ? roomTotal / totalNights : 0,
       mealsNightly: totalNights > 0 ? pension / totalNights : 0,
       roomTotal,
       mealsTotal: pension,
+      petsTotal,
       nightlyRate: totalNights > 0 ? (roomTotal + pension) / totalNights : 0,
-      totalStayPrice: roomTotal + pension
+      totalStayPrice: roomTotal + pension + petsTotal
     };
   };
 
@@ -438,7 +444,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                 <OccupantRow icon={<Users size={28} />} label="Adultos" sub="Mayores de 12 años" value={occupants.adults} onUpdate={(d) => updateOccupant('adults', d)} />
                 <OccupantRow icon={<Users size={28} className="scale-75" />} label="Niños" sub="De 3 a 12 años" value={occupants.children} onUpdate={(d) => updateOccupant('children', d)} />
                 <OccupantRow icon={<Users size={28} className="scale-50" />} label="Bebés" sub="De 0 a 2 años" value={occupants.babies} onUpdate={(d) => updateOccupant('babies', d)} />
-                <OccupantRow icon={<Dog size={28} />} label="Mascotas" sub="Perros pequeños hasta 5kg" value={occupants.pets} onUpdate={(d) => updateOccupant('pets', d)} hasBadge />
+                <OccupantRow icon={<Dog size={28} />} label="Mascotas" sub={`Perro pequeño (hasta 5 kg): $${tarifaMascota} por noche · otros tamaños, consultar`} value={occupants.pets} onUpdate={(d) => updateOccupant('pets', d)} hasBadge />
               </div>
 
               <AnimatePresence>
@@ -794,6 +800,12 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
                     <span>Alimentación ({totalNights} {totalNights === 1 ? 'noche' : 'noches'}):</span>
                     <span className="font-semibold font-mono">${pricing.mealsTotal}</span>
                   </div>
+                  {pricing.petsTotal > 0 && (
+                    <div className="flex justify-between text-brand-primary/60">
+                      <span>Mascotas ({occupants.pets} × ${tarifaMascota} × {totalNights} {totalNights === 1 ? 'noche' : 'noches'}):</span>
+                      <span className="font-semibold font-mono">${pricing.petsTotal}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between font-bold text-sm pt-2 border-t border-brand-primary/5">
                     <span className="text-brand-primary">Total Estadía:</span>
                     <span className="text-brand-wood font-mono">${totalStayPrice}</span>
@@ -1286,7 +1298,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ onClose, onComplete, initialU
 *Resumen de Pago:*
 *Hospedaje (${totalNights} ${totalNights === 1 ? 'noche' : 'noches'}):* $${pricing.roomTotal}
 *Alimentación (${totalNights} ${totalNights === 1 ? 'noche' : 'noches'}):* $${pricing.mealsTotal}
-*Total Estadía:* $${totalStayPrice}
+${pricing.petsTotal > 0 ? `*Mascotas (${occupants.pets} × $${tarifaMascota} × ${totalNights} ${totalNights === 1 ? 'noche' : 'noches'}):* $${pricing.petsTotal}\n` : ''}*Total Estadía:* $${totalStayPrice}
 *Monto de Adelanto Requerido (${depositPercent}%):* $${depositAmount}
 ${remainingAmount > 0 ? `*Monto restante (50%):* $${remainingAmount}\n*Política de saldo restante:* ${remainingPolicyText}` : '*Monto restante:* $0 (Reserva liquidada al 100%)'}
 
@@ -1334,7 +1346,7 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
                   const allocatedPets = Math.floor(occupants.pets / N) + (idx === 0 ? occupants.pets % N : 0);
 
                   const roomPriceDetails = calculateStayPrice(id, allocatedAdults, allocatedChildren, totalNights, reparto);
-                  const roomTotal = roomPriceDetails.totalStayPrice;
+                  const roomTotal = roomPriceDetails.totalStayPrice + cargoMascotas(allocatedPets, tarifaMascota, totalNights);
 
                   return {
                     guest_name: `${formData.nombre} ${formData.apellido}${N > 1 ? ` (Habitación ${idx + 1}/${N})` : ''}`,
@@ -1347,6 +1359,7 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
                     children: allocatedChildren,
                     babies: allocatedBabies,
                     pets: allocatedPets,
+                    pet_fee_night: allocatedPets > 0 ? tarifaMascota : null,
                     total_amount: roomTotal,
                     // El huésped todavía no ha pagado nada: solo ha elegido cómo pagará. Antes
                     // se apuntaba el adelanto como cobrado, y la reserva nacía diciendo que ya
