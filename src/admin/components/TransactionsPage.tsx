@@ -136,14 +136,25 @@ const fmt = (n: number) =>
 
 const incomeCategories: TransactionCategory[] = ['alojamiento', 'restaurante', 'bebidas', 'almuerzos', 'pasapalos', 'excursiones', 'bar_cava', 'otros_ingresos', 'propinas']
 const expenseCategories: TransactionCategory[] = ['empleados', 'alimentos', 'mantenimiento', 'servicios', 'comisiones', 'otros_egresos']
-const paymentMethods: PaymentMethod[] = ['efectivo', 'transferencia', 'pago_movil', 'zelle', 'binance', 'tarjeta', 'cheque']
+const paymentMethods: PaymentMethod[] = ['efectivo', 'transferencia', 'pago_movil', 'punto_venta', 'zelle', 'binance', 'tarjeta', 'cheque']
 
 // `pago_movil` se guarda con guion bajo; en pantalla no puede salir asi.
 const etiquetaDeMetodo: Partial<Record<PaymentMethod, string>> = {
   pago_movil: 'Pago Móvil',
+  punto_venta: 'Punto de venta',
   zelle: 'Zelle',
   binance: 'Binance',
 }
+
+/**
+ * Formas de cobro que en Venezuela entran siempre en bolívares. Un ingreso así se apunta
+ * escribiendo los bolívares y la tasa, y los dólares salen de ahí.
+ *
+ * Antes el único campo era «Monto ($)», y la calculadora de bolívares estaba escondida
+ * detrás de un botón. Se cargó una propina de 50.679,20 Bs como si fueran dólares.
+ */
+const seCobraEnBolivares = (metodo: PaymentMethod) =>
+  metodo === 'punto_venta' || metodo === 'pago_movil'
 
 const periodLabels: Record<DatePeriod, string> = {
   hoy: 'Hoy',
@@ -361,7 +372,9 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
 
   const handleAmountChange = (newAmount: number) => {
     setCashBoxError(false)
-    if (form.cashBox === 'bs' && exchangeRate > 0 && newAmount > 0) {
+    const enBolivares = form.cashBox === 'bs'
+      || (form.type === 'ingreso' && seCobraEnBolivares(form.paymentMethod))
+    if (enBolivares && exchangeRate > 0 && newAmount > 0) {
       const calcBs = Number((newAmount * exchangeRate).toFixed(2))
       setAmountBs(calcBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
       setForm(f => ({ ...f, amount: newAmount, amountBs: calcBs, exchangeRate }))
@@ -673,6 +686,13 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' })
         el.focus()
       }
+      return
+    }
+
+    if (form.type === 'ingreso' && seCobraEnBolivares(form.paymentMethod)
+      && (!effectiveBs || effectiveBs <= 0 || !effectiveRate || effectiveRate <= 0)) {
+      setCashBoxError(true)
+      document.getElementById('ingreso-en-bolivares')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return
     }
     // Un segundo toque mientras se guarda duplicaría el gasto: dinero contado dos veces.
@@ -1774,6 +1794,84 @@ const TransactionsPage: React.FC<Props> = ({ typeFilter }) => {
                   </select>
                 </div>
               </div>
+
+              {form.type === 'ingreso' && seCobraEnBolivares(form.paymentMethod) && (() => {
+                const numBs = parseLocalNumber(amountBs)
+                const dolares = numBs > 0 && exchangeRate > 0 ? Number((numBs / exchangeRate).toFixed(2)) : 0
+                const falta = cashBoxError && (numBs <= 0 || exchangeRate <= 0)
+                return (
+                  <div
+                    id="ingreso-en-bolivares"
+                    className={`rounded-2xl border p-3.5 space-y-2.5 ${falta ? 'border-red-300 bg-red-50/50' : 'border-amber-200 bg-amber-50/50'}`}
+                  >
+                    <div>
+                      <p className="text-xs font-bold text-amber-900 uppercase tracking-widest">Cobrado en bolívares</p>
+                      <p className="text-[11px] text-gray-500 mt-0.5">
+                        El {etiquetaDeMetodo[form.paymentMethod]?.toLowerCase()} entra en bolívares. Escriba los bolívares y la tasa: los dólares se calculan solos.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Bolívares recibidos</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="Ej. 50.679,20"
+                          value={amountBs}
+                          onChange={e => handleBsChange(e.target.value)}
+                          className="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-sm font-semibold outline-none focus:border-amber-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Tasa (Bs por $)</label>
+                        <DecimalInput
+                          placeholder="Ej. 979,07"
+                          value={exchangeRate}
+                          onChange={handleRateChange}
+                          className="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-sm font-semibold outline-none focus:border-amber-500"
+                        />
+                      </div>
+                    </div>
+
+                    {(bcvUsd > 0 || paraleloUsd > 0) && (
+                      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                        <span className="text-gray-400 font-medium">Referencias de hoy:</span>
+                        {bcvUsd > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRateChange(bcvUsd)}
+                            className="px-2 py-0.5 rounded bg-white hover:bg-amber-50 text-amber-900 border border-amber-200 font-semibold"
+                          >
+                            BCV: {bcvUsd.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </button>
+                        )}
+                        {paraleloUsd > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRateChange(paraleloUsd)}
+                            className="px-2 py-0.5 rounded bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-semibold"
+                          >
+                            Paralelo: {paraleloUsd.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {dolares > 0 ? (
+                      <p className="text-xs text-gray-700">
+                        Bs. {numBs.toLocaleString('es-VE', { maximumFractionDigits: 2 })} ÷ {exchangeRate.toLocaleString('es-VE', { maximumFractionDigits: 2 })} ={' '}
+                        <strong className="text-emerald-700">{dolares.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $</strong>
+                        <span className="text-gray-400"> · se apuntan los dólares y se guardan los bolívares y la tasa</span>
+                      </p>
+                    ) : (
+                      <p className={`text-[11px] font-medium ${falta ? 'text-red-600' : 'text-amber-700'}`}>
+                        {numBs > 0 ? 'Falta la tasa a la que se cobró.' : 'Faltan los bolívares que entraron.'}
+                      </p>
+                    )}
+                  </div>
+                )
+              })()}
 
               {form.type === 'egreso' && (
                 <div className="space-y-2.5">
