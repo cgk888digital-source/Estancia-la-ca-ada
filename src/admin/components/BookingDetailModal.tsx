@@ -1559,10 +1559,12 @@ export default function BookingDetailModal({
                     onClick={() => {
                       const group = getBookingGroup(selectedBooking)
                       setEditDiscountPercent(getBookingDiscountPercent(selectedBooking.specialNotes))
-                      setEditFixedDiscountAmount(group.reduce(
+                      // Suma de las partes de cada habitación, en céntimos: sumar 19 decimales
+                      // sueltos daba 2954.0000000000005 en el campo.
+                      setEditFixedDiscountAmount(Math.round(group.reduce(
                         (sum, room) => sum + getBookingFixedDiscountAmount(room.specialNotes),
                         0
-                      ))
+                      ) * 100) / 100)
                       setEditingFinancials(true)
                     }}
                     className="text-[10px] font-bold text-[#C5A059] uppercase tracking-wider hover:underline flex items-center gap-1"
