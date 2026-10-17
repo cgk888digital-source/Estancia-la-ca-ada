@@ -9,7 +9,7 @@ import { supabase } from '../../lib/supabase'
 import type { Booking, BookingPayment } from '../types'
 import { repartirNoches, precioEstancia } from '../../utils/seasonNights'
 import { cargoMascotas } from '../../utils/tarifaMascota'
-import { repartirDescuentoFijo } from '../../utils/descuentos'
+import { repartirDescuentoFijo, porcentajeDe, fijoDe, totalConDescuento, sinMarcasDeDescuento } from '../../utils/descuentos'
 import { parseLocalDate } from '../../utils/dateUtils'
 import CobroEnBolivares from './CobroEnBolivares'
 import { dolaresDeBolivares, textoEnBolivares } from '../../utils/bolivares'
@@ -17,6 +17,7 @@ import { useEnvioUnico } from '../../utils/useEnvioUnico'
 import { sendBookingVoucherEmail } from '../../utils/sendBookingVoucherEmail'
 import { splitPersonName, joinPersonName } from '../../utils/personName'
 import { registrarIngresoDeAbono, retirarIngresoDeAbono } from '../../utils/bookingIncome'
+import { sincronizarPagosDelGrupo } from '../../utils/pagosDeReserva'
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('es-VE', {
@@ -35,43 +36,8 @@ const calculateNights = (startStr: string, endStr: string) => {
   return diffDays > 0 ? diffDays : 1
 }
 
-const getBookingDiscountPercent = (notes?: string) => {
-  const matches = [...(notes || '').matchAll(/descuento(?:\s+aplicado)?(?:\s+(?:del|de))?\s*:?\s*(\d+(?:[.,]\d+)?)\s*%/gi)]
-  const lastMatch = matches.at(-1)
-  if (!lastMatch) return 0
-  const value = Number(lastMatch[1].replace(',', '.'))
-  return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0
-}
-
-const withBookingDiscountNote = (notes: string | undefined, percent: number) => {
-  const withoutAppMarker = (notes || '')
-    .replace(/\s*Descuento aplicado:\s*\d+(?:[.,]\d+)?%\.?/gi, '')
-    .trim()
-  return [withoutAppMarker, `Descuento aplicado: ${percent}%.`].filter(Boolean).join(' ')
-}
-
-const getBookingFixedDiscountAmount = (notes?: string) => {
-  const matches = [...(notes || '').matchAll(/Descuento fijo aplicado:\s*USD\s*(\d+(?:[.,]\d+)?)/gi)]
-  const lastMatch = matches.at(-1)
-  if (!lastMatch) return 0
-  const value = Number(lastMatch[1].replace(',', '.'))
-  return Number.isFinite(value) ? Math.max(0, value) : 0
-}
-
-const withBookingFixedDiscountNote = (notes: string | undefined, amount: number) => {
-  const withoutAppMarker = (notes || '')
-    .replace(/\s*Descuento fijo aplicado:\s*USD\s*\d+(?:[.,]\d+)?\.?/gi, '')
-    .trim()
-  if (amount <= 0) return withoutAppMarker
-  return [withoutAppMarker, `Descuento fijo aplicado: USD ${amount.toFixed(2)}.`].filter(Boolean).join(' ')
-}
-
-const getAdjustedBookingTotal = (standardTotal: number, notes?: string) => {
-  const percent = getBookingDiscountPercent(notes)
-  const fixedAmount = getBookingFixedDiscountAmount(notes)
-  const afterPercent = standardTotal * (1 - percent / 100)
-  return Math.max(0, Math.round((afterPercent - fixedAmount) * 100) / 100)
-}
+// El descuento de cada habitación vive en sus columnas (discount_percent, discount_fixed):
+// ver utils/descuentos.ts. Ya no se lee de las notas.
 
 type EffectivePaymentState = 'reservado' | 'sin_pago' | 'parcial' | 'pagado'
 
@@ -127,6 +93,8 @@ const mapDbBookingToReact = (db: any): Booking => ({
     pets: db.pets || 0
   },
   petFeeNight: db.pet_fee_night == null ? null : Number(db.pet_fee_night),
+  discountPercent: Number(db.discount_percent) || 0,
+  discountFixed: Number(db.discount_fixed) || 0,
   totalAmount: Number(db.total_amount) || 0,
   amountPaid: Number(db.amount_paid) || 0,
   paymentStatus: (db.payment_status || 'pendiente') as 'completo' | 'parcial' | 'pendiente',
@@ -233,6 +201,24 @@ export default function BookingDetailModal({
   const [voucherSentFor, setVoucherSentFor] = useState<string | null>(null)
 
   const envioAbono = useEnvioUnico()
+
+  /**
+   * Vuelve a calcular lo pagado y el estado de pago de todo el grupo a partir de los abonos
+   * de la base de datos, y deja la pantalla igual. Se llama después de cualquier cambio que
+   * toque dinero o totales. Devuelve el error, si lo hubo, para poder avisar.
+   */
+  const sincronizarGrupo = async (ids: string[]) => {
+    const { error, filas } = await sincronizarPagosDelGrupo(supabase, ids)
+    if (error) console.error('No se pudo recalcular lo pagado del grupo:', error)
+    const porId = new Map(filas.map(f => [f.id, f]))
+    const aplicar = (b: Booking): Booking => {
+      const f = porId.get(b.id)
+      return f ? { ...b, amountPaid: f.amountPaid, paymentStatus: f.paymentStatus } : b
+    }
+    setBookings(prev => prev.map(aplicar))
+    setSelectedBooking(prev => prev ? aplicar(prev) : prev)
+    return error
+  }
   const getAccommodation = (id: number) => accommodationOptions.find(o => o.id === id)
 
   const getBookingGroup = (booking: Booking) => booking.locator
@@ -433,7 +419,7 @@ export default function BookingDetailModal({
       editRoomForm.pets,
       editRoomForm.petFeeNight
     )
-    const totalAmount = getAdjustedBookingTotal(standardTotal, roomBooking.specialNotes)
+    const totalAmount = totalConDescuento(standardTotal, roomBooking)
     const paymentStatus: Booking['paymentStatus'] = roomBooking.amountPaid >= totalAmount
       ? 'completo'
       : roomBooking.amountPaid > 0 ? 'parcial' : 'pendiente'
@@ -478,6 +464,7 @@ export default function BookingDetailModal({
     }
     setBookings(prev => prev.map(item => item.id === roomBooking.id ? { ...item, ...updatedFields } : item))
     setSelectedBooking(prev => prev && prev.id === roomBooking.id ? { ...prev, ...updatedFields } : prev)
+    await sincronizarGrupo(getBookingGroup(selectedBooking).map(r => r.id))
     setEditingRoomId(null)
   }
 
@@ -510,7 +497,7 @@ export default function BookingDetailModal({
 
         const tarifaPerro = isRoomBeingEdited ? editRoomForm.petFeeNight : tarifaDe(room)
         const newStandardTotal = getStandardRate(accId, editDatesForm.checkIn, editDatesForm.checkOut, adults, children, pets, tarifaPerro)
-        const newTotalAmount = getAdjustedBookingTotal(newStandardTotal, room.specialNotes)
+        const newTotalAmount = totalConDescuento(newStandardTotal, room)
         const newPaymentStatus: Booking['paymentStatus'] = room.amountPaid >= newTotalAmount
           ? 'completo'
           : room.amountPaid > 0 ? 'parcial' : 'pendiente'
@@ -550,6 +537,7 @@ export default function BookingDetailModal({
         setSelectedBooking(prev => prev && prev.id === room.id ? { ...prev, ...updatedFields } : prev)
       }
 
+      await sincronizarGrupo(getBookingGroup(selectedBooking).map(r => r.id))
       setEditingDates(false)
       setEditingRoomId(null)
     } finally {
@@ -592,12 +580,12 @@ export default function BookingDetailModal({
     }
 
     const locator = selectedBooking.locator || ('LC-' + Math.random().toString(36).substring(2, 7).toUpperCase())
-    const discountPercent = getBookingDiscountPercent(selectedBooking.specialNotes)
+    const discountPercent = porcentajeDe(selectedBooking)
 
     const rows = additionalAccommodationIds.map((accId) => {
       const standardTotal = getStandardRate(accId, checkInToAdd, checkOutToAdd, additionalGuests.adults, additionalGuests.children, additionalGuests.pets, tarifaMascota)
-      const totalAmount = discountPercent > 0 ? Math.round(standardTotal * (1 - discountPercent / 100)) : standardTotal
-      const specialNotes = withBookingDiscountNote(selectedBooking.specialNotes, discountPercent)
+      const totalAmount = totalConDescuento(standardTotal, { discountPercent })
+      const specialNotes = sinMarcasDeDescuento(selectedBooking.specialNotes) || null
 
       return {
         guest_name: `${selectedBooking.guestName.replace(/\s+\(\d+\/\d+\)$/, '')} (${resultingGroupSize}/${resultingGroupSize})`,
@@ -613,6 +601,8 @@ export default function BookingDetailModal({
         babies: additionalGuests.babies,
         pets: additionalGuests.pets,
         pet_fee_night: additionalGuests.pets > 0 ? tarifaMascota : null,
+        discount_percent: discountPercent,
+        discount_fixed: 0,
         total_amount: totalAmount,
         amount_paid: 0,
         payment_status: 'pendiente',
@@ -647,6 +637,8 @@ export default function BookingDetailModal({
     setAdditionalAccommodationIds([])
     setAdditionalGuests({ adults: 2, children: 0, babies: 0, pets: 0 })
     setAddingRoomsToBooking(false)
+    // Con habitaciones nuevas el total del grupo sube: lo que estaba «Pagado» pasa a parcial.
+    await sincronizarGrupo([...getBookingGroup(selectedBooking).map(r => r.id), ...inserted.map(r => r.id)])
   }
 
   const handleSaveBookingDiscount = async () => {
@@ -662,15 +654,17 @@ export default function BookingDetailModal({
     try {
       for (const [indice, room] of groupBookings.entries()) {
         const standard = estandares[indice]
-        let note = withBookingDiscountNote(room.specialNotes, editDiscountPercent)
-        note = withBookingFixedDiscountNote(note, partesFijas[indice])
-        const newTotal = getAdjustedBookingTotal(standard, note)
+        const descuento = { discountPercent: editDiscountPercent, discountFixed: partesFijas[indice] }
+        const note = sinMarcasDeDescuento(room.specialNotes)
+        const newTotal = totalConDescuento(standard, descuento)
         const newPaymentStatus: Booking['paymentStatus'] = room.amountPaid >= newTotal ? 'completo' : room.amountPaid > 0 ? 'parcial' : 'pendiente'
 
         const { error } = await supabase.from('bookings').update({
           total_amount: newTotal,
           payment_status: newPaymentStatus,
-          special_notes: note
+          discount_percent: descuento.discountPercent,
+          discount_fixed: descuento.discountFixed,
+          special_notes: note || null
         }).eq('id', room.id)
         if (error) {
           console.error('Error guardando el descuento:', error)
@@ -678,9 +672,11 @@ export default function BookingDetailModal({
           return
         }
 
-        setBookings(prev => prev.map(b => b.id === room.id ? { ...b, totalAmount: newTotal, paymentStatus: newPaymentStatus, specialNotes: note } : b))
-        setSelectedBooking(prev => prev && prev.id === room.id ? { ...prev, totalAmount: newTotal, paymentStatus: newPaymentStatus, specialNotes: note } : prev)
+        const cambios = { totalAmount: newTotal, paymentStatus: newPaymentStatus, specialNotes: note, ...descuento }
+        setBookings(prev => prev.map(b => b.id === room.id ? { ...b, ...cambios } : b))
+        setSelectedBooking(prev => prev && prev.id === room.id ? { ...prev, ...cambios } : prev)
       }
+      await sincronizarGrupo(groupBookings.map(r => r.id))
       setEditingFinancials(false)
     } finally {
       setSavingFinancials(false)
@@ -695,6 +691,23 @@ export default function BookingDetailModal({
       alert('Ingresa un monto válido para el abono.')
       return
     }
+
+    // El 8 de octubre se registró dos veces el mismo Zelle (misma referencia, 41 segundos
+    // después) porque el primero no se veía reflejado. Si ya hay un abono igual, se pregunta.
+    const referenciaNueva = paymentForm.reference.trim()
+    const fechaNueva = paymentForm.date || todayStr
+    const parecido = bookingPayments.find(p =>
+      Math.abs(p.amount - amountVal) < 0.01 && (
+        referenciaNueva
+          ? (p.reference || '').trim() === referenciaNueva
+          : p.paymentDate === fechaNueva && p.method === paymentForm.method
+      )
+    )
+    if (parecido && !confirm(
+      `Ya hay un abono de ${fmt(parecido.amount)} del ${parecido.paymentDate}` +
+      (parecido.reference ? ` con la referencia ${parecido.reference}` : '') +
+      '.\n\n¿Es un pago distinto? Si es el mismo, pulse Cancelar: ya está registrado.'
+    )) return
 
     if (!envioAbono.empezar()) return
     try {
@@ -723,15 +736,10 @@ export default function BookingDetailModal({
       const reactPayment = mapDbPaymentToReact(data)
       setBookingPayments(prev => [...prev, reactPayment])
 
-      // Update amount_paid on target booking
-      const newPaid = Number(targetBooking.amountPaid) + amountVal
-      const newStatus = newPaid >= targetBooking.totalAmount ? 'completo' : 'parcial'
-      await supabase.from('bookings').update({ amount_paid: newPaid, payment_status: newStatus }).eq('id', targetBooking.id)
-      setBookings(prev => prev.map(b => b.id === targetBooking.id ? { ...b, amountPaid: newPaid, paymentStatus: newStatus } : b))
-      setSelectedBooking(prev => prev && prev.id === targetBooking.id ? { ...prev, amountPaid: newPaid, paymentStatus: newStatus } : prev)
+      // Lo pagado y el estado salen de los abonos guardados, no de la memoria de la pantalla.
+      const errorPagado = await sincronizarGrupo(group.map(r => r.id))
 
-      // Register income
-      await registrarIngresoDeAbono(supabase, {
+      const ingreso = await registrarIngresoDeAbono(supabase, {
         paymentId: data.id,
         bookingId: targetBooking.id,
         guestName: selectedBooking.guestName,
@@ -744,6 +752,17 @@ export default function BookingDetailModal({
         exchangeRate: data.exchange_rate,
         amountBs: data.amount_bs
       })
+
+      // El abono ya está guardado. Si falla lo de después, se dice claro para que no se
+      // vuelva a cargar: era justo lo que duplicaba abonos.
+      if (errorPagado || ingreso.error) {
+        alert(
+          'El abono SÍ quedó registrado. No lo vuelva a cargar.\n\n' +
+          (errorPagado ? 'No se pudo actualizar lo pagado de la reserva. ' : '') +
+          (ingreso.error ? 'No se pudo pasar a Ingresos. ' : '') +
+          'Cierre y vuelva a abrir la reserva; si sigue igual, avise.'
+        )
+      }
 
       setAddingPayment(false)
       setPaymentForm({ amount: '', date: todayStr, method: 'transferencia', reference: '' })
@@ -763,14 +782,7 @@ export default function BookingDetailModal({
     await retirarIngresoDeAbono(supabase, payment.id)
     setBookingPayments(prev => prev.filter(p => p.id !== payment.id))
 
-    const target = bookings.find(b => b.id === payment.bookingId)
-    if (target) {
-      const newPaid = Math.max(0, target.amountPaid - payment.amount)
-      const newStatus = newPaid >= target.totalAmount ? 'completo' : newPaid > 0 ? 'parcial' : 'pendiente'
-      await supabase.from('bookings').update({ amount_paid: newPaid, payment_status: newStatus }).eq('id', target.id)
-      setBookings(prev => prev.map(b => b.id === target.id ? { ...b, amountPaid: newPaid, paymentStatus: newStatus } : b))
-      setSelectedBooking(prev => prev && prev.id === target.id ? { ...prev, amountPaid: newPaid, paymentStatus: newStatus } : prev)
-    }
+    await sincronizarGrupo(getBookingGroup(selectedBooking).map(r => r.id))
   }
 
   const handleSendVoucher = async (booking: Booking) => {
@@ -1015,7 +1027,7 @@ export default function BookingDetailModal({
                   const previewStandard = isEditing
                     ? getStandardRate(editRoomForm.accommodationId, effectiveCheckIn, effectiveCheckOut, editRoomForm.adults, editRoomForm.children, editRoomForm.pets, editRoomForm.petFeeNight)
                     : getStandardRate(roomBooking.accommodationId, effectiveCheckIn, effectiveCheckOut, roomBooking.guestsCount.adults, roomBooking.guestsCount.children, roomBooking.guestsCount.pets, tarifaDe(roomBooking))
-                  const previewTotal = getAdjustedBookingTotal(previewStandard, roomBooking.specialNotes)
+                  const previewTotal = totalConDescuento(previewStandard, roomBooking)
                   const datesDiffer = hasValidEditDates && (editDatesForm.checkIn !== roomBooking.checkIn || editDatesForm.checkOut !== roomBooking.checkOut)
 
                   return (
@@ -1176,7 +1188,7 @@ export default function BookingDetailModal({
                 const additionalStandardTotal = (selectedAdditionalId && additionalNights > 0)
                   ? getStandardRate(selectedAdditionalId, checkInToAdd, checkOutToAdd, additionalGuests.adults, additionalGuests.children, additionalGuests.pets, tarifaMascota)
                   : 0
-                const additionalDiscount = getBookingDiscountPercent(selectedBooking.specialNotes)
+                const additionalDiscount = porcentajeDe(selectedBooking)
                 const additionalTotal = Math.round(additionalStandardTotal * (1 - additionalDiscount / 100) * 100) / 100
                 return (
                   <div className="border border-emerald-100 bg-emerald-50/40 rounded-2xl p-3 space-y-3">
@@ -1374,7 +1386,7 @@ export default function BookingDetailModal({
                           const pets = isRoomBeingEdited ? editRoomForm.pets : room.guestsCount.pets
                           const tarifaPerro = isRoomBeingEdited ? editRoomForm.petFeeNight : tarifaDe(room)
                           const standard = getStandardRate(accId, editDatesForm.checkIn, editDatesForm.checkOut, adults, children, pets, tarifaPerro)
-                          return sum + getAdjustedBookingTotal(standard, room.specialNotes)
+                          return sum + totalConDescuento(standard, room)
                         }, 0)
 
                         const diffAmount = newTotal - oldTotal
@@ -1558,11 +1570,11 @@ export default function BookingDetailModal({
                   <button
                     onClick={() => {
                       const group = getBookingGroup(selectedBooking)
-                      setEditDiscountPercent(getBookingDiscountPercent(selectedBooking.specialNotes))
+                      setEditDiscountPercent(porcentajeDe(selectedBooking))
                       // Suma de las partes de cada habitación, en céntimos: sumar 19 decimales
                       // sueltos daba 2954.0000000000005 en el campo.
                       setEditFixedDiscountAmount(Math.round(group.reduce(
-                        (sum, room) => sum + getBookingFixedDiscountAmount(room.specialNotes),
+                        (sum, room) => sum + fijoDe(room),
                         0
                       ) * 100) / 100)
                       setEditingFinancials(true)
@@ -1654,9 +1666,9 @@ export default function BookingDetailModal({
                 )
               })() : (() => {
                 const groupBookings = getBookingGroup(selectedBooking)
-                const percent = getBookingDiscountPercent(selectedBooking.specialNotes)
+                const percent = porcentajeDe(selectedBooking)
                 const fixedDiscount = groupBookings.reduce(
-                  (sum, room) => sum + getBookingFixedDiscountAmount(room.specialNotes),
+                  (sum, room) => sum + fijoDe(room),
                   0
                 )
                 const standardTotals = groupBookings.map(room => getStandardRate(

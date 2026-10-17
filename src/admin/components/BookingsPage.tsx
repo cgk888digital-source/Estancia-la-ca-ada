@@ -14,6 +14,8 @@ import PrintableReservationsReport from './PrintableReservationsReport'
 import { parseLocalDate, fechaLocalISO as formatLocalDate } from '../../utils/dateUtils'
 import { getBcvEuroRate } from '../../utils/exchangeRate'
 import { useHotelSettings, getMealRates, getPetFee } from '../../utils/useHotelSettings'
+import { sincronizarPagosDelGrupo } from '../../utils/pagosDeReserva'
+import { totalConDescuento } from '../../utils/descuentos'
 import AddBookingModal from './AddBookingModal'
 import BookingDetailModal from './BookingDetailModal'
 import BookingsWeekView from './BookingsWeekView'
@@ -95,6 +97,8 @@ interface DbBooking {
   babies?: number | null
   pets?: number | null
   pet_fee_night?: number | string | null
+  discount_percent?: number | string | null
+  discount_fixed?: number | string | null
   total_amount?: number | string | null
   amount_paid?: number | string | null
   payment_status?: string | null
@@ -137,6 +141,8 @@ const mapDbBookingToReact = (db: DbBooking): Booking => ({
     pets: db.pets || 0
   },
   petFeeNight: db.pet_fee_night == null ? null : Number(db.pet_fee_night),
+  discountPercent: Number(db.discount_percent) || 0,
+  discountFixed: Number(db.discount_fixed) || 0,
   totalAmount: Number(db.total_amount) || 0,
   amountPaid: Number(db.amount_paid) || 0,
   paymentStatus: (db.payment_status || 'pendiente') as 'completo' | 'parcial' | 'pendiente',
@@ -151,28 +157,6 @@ const mapDbBookingToReact = (db: DbBooking): Booking => ({
   cancellationReason: db.cancellation_reason || null
 })
 
-const getBookingDiscountPercent = (notes?: string) => {
-  const matches = [...(notes || '').matchAll(/descuento(?:\s+aplicado)?(?:\s+(?:del|de))?\s*:?\s*(\d+(?:[.,]\d+)?)\s*%/gi)]
-  const lastMatch = matches.at(-1)
-  if (!lastMatch) return 0
-  const value = Number(lastMatch[1].replace(',', '.'))
-  return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0
-}
-
-const getBookingFixedDiscountAmount = (notes?: string) => {
-  const matches = [...(notes || '').matchAll(/Descuento fijo aplicado:\s*USD\s*(\d+(?:[.,]\d+)?)/gi)]
-  const lastMatch = matches.at(-1)
-  if (!lastMatch) return 0
-  const value = Number(lastMatch[1].replace(',', '.'))
-  return Number.isFinite(value) ? Math.max(0, value) : 0
-}
-
-const getAdjustedBookingTotal = (standardTotal: number, notes?: string) => {
-  const percent = getBookingDiscountPercent(notes)
-  const fixedAmount = getBookingFixedDiscountAmount(notes)
-  const afterPercent = standardTotal * (1 - percent / 100)
-  return Math.max(0, Math.round((afterPercent - fixedAmount) * 100) / 100)
-}
 
 // Paleta calcada de Paxer: Reservado (azul cielo) → Sin pago (azul) → Pago parcial (naranja) → Pagado (verde)
 type EffectivePaymentState = 'reservado' | 'sin_pago' | 'parcial' | 'pagado'
@@ -578,7 +562,6 @@ export default function BookingsPage() {
     if (isGroupBooking) {
       const remainingBookings = groupBookings.filter(room => room.id !== bookingId)
       const paymentTarget = remainingBookings[0]
-      const groupPaidTotal = groupBookings.reduce((sum, room) => sum + room.amountPaid, 0)
 
       const { error: movePaymentsError } = await supabase
         .from('booking_payments')
@@ -591,24 +574,15 @@ export default function BookingsPage() {
         return
       }
 
-      const normalizedPaidTotal = Math.round(groupPaidTotal * 100) / 100
-      const groupTotal = remainingBookings.reduce((sum, room) => sum + room.totalAmount, 0)
-      const paymentStatus: Booking['paymentStatus'] = normalizedPaidTotal >= groupTotal
-        ? 'completo'
-        : normalizedPaidTotal > 0 ? 'parcial' : 'pendiente'
-
-      await Promise.all(remainingBookings.map((room, index) => supabase
-        .from('bookings')
-        .update({ amount_paid: index === 0 ? normalizedPaidTotal : 0, payment_status: paymentStatus })
-        .eq('id', room.id)
-      ))
 
       const { error: cancelRoomError } = await supabase
         .from('bookings')
         .update({
           status: 'anulada',
           cancelled_at: new Date().toISOString(),
-          cancellation_reason: finalReason
+          cancellation_reason: finalReason,
+          // Sus abonos ya están en otra habitación del grupo.
+          amount_paid: 0
         })
         .eq('id', bookingId)
 
@@ -618,14 +592,11 @@ export default function BookingsPage() {
         return
       }
 
+      const { filas } = await sincronizarPagosDelGrupo(supabase, remainingBookings.map(r => r.id))
+      const porId = new Map(filas.map(f => [f.id, f]))
       setBookings(prev => prev.filter(room => room.id !== bookingId).map(room => {
-        if (room.id === paymentTarget.id) {
-          return { ...room, amountPaid: normalizedPaidTotal, paymentStatus }
-        }
-        if (remainingBookings.some(r => r.id === room.id)) {
-          return { ...room, amountPaid: 0, paymentStatus }
-        }
-        return room
+        const f = porId.get(room.id)
+        return f ? { ...room, amountPaid: f.amountPaid, paymentStatus: f.paymentStatus } : room
       }))
       setSelectedBooking(null)
       alert(`Habitación anulada con éxito. Se guardó en "Res. Anuladas" con motivo: "${finalReason}".`)
@@ -696,7 +667,7 @@ export default function BookingsPage() {
       pets,
       tarifaPerro
     )
-    const newTotalAmount = getAdjustedBookingTotal(newStandardTotal, booking.specialNotes)
+    const newTotalAmount = totalConDescuento(newStandardTotal, booking)
     const newPaymentStatus: Booking['paymentStatus'] = booking.amountPaid >= newTotalAmount
       ? 'completo'
       : booking.amountPaid > 0
@@ -741,6 +712,17 @@ export default function BookingsPage() {
     }
     setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, ...updatedFields } : b))
     setSelectedBooking(prev => prev && prev.id === bookingId ? { ...prev, ...updatedFields } : prev)
+
+    // El total cambió: el estado de pago es el del grupo entero, no el de esta habitación.
+    const grupo = booking.locator ? bookings.filter(b => b.locator === booking.locator).map(b => b.id) : [bookingId]
+    const { filas } = await sincronizarPagosDelGrupo(supabase, grupo)
+    const porId = new Map(filas.map(f => [f.id, f]))
+    const aplicar = (b: Booking): Booking => {
+      const f = porId.get(b.id)
+      return f ? { ...b, amountPaid: f.amountPaid, paymentStatus: f.paymentStatus } : b
+    }
+    setBookings(prev => prev.map(aplicar))
+    setSelectedBooking(prev => prev ? aplicar(prev) : prev)
     return true
   }
 

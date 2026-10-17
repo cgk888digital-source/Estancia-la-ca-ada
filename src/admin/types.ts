@@ -88,6 +88,9 @@ export interface Booking {
   locator?: string
   /** Lo que se cobra por mascota y noche en esta reserva. Null si no lleva mascotas. */
   petFeeNight?: number | null
+  /** Descuento de esta habitación: primero el porcentaje y luego el fijo, en USD. */
+  discountPercent?: number
+  discountFixed?: number
   createdAt?: string
   cancelledAt?: string | null
   cancellationReason?: string | null

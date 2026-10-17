@@ -14,7 +14,7 @@ import { sendBookingVoucherEmail } from '../../utils/sendBookingVoucherEmail'
 import { splitPersonName } from '../../utils/personName'
 import { registrarIngresoDeAbono } from '../../utils/bookingIncome'
 import { cargoMascotas, notaDeMascotas } from '../../utils/tarifaMascota'
-import { repartirDescuentoFijo, notaDescuentoFijo } from '../../utils/descuentos'
+import { repartirDescuentoFijo } from '../../utils/descuentos'
 
 interface DbAccommodation {
   id: number | string
@@ -72,6 +72,8 @@ const mapDbBookingToReact = (db: any): Booking => ({
     pets: db.pets || 0
   },
   petFeeNight: db.pet_fee_night == null ? null : Number(db.pet_fee_night),
+  discountPercent: Number(db.discount_percent) || 0,
+  discountFixed: Number(db.discount_fixed) || 0,
   totalAmount: Number(db.total_amount) || 0,
   amountPaid: Number(db.amount_paid) || 0,
   paymentStatus: (db.payment_status || 'pendiente') as 'completo' | 'parcial' | 'pendiente',
@@ -403,7 +405,7 @@ export default function AddBookingModal({
     : 0
 
   const calculatedTotal = useCustomRate
-    ? (discountPercent > 0 ? Math.round(standardRate * (1 - discountPercent / 100)) : form.totalAmount)
+    ? (discountPercent > 0 ? Math.round(standardRate * (1 - discountPercent / 100) * 100) / 100 : form.totalAmount)
     : standardRate
 
   const handleAddBooking = async () => {
@@ -461,7 +463,7 @@ export default function AddBookingModal({
     setIsSubmitting(true)
 
     const finalTotal = useCustomRate
-      ? (discountPercent > 0 ? Math.round(standardRate * (1 - discountPercent / 100)) : form.totalAmount)
+      ? (discountPercent > 0 ? Math.round(standardRate * (1 - discountPercent / 100) * 100) / 100 : form.totalAmount)
       : standardRate
 
     const allocateMoney = (amount: number, weights: number[]) => {
@@ -477,14 +479,12 @@ export default function AddBookingModal({
     }
 
     const initialStatus = form.checkIn === todayStr ? 'checkin_hoy' : 'confirmado'
-    const discountNote = useCustomRate && discountPercent > 0
-      ? `Descuento aplicado: ${discountPercent}%.`
-      : ''
+    const porcentajeAplicado = useCustomRate && discountPercent > 0 ? discountPercent : 0
     const groupNote = selectedAccommodationIds.length > 1
       ? `Reserva grupal: ${selectedAccommodationIds.length} alojamientos bajo el localizador ${locatorCode}.`
       : ''
     const petNote = notaDeMascotas(Number(form.pets) || 0, tarifaMascotaReserva, nochesReserva)
-    const specialNotes = [form.specialNotes.trim(), groupNote, discountNote, petNote].filter(Boolean).join(' ')
+    const specialNotes = [form.specialNotes.trim(), groupNote, petNote].filter(Boolean).join(' ')
     const roomAllocations = allocateGuestsAcrossAccommodations(selectedAccommodationIds)
     const roomStandardTotals = roomAllocations.map((room, index) =>
       getStandardRate(room.id, form.checkIn, form.checkOut, room.adults, room.children)
@@ -522,7 +522,9 @@ export default function AddBookingModal({
       payment_reference: form.paymentReference.trim() || null,
       status: initialStatus,
       confirmed: true,
-      special_notes: [specialNotes, notaDescuentoFijo(partesFijas[index])].filter(Boolean).join(' ') || null,
+      special_notes: specialNotes || null,
+      discount_percent: porcentajeAplicado,
+      discount_fixed: partesFijas[index],
       locator: locatorCode,
       pet_fee_night: room.pets > 0 ? tarifaMascotaReserva : null
     }))

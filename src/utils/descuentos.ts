@@ -35,6 +35,28 @@ export function repartirDescuentoFijo(totales: number[], descuento: number): num
   return partes.map(p => p / 100)
 }
 
-/** La marca que se escribe en las notas de cada habitación con su parte del descuento. */
-export const notaDescuentoFijo = (importe: number) =>
-  importe > 0 ? `Descuento fijo aplicado: USD ${importe.toFixed(2)}.` : ''
+/**
+ * El descuento de una habitación vive en sus columnas `discount_percent` y `discount_fixed`.
+ * Antes iba como texto dentro de las notas y se volvía a leer en cada recálculo. Editar las
+ * notas de un grupo copiaba el texto de una habitación en todas, borrarlo quitaba el
+ * descuento, y una frase como «descuento del 15%» se aplicaba como descuento real.
+ */
+export interface ConDescuento {
+  discountPercent?: number | null
+  discountFixed?: number | null
+}
+
+export const porcentajeDe = (b: ConDescuento) => Math.min(100, Math.max(0, Number(b.discountPercent) || 0))
+
+export const fijoDe = (b: ConDescuento) => Math.max(0, Number(b.discountFixed) || 0)
+
+/** Lo que cuesta una habitación con su descuento: primero el porcentaje, luego el fijo. */
+export const totalConDescuento = (estandar: number, b: ConDescuento) =>
+  Math.max(0, Math.round((estandar * (1 - porcentajeDe(b) / 100) - fijoDe(b)) * 100) / 100)
+
+/** Quita de las notas los textos de descuento que escribía la app. Las notas son solo notas. */
+export const sinMarcasDeDescuento = (notas?: string | null) =>
+  (notas || '')
+    .replace(/\s*Descuento aplicado:\s*\d+(?:[.,]\d+)?%\.?/gi, '')
+    .replace(/\s*Descuento fijo aplicado:\s*USD\s*\d+(?:[.,]\d+)?\.?/gi, '')
+    .trim()
