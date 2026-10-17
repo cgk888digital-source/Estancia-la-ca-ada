@@ -14,6 +14,7 @@ import { sendBookingVoucherEmail } from '../../utils/sendBookingVoucherEmail'
 import { splitPersonName } from '../../utils/personName'
 import { registrarIngresoDeAbono } from '../../utils/bookingIncome'
 import { cargoMascotas, notaDeMascotas } from '../../utils/tarifaMascota'
+import { repartirDescuentoFijo, notaDescuentoFijo } from '../../utils/descuentos'
 
 interface DbAccommodation {
   id: number | string
@@ -489,7 +490,13 @@ export default function AddBookingModal({
       getStandardRate(room.id, form.checkIn, form.checkOut, room.adults, room.children)
         + (index === 0 ? cargoPerros : 0)
     )
-    const roomFinalTotals = allocateMoney(finalTotal, roomStandardTotals)
+    const descuentoManual = useCustomRate && discountPercent <= 0 && finalTotal < standardRate
+      ? standardRate - finalTotal
+      : 0
+    const partesFijas = repartirDescuentoFijo(roomStandardTotals, descuentoManual)
+    const roomFinalTotals = descuentoManual > 0
+      ? roomStandardTotals.map((t, i) => Math.round((t - partesFijas[i]) * 100) / 100)
+      : allocateMoney(finalTotal, roomStandardTotals)
     const initialPaidTotal = Math.round(Number(form.amountPaid) * 100) / 100
     const globalPaymentStatus: Booking['paymentStatus'] = initialPaidTotal >= finalTotal
       ? 'completo'
@@ -515,7 +522,7 @@ export default function AddBookingModal({
       payment_reference: form.paymentReference.trim() || null,
       status: initialStatus,
       confirmed: true,
-      special_notes: specialNotes || null,
+      special_notes: [specialNotes, notaDescuentoFijo(partesFijas[index])].filter(Boolean).join(' ') || null,
       locator: locatorCode,
       pet_fee_night: room.pets > 0 ? tarifaMascotaReserva : null
     }))
@@ -1289,7 +1296,9 @@ export default function AddBookingModal({
                 checked={useCustomRate}
                 onChange={e => {
                   setUseCustomRate(e.target.checked)
-                  if (!e.target.checked) {
+                  if (e.target.checked) {
+                    setForm(f => ({ ...f, totalAmount: standardRate }))
+                  } else {
                     setDiscountPercent(0)
                   }
                 }}

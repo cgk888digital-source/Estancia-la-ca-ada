@@ -9,6 +9,7 @@ import { supabase } from '../../lib/supabase'
 import type { Booking, BookingPayment } from '../types'
 import { repartirNoches, precioEstancia } from '../../utils/seasonNights'
 import { cargoMascotas } from '../../utils/tarifaMascota'
+import { repartirDescuentoFijo } from '../../utils/descuentos'
 import { parseLocalDate } from '../../utils/dateUtils'
 import CobroEnBolivares from './CobroEnBolivares'
 import { dolaresDeBolivares, textoEnBolivares } from '../../utils/bolivares'
@@ -650,20 +651,32 @@ export default function BookingDetailModal({
 
   const handleSaveBookingDiscount = async () => {
     const groupBookings = getBookingGroup(selectedBooking)
+    const estandares = groupBookings.map(room => getStandardRate(room.accommodationId, room.checkIn, room.checkOut, room.guestsCount.adults, room.guestsCount.children, room.guestsCount.pets, tarifaDe(room)))
+    // El descuento fijo es de toda la reserva: cada habitación se queda con su parte.
+    // Antes se escribía entero en cada una y se restaba entero en cada una.
+    const partesFijas = repartirDescuentoFijo(
+      estandares.map(e => e * (1 - editDiscountPercent / 100)),
+      editFixedDiscountAmount
+    )
     setSavingFinancials(true)
     try {
-      for (const room of groupBookings) {
-        const standard = getStandardRate(room.accommodationId, room.checkIn, room.checkOut, room.guestsCount.adults, room.guestsCount.children, room.guestsCount.pets, tarifaDe(room))
+      for (const [indice, room] of groupBookings.entries()) {
+        const standard = estandares[indice]
         let note = withBookingDiscountNote(room.specialNotes, editDiscountPercent)
-        note = withBookingFixedDiscountNote(note, editFixedDiscountAmount)
+        note = withBookingFixedDiscountNote(note, partesFijas[indice])
         const newTotal = getAdjustedBookingTotal(standard, note)
         const newPaymentStatus: Booking['paymentStatus'] = room.amountPaid >= newTotal ? 'completo' : room.amountPaid > 0 ? 'parcial' : 'pendiente'
 
-        await supabase.from('bookings').update({
+        const { error } = await supabase.from('bookings').update({
           total_amount: newTotal,
           payment_status: newPaymentStatus,
           special_notes: note
         }).eq('id', room.id)
+        if (error) {
+          console.error('Error guardando el descuento:', error)
+          alert('No se pudo guardar el descuento de una de las habitaciones. Revise la reserva e intente de nuevo.')
+          return
+        }
 
         setBookings(prev => prev.map(b => b.id === room.id ? { ...b, totalAmount: newTotal, paymentStatus: newPaymentStatus, specialNotes: note } : b))
         setSelectedBooking(prev => prev && prev.id === room.id ? { ...prev, totalAmount: newTotal, paymentStatus: newPaymentStatus, specialNotes: note } : prev)
@@ -1649,7 +1662,9 @@ export default function BookingDetailModal({
                   room.checkIn,
                   room.checkOut,
                   room.guestsCount.adults,
-                  room.guestsCount.children
+                  room.guestsCount.children,
+                  room.guestsCount.pets,
+                  tarifaDe(room)
                 ))
                 const totalAfterPercent = standardTotals.reduce(
                   (sum, total) => sum + Math.max(0, Math.round(total * (1 - percent / 100) * 100) / 100),
