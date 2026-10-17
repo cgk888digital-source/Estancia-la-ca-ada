@@ -1374,9 +1374,28 @@ Muchas gracias por escoger a Estancia La Cañada para sus vacaciones! 😃`;
                   };
                 });
 
-                supabase.from('bookings').insert(insertRows).then(({ error }) => {
+                // Si falla al guardar, se reintenta: antes el error quedaba en la consola, el
+                // huésped veía «reserva hecha» y la reserva no llegaba al panel. El WhatsApp ya
+                // salió con todos los datos, así que si al final no se guarda se le pide que lo envíe.
+                const guardarReserva = async () => {
+                  let ultimo: unknown = null;
+                  for (let intento = 0; intento < 3; intento++) {
+                    const { error } = await supabase.from('bookings').insert(insertRows);
+                    if (!error) return null;
+                    ultimo = error;
+                    await new Promise(r => setTimeout(r, 1500 * (intento + 1)));
+                  }
+                  return ultimo;
+                };
+
+                guardarReserva().then((error) => {
                   if (error) {
                     console.error('Error guardando la reserva en Supabase:', error);
+                    alert(
+                      'No pudimos registrar tu reserva en nuestro sistema por un problema de conexión.\n\n' +
+                      'Por favor envía el mensaje de WhatsApp que se abrió con tus datos y la registramos nosotros. ' +
+                      'Código: ' + bookingCode
+                    );
                     return;
                   }
                   // Que el huésped que reserva quede disponible para Email Marketing sin
